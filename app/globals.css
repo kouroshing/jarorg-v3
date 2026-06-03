@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    /* Fixed header inner bar (matches Navbar h-11 / md:h-14). */
+    --navbar-bar-h: 2.75rem;
+    --navbar-bar-h-md: 3.5rem;
+    /* Main offset: Tailwind pt-20 (5rem) mobile, pt-24 (6rem) desktop + safe area. */
+    --navbar-offset: 5rem;
+    --navbar-offset-md: 6rem;
+  }
+
+  html {
+    /* Smooth in-page anchor navigation. */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white text-black antialiased;
+    /* Prevent rubber-band background flashes on mobile. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Brand-tinted text selection. */
+  ::selection {
+    background-color: #facc15;
+    color: #000000;
+  }
+
+  /* Thin, minimalist scrollbar. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #ffffff;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #e5e7eb;
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #d1d5db;
+  }
+}

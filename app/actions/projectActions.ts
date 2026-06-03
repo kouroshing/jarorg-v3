@@ -1,0 +1,260 @@
+"use server";
+
+import { z } from "zod";
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/auth/session";
+import { normalizePhoneDigits } from "@/lib/auth/phone";
+import { isAdminSession } from "@/lib/auth/admin";
+import { ADMIN_STATUSES } from "@/lib/projects/status";
+import { sendProjectCreatedSmsNotifications } from "@/lib/sms/project-created";
+import { PROJECT_BUDGET_IDS } from "@/lib/projects/budget";
+import {
+  OFFERING_IDS,
+  SERVICE_AUDIENCES,
+  buildOfferingServiceDetailsJson,
+  composeBriefWithOffering,
+  getOfferingById,
+} from "@/lib/projects/service-offerings";
+import { checkProjectSubmissionRateLimit } from "@/lib/projects/submission-rate-limit";
+const projectInputSchema = z
+  .object({
+    serviceAudience: z.enum(SERVICE_AUDIENCES),
+    serviceOfferingId: z.enum(OFFERING_IDS),
+    city: z.enum(["tehran", "karaj", "other"]),
+    briefNotes: z
+      .string()
+      .trim()
+      .min(1, "لطفاً جزئیات یا نیازمندی‌های پروژه خود را بنویسید.")
+      .max(5000),
+    referenceLink: z
+      .string()
+      .trim()
+      .max(2000)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : undefined))
+      .refine(
+        (v) =>
+          v === undefined ||
+          /^https?:\/\//i.test(v) ||
+          v.startsWith("/"),
+        "لینک نمونه کار معتبر نیست."
+      ),
+    name: z.string().trim().min(1, "نام الزامی است.").max(120),
+    phone: z.string().trim().min(10, "شماره تماس معتبر نیست.").max(32),
+    callTime: z.enum(["morning", "noon", "evening"]),
+    budget: z.enum(PROJECT_BUDGET_IDS),
+    expertId: z.string().uuid().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const offering = getOfferingById(data.serviceOfferingId);
+    if (!offering || offering.audience !== data.serviceAudience) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "خدمت انتخاب‌شده نامعتبر است.",
+        path: ["serviceOfferingId"],
+      });
+      return;
+    }
+  });
+
+export type SubmitProjectInput = z.input<typeof projectInputSchema>;
+
+export type SubmitProjectResult =
+  | { success: true; id: string }
+  | { success: false; error: string };
+
+export type AdminProjectRecord = {
+  id: string;
+  createdAt: Date;
+  serviceType: string;
+  serviceDetails: string | null;
+  city: string;
+  brief: string;
+  contactName: string | null;
+  contactPhone: string | null;
+  preferredCallTime: string | null;
+  budget: string | null;
+  referenceLink: string | null;
+  status: string;
+  adminNotes: string | null;
+  expert: { name: string } | null;
+};
+
+function revalidateAdminProjectPaths() {
+  revalidatePath("/admin");
+  revalidatePath("/admin/projects");
+}
+
+/**
+ * Persists a 3-step consultation request. Status defaults to PENDING.
+ * When the user is signed in, their session phone is used (ignores tampered input).
+ */
+export async function submitProjectRequest(
+  input: SubmitProjectInput
+): Promise<SubmitProjectResult> {
+  const parsed = projectInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "اطلاعات واردشده نامعتبر است.",
+    };
+  }
+  const data = parsed.data;
+
+  try {
+    const session = await getSession();
+    const contactPhone = session
+      ? session.phone
+      : normalizePhoneDigits(data.phone);
+
+    const rateLimitError = await checkProjectSubmissionRateLimit(contactPhone);
+    if (rateLimitError) {
+      return { success: false, error: rateLimitError };
+    }
+
+    const offering = getOfferingById(data.serviceOfferingId)!;
+
+    const brief = composeBriefWithOffering(offering, data.briefNotes, null);
+
+    const serviceDetails = buildOfferingServiceDetailsJson(offering, null);
+
+    let expertId: string | null = null;
+    if (data.expertId) {
+      const expert = await prisma.expert.findFirst({
+        where: { id: data.expertId, isActive: true },
+        select: { id: true },
+      });
+      if (!expert) {
+        return {
+          success: false,
+          error: "متخصص انتخاب‌شده در دسترس نیست.",
+        };
+      }
+      expertId = expert.id;
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        serviceType: offering.serviceType,
+        city: data.city,
+        brief,
+        referenceLink: data.referenceLink ?? null,
+        serviceDetails,
+        contactName: data.name,
+        contactPhone,
+        preferredCallTime: data.callTime,
+        budget: data.budget,
+        expertId,
+        bookingRoute: "meeting_request",
+        status: "PENDING",
+        userId: session?.userId ?? null,
+      },
+    });
+
+    sendProjectCreatedSmsNotifications({
+      contactPhone,
+      contactName: data.name,
+      serviceType: project.serviceType,
+      projectId: project.id,
+    });
+
+    return { success: true, id: project.id };
+  } catch {
+    return {
+      success: false,
+      error: "ثبت درخواست با خطا مواجه شد. لطفاً دوباره تلاش کنید.",
+    };
+  }
+}
+
+const updateLeadSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(ADMIN_STATUSES).optional(),
+  adminNotes: z.string().max(5000).optional(),
+});
+
+export type UpdateProjectLeadInput = z.infer<typeof updateLeadSchema>;
+
+export type UpdateProjectLeadResult = {
+  success: boolean;
+  error?: string;
+};
+
+/** Admin-only: update lead status and/or admin notes. */
+export async function updateProjectLead(
+  input: UpdateProjectLeadInput
+): Promise<UpdateProjectLeadResult> {
+  const session = await getSession();
+  if (!session || !isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز." };
+  }
+
+  const parsed = updateLeadSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "ورودی نامعتبر است." };
+  }
+
+  if (parsed.data.status === undefined && parsed.data.adminNotes === undefined) {
+    return { success: false, error: "چیزی برای ذخیره وجود ندارد." };
+  }
+
+  try {
+    await prisma.project.update({
+      where: { id: parsed.data.id },
+      data: {
+        ...(parsed.data.status !== undefined
+          ? { status: parsed.data.status }
+          : {}),
+        ...(parsed.data.adminNotes !== undefined
+          ? { adminNotes: parsed.data.adminNotes }
+          : {}),
+      },
+    });
+  } catch {
+    return { success: false, error: "بروزرسانی ناموفق بود." };
+  }
+
+  revalidateAdminProjectPaths();
+  return { success: true };
+}
+
+/** Admin-only: update lead status. */
+export async function updateProjectStatus(input: {
+  id: string;
+  status: (typeof ADMIN_STATUSES)[number];
+}): Promise<UpdateProjectLeadResult> {
+  return updateProjectLead({ id: input.id, status: input.status });
+}
+
+/** Admin-only: update internal admin notes. */
+export async function updateProjectNote(input: {
+  id: string;
+  adminNotes: string;
+}): Promise<UpdateProjectLeadResult> {
+  return updateProjectLead({ id: input.id, adminNotes: input.adminNotes });
+}
+
+export type GetAdminProjectsResult =
+  | { success: true; projects: AdminProjectRecord[] }
+  | { success: false; error: string };
+
+/** Admin-only: all projects for lead management. */
+export async function getAdminProjects(): Promise<GetAdminProjectsResult> {
+  const session = await getSession();
+  if (!session || !isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز." };
+  }
+
+  try {
+    const projects = await prisma.project.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        expert: { select: { name: true } },
+      },
+    });
+    return { success: true, projects };
+  } catch {
+    return { success: false, error: "خطا در دریافت پروژه‌ها." };
+  }
+}
