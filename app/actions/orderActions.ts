@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth/session";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
 import type { OrderStatus } from "@/lib/orders/status";
+import { resolveScheduledAt } from "@/lib/date/jalali";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -76,6 +77,12 @@ export async function createOrderAction(input: CreateOrderInput) {
         bookingDate: isFlexibleSchedule ? (input.bookingDate || null) : input.bookingDate,
         timeSlot: isFlexibleSchedule ? (input.timeSlot || null) : input.timeSlot,
         durationHours: input.durationHours,
+        // Derived once, at the source. bookingDate is a Persian display string;
+        // every later question about time is asked of this instead.
+        scheduledAt: resolveScheduledAt(
+          isFlexibleSchedule ? input.bookingDate || null : input.bookingDate,
+          input.timeSlot
+        ),
         locationType: input.locationType,
         locationAddress: input.locationAddress || null,
         districtOrCity: input.districtOrCity || null,

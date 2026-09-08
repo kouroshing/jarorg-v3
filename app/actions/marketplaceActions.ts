@@ -6,7 +6,8 @@ import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
 import { getMarketplaceSettings } from "@/lib/orders/settings";
-import { allowanceExhaustedMessage, getApplicationAllowance } from "@/lib/orders/limits";
+import { canAfford, getTokenBalance, outOfTokensMessage } from "@/lib/orders/tokens";
+import { conflictMessage, findScheduleConflict } from "@/lib/orders/conflicts";
 import { proposalTotal, quoteTravel } from "@/lib/orders/travel";
 import {
   type OrderStatus,
@@ -162,7 +163,14 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
   error?: string;
   redirectTo?: string;
   orders?: AvailableOrderSpecialistView[];
-  allowance?: { limit: number; used: number; remaining: number; planName: string; canApply: boolean };
+  tokens?: {
+    granted: number;
+    spent: number;
+    remaining: number;
+    planName: string;
+    costApply: number;
+    costDismiss: number;
+  };
 }> {
   try {
     const session = await getSession();
@@ -312,18 +320,18 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
       };
     });
 
-    const allowance = await getApplicationAllowance(session.userId);
+    const balance = await getTokenBalance(session.userId);
 
     return {
       success: true,
       orders: mapped,
-      allowance: {
-        limit: allowance.limit,
-        used: allowance.used,
-        // Infinity does not survive serialisation to the client component.
-        remaining: Number.isFinite(allowance.remaining) ? allowance.remaining : -1,
-        planName: allowance.planName,
-        canApply: allowance.canApply,
+      tokens: {
+        granted: balance.granted,
+        spent: balance.spent,
+        remaining: balance.remaining,
+        planName: balance.planName,
+        costApply: balance.costApply,
+        costDismiss: balance.costDismiss,
       },
     };
   } catch (error: any) {
@@ -374,6 +382,8 @@ export async function submitProjectInterestAction(
         categoryTitle: true,
         locationLat: true,
         locationLng: true,
+        scheduledAt: true,
+        durationHours: true,
       },
     });
 
@@ -408,12 +418,24 @@ export async function submitProjectInterestAction(
       }
     }
 
-    // Daily cap. Checked here rather than in the UI alone, because the action is
-    // callable directly and the allowance is what protects clients' shortlists
-    // from being blanketed by a few specialists.
-    const allowance = await getApplicationAllowance(session.userId);
-    if (!allowance.canApply) {
-      return { success: false, error: allowanceExhaustedMessage(allowance) };
+    // Enforced here rather than in the UI alone, because the action is callable
+    // directly and the allowance is what keeps a few specialists from
+    // blanketing every client's shortlist.
+    const balance = await getTokenBalance(session.userId);
+    if (!canAfford(balance, "apply")) {
+      return { success: false, error: outOfTokensMessage(balance, "apply") };
+    }
+
+    // Multiple projects are fine; two at the same time are not. Checked again
+    // when the client selects, because a clash can appear in between.
+    const clash = await findScheduleConflict(
+      session.userId,
+      order.scheduledAt,
+      order.durationHours,
+      order.id
+    );
+    if (clash) {
+      return { success: false, error: conflictMessage(clash) };
     }
 
     // Quote travel from the specialist's registered base to the shoot. Computed
@@ -1237,9 +1259,10 @@ export async function cancelOrderByClientAction(
  * work they had already decided against, every day, forever.
  *
  * Stored as a ProjectInterest row so the unique(orderId, specialistId)
- * constraint does the deduplication, and so a dismissal can be undone by
- * applying later. It does not consume the daily allowance: saying no should
- * never be rationed, only saying yes.
+ * constraint does the deduplication, and so a dismissal can be undone.
+ *
+ * It costs a token. Letting a specialist clear the board for free means they
+ * learn in one afternoon exactly how few projects there are.
  */
 export async function dismissOrderAction(
   orderId: string
@@ -1258,6 +1281,11 @@ export async function dismissOrderAction(
     const authCheck = await getAuthorizedSpecialist(session.userId);
     if (!authCheck.isSpecialist) {
       return { success: false, error: authCheck.error };
+    }
+
+    const balance = await getTokenBalance(session.userId);
+    if (!canAfford(balance, "dismiss")) {
+      return { success: false, error: outOfTokensMessage(balance, "dismiss") };
     }
 
     const existing = await prisma.projectInterest.findUnique({

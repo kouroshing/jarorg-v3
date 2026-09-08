@@ -7,9 +7,13 @@ import type { OrderStatus } from "@/lib/orders/status";
  * Records a cleared payment.
  *
  * This is the moment the deal becomes real: the money is with Jar, the order is
- * confirmed, the losing proposals are closed out, and — only now — the contact
- * details are released. Up to this point the specialist has never seen the
- * client's phone number or exact address.
+ * confirmed, and the losing proposals are closed out.
+ *
+ * Contact details are NOT released here. Chat opens at payment; the phone
+ * number and exact address wait until 24 hours before the shoot, when they are
+ * actually needed to meet. Releasing both at once meant everyone simply phoned
+ * each other and the chat — and with it Jar's record of what was agreed — went
+ * unused. scripts/reveal-contacts.mjs does the release.
  *
  * Idempotent: a gateway that calls back twice, or a client who reloads the
  * callback URL, must not double-notify or overwrite the first refId.
@@ -31,7 +35,6 @@ export async function markOrderPaid(orderId: string, refId: string): Promise<boo
         status: "CONFIRMED" satisfies OrderStatus,
         paidAt: now,
         paymentRefId: refId,
-        contactRevealedAt: now,
       },
     });
 
@@ -55,7 +58,7 @@ export async function markOrderPaid(orderId: string, refId: string): Promise<boo
     await createNotification({
       userId: applied.selectedSpecialistId,
       title: "پروژه قطعی شد",
-      message: `کارفرما هزینه پروژه «${applied.categoryTitle || "عکاسی"}» را پرداخت کرد. اطلاعات تماس و نشانی دقیق حالا در دسترس شماست.`,
+      message: `کارفرما هزینه پروژه «${applied.categoryTitle || "عکاسی"}» را پرداخت کرد. از همین حالا می‌توانید در گفتگوی پروژه هماهنگ کنید؛ شماره تماس و نشانی دقیق ۲۴ ساعت پیش از شروع پروژه در اختیارتان قرار می‌گیرد.`,
       type: "SUCCESS",
       link: "/specialist/projects",
     });

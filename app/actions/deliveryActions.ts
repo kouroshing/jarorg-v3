@@ -385,3 +385,109 @@ export async function resolveDisputeAction(
     message: resolution === "RELEASED" ? "مبلغ برای متخصص آزاد شد." : "سفارش لغو شد؛ بازگشت وجه دستی است.",
   };
 }
+
+/**
+ * The client sends the work back with notes instead of escalating.
+ *
+ * Karlancer's flow, and it is the right one: most dissatisfaction is "please
+ * fix this", not "refund me". A binary accept-or-dispute forces every small
+ * complaint into arbitration, which is slow for everyone and puts an admin in
+ * the middle of a conversation two people could have had themselves.
+ *
+ * A revision reopens delivery — the auto-release clock stops until the
+ * specialist reports again — but it does not freeze the order the way a dispute
+ * does. Nobody has accused anyone of anything yet.
+ */
+export async function requestRevisionAction(
+  orderId: string,
+  note: string
+): Promise<DeliveryResult> {
+  const session = await getSession();
+  if (!session?.userId) {
+    return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+  }
+
+  const parsed = orderIdSchema.safeParse(orderId);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  const trimmed = note.trim();
+  if (trimmed.length < 10) {
+    return {
+      success: false,
+      error: "لطفاً بنویسید دقیقاً چه چیزی باید اصلاح شود تا متخصص بتواند کار را درست کند.",
+    };
+  }
+  if (trimmed.length > 1500) {
+    return { success: false, error: "توضیح نمی‌تواند بیشتر از ۱۵۰۰ کاراکتر باشد." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: parsed.data },
+    select: {
+      id: true,
+      userId: true,
+      contactPhone: true,
+      paidAt: true,
+      settledAt: true,
+      deliveredAt: true,
+      disputedAt: true,
+      revisionCount: true,
+      categoryTitle: true,
+      selectedSpecialistId: true,
+    },
+  });
+
+  if (!order) return { success: false, error: "سفارش یافت نشد." };
+
+  const isOwner =
+    (order.userId && order.userId === session.userId) ||
+    (order.contactPhone && order.contactPhone === session.phone);
+
+  if (!isOwner) {
+    return { success: false, error: "فقط کارفرمای این سفارش می‌تواند درخواست اصلاح بدهد." };
+  }
+
+  if (!order.deliveredAt) {
+    return { success: false, error: "هنوز تحویلی برای این پروژه ثبت نشده است." };
+  }
+  if (order.settledAt) {
+    return { success: false, error: "این پروژه تسویه شده است." };
+  }
+  if (order.disputedAt) {
+    return { success: false, error: "برای این پروژه اعتراض ثبت شده و در حال بررسی است." };
+  }
+
+  await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      // Clearing deliveredAt is what stops the auto-release clock: the ball is
+      // back with the specialist, and the countdown restarts when they redeliver.
+      deliveredAt: null,
+      revisionCount: { increment: 1 },
+      revisionRequestedAt: new Date(),
+      revisionNote: trimmed,
+    },
+  });
+
+  if (order.selectedSpecialistId) {
+    await createNotification({
+      userId: order.selectedSpecialistId,
+      title: "کارفرما درخواست اصلاح داد",
+      message: `برای پروژه «${
+        order.categoryTitle || "عکاسی"
+      }» اصلاحاتی خواسته شده است: ${trimmed.slice(0, 120)}${trimmed.length > 120 ? "…" : ""}`,
+      type: "WARNING",
+      link: "/specialist/projects",
+    });
+  }
+
+  revalidatePath(`/order/${order.id}`);
+  revalidatePath("/specialist/projects");
+
+  return {
+    success: true,
+    message: `درخواست اصلاح ثبت شد (نوبت ${(order.revisionCount + 1).toLocaleString("fa-IR")}). متخصص مطلع شد.`,
+  };
+}

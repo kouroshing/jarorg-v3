@@ -140,6 +140,11 @@ model Order {
   timeSlot           String? @map("time_slot")
   durationHours      Int     @default(2) @map("duration_hours")
 
+  /// The shoot as an actual instant, derived from bookingDate + timeSlot.
+  /// bookingDate is a Persian display string ("۱۴۰۵/۰۶/۱۵"), which cannot answer
+  /// "do these two shoots overlap" or "is this 24 hours away". This can.
+  scheduledAt        DateTime? @map("scheduled_at")
+
   // Location
   locationType    String  @default("SPECIALIST_ADVICE") @map("location_type") // CLIENT_LOCATION, SPECIALIST_ADVICE, JAR_STUDIO
   locationAddress String? @map("location_address")
@@ -202,8 +207,16 @@ model Order {
   settledAt        DateTime? @map("settled_at")
   settledAmount    Int?      @map("settled_amount")
 
-  /// Set when payment clears. Until then the specialist sees no contact details.
+  /// Set 24 hours before the shoot. Chat opens at payment; phone numbers and
+  /// the exact address wait until they are needed to actually meet, which keeps
+  /// the conversation on Jar and gives the platform a record of it.
   contactRevealedAt DateTime? @map("contact_revealed_at")
+
+  /// Most complaints are "please fix this", not "refund me". The client can
+  /// send work back with notes before anything escalates to arbitration.
+  revisionCount      Int       @default(0) @map("revision_count")
+  revisionRequestedAt DateTime? @map("revision_requested_at")
+  revisionNote       String?   @map("revision_note")
 
   userId String? @map("user_id")
   user   User?   @relation("ClientOrders", fields: [userId], references: [id], onDelete: SetNull)
@@ -309,9 +322,11 @@ model Plan {
   price12Months Int      @map("price_12_months")
   features      String
   maxStorage    Int      @default(0) @map("max_storage")
-  /// Proposals a specialist on this plan may submit per day. The strongest
-  /// reason to upgrade a marketplace plan is more work, not a bigger badge.
-  dailyApplicationLimit Int @default(3) @map("daily_application_limit")
+  /// Tokens granted each month. One token is spent per decision on a project —
+  /// applying or dismissing it. A monthly pool reads as abundance where a daily
+  /// cap reads as scarcity, and it lets a specialist act on a good day instead
+  /// of rationing themselves across it.
+  monthlyTokens Int @default(10) @map("monthly_tokens")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -342,8 +357,14 @@ model PwaSettings {
   /// Toman charged per kilometre beyond the free radius.
   travelRatePerKm      Int      @default(0) @map("travel_rate_per_km")
 
-  /// Daily proposal allowance for a specialist with no active paid plan.
-  freeDailyApplicationLimit Int @default(3) @map("free_daily_application_limit")
+  /// Monthly token grant for a specialist with no active paid plan.
+  freeMonthlyTokens         Int @default(10) @map("free_monthly_tokens")
+  /// Tokens spent when applying to a project.
+  tokenCostApply            Int @default(1) @map("token_cost_apply")
+  /// Tokens spent when dismissing one. Cheaper than applying, but not free:
+  /// a specialist who can clear the whole board for nothing learns how thin it
+  /// is in an afternoon.
+  tokenCostDismiss          Int @default(1) @map("token_cost_dismiss")
   /// Hours an order may sit with nobody applying before it is escalated.
   noApplicantTimeoutHours   Int @default(48) @map("no_applicant_timeout_hours")
   /// Hours a client may sit on proposals before being reminded.
