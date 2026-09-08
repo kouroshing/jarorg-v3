@@ -18,6 +18,7 @@ export const ORDER_STATUSES = [
   "DEPOSIT_PAID",
   "MATCHING",
   "HAS_APPLICANTS",
+  "AWAITING_PAYMENT",
   "AWAITING_SPECIALIST_CONFIRMATION",
   "CONFIRMED",
   "COMPLETED",
@@ -108,9 +109,23 @@ export const ON_MARKET_STATUSES = [
 
 /** A specialist is locked in; the job is no longer on the board. */
 export const MATCHED_STATUSES = [
+  "AWAITING_PAYMENT",
   "AWAITING_SPECIALIST_CONFIRMATION",
   "CONFIRMED",
 ] as const satisfies readonly OrderStatus[];
+
+/**
+ * Payment has cleared into escrow. Contact details are released and the two
+ * sides may talk; before this the specialist has never seen a phone number.
+ */
+export const PAID_STATUSES = [
+  "CONFIRMED",
+  "COMPLETED",
+] as const satisfies readonly OrderStatus[];
+
+export function isPaid(status: string): boolean {
+  return (PAID_STATUSES as readonly string[]).includes(parseOrderStatus(status));
+}
 
 /** Nothing further happens to the order. */
 export const TERMINAL_STATUSES = [
@@ -208,6 +223,12 @@ export const ORDER_STATUS_PRESENTATION: Record<OrderStatus, OrderStatusPresentat
     adminLabel: "دارای پیشنهاد متخصصان",
     badgeBg: "bg-indigo-100 text-indigo-900 border-indigo-300",
     textColor: "text-indigo-800",
+  },
+  AWAITING_PAYMENT: {
+    label: "در انتظار پرداخت شما",
+    adminLabel: "متخصص انتخاب شده، در انتظار پرداخت",
+    badgeBg: "bg-amber-100 text-amber-900 border-amber-300",
+    textColor: "text-amber-800",
   },
   AWAITING_SPECIALIST_CONFIRMATION: {
     label: "در انتظار تأیید متخصص منتخب",

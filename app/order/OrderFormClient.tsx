@@ -76,6 +76,8 @@ export default function OrderFormClient({
   const [locationType, setLocationType] = useState<LocationType>("SPECIALIST_ADVICE");
   const [locationAddress, setLocationAddress] = useState("");
   const [districtOrCity, setDistrictOrCity] = useState("تهران");
+  // The picked point, kept so the travel fee can be quoted per specialist.
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   // Budget State
   const [isAutoPriced, setIsAutoPriced] = useState<boolean>(true);
@@ -201,6 +203,8 @@ export default function OrderFormClient({
         locationType,
         locationAddress,
         districtOrCity,
+        locationLat: coords?.lat ?? null,
+        locationLng: coords?.lng ?? null,
         referenceLink: "",
         moodboardUrls: [],
         projectDescription: projectDescription.trim(),
@@ -335,6 +339,7 @@ export default function OrderFormClient({
                 address={locationAddress}
                 onChangeAddress={setLocationAddress}
                 district={districtOrCity}
+                onChangeCoords={setCoords}
                 onChangeDistrict={setDistrictOrCity}
               />
             )}

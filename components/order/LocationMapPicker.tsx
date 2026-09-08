@@ -26,6 +26,12 @@ export interface LocationMapPickerProps {
   onChangeDistrict: (val: string) => void;
   address: string;
   onChangeAddress: (val: string) => void;
+  /**
+   * The picked point itself. The map always knew it — it was reverse-geocoded
+   * to text and thrown away — but the travel fee needs the coordinates, so the
+   * order now stores them too.
+   */
+  onChangeCoords?: (coords: Coordinates) => void;
   initialCoords?: Coordinates;
 }
 
@@ -38,6 +44,7 @@ export default function LocationMapPicker({
   onChangeDistrict,
   address,
   onChangeAddress,
+  onChangeCoords,
   initialCoords = DEFAULT_CENTER,
 }: LocationMapPickerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -49,6 +56,8 @@ export default function LocationMapPicker({
   onChangeDistrictRef.current = onChangeDistrict;
   const onChangeAddressRef = useRef(onChangeAddress);
   onChangeAddressRef.current = onChangeAddress;
+  const onChangeCoordsRef = useRef(onChangeCoords);
+  onChangeCoordsRef.current = onChangeCoords;
   const districtRef = useRef(district);
   districtRef.current = district;
   const locationTypeRef = useRef(locationType);
@@ -93,6 +102,10 @@ export default function LocationMapPicker({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const updateLocationFromCoords = useCallback((lat: number, lng: number, force = false) => {
+    // 0. Hand the raw point up. Reverse geocoding below can fail or be slow;
+    //    the travel fee only needs these two numbers, so publish them first.
+    onChangeCoordsRef.current?.({ lat, lng });
+
     // 1. Instant 0ms offline resolution for Iranian cities and Tehran districts
     const fastLoc = getFastIranLocation(lat, lng);
     setLocationBadge(fastLoc.district);

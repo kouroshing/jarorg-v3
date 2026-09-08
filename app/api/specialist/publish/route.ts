@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
+import { evaluateEligibility } from "@/lib/specialists/eligibility";
 
 export const dynamic = "force-dynamic";
 
@@ -87,18 +88,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Update SpecialistProfile with agreedToTerms and timestamp
+    // 4. Publish. This used to write agreedToTerms and a timestamp and then
+    //    return "profile approved and published" without ever setting status,
+    //    so every specialist who completed this flow stayed INCOMPLETE and
+    //    never saw a single project.
+    const eligibility = evaluateEligibility({
+      city: specialist.city,
+      baseLat: specialist.baseLat,
+      baseLng: specialist.baseLng,
+      agreedToTerms: true,
+      portfolioItems: specialist.portfolioItems,
+      selectedCategories: specialist.selectedCategories,
+    });
+
+    if (!eligibility.isEligible) {
+      const missing: string[] = [];
+      if (!eligibility.hasCity) missing.push("شهر محل فعالیت");
+      if (!eligibility.hasBaseLocation) missing.push("محل شروع حرکت روی نقشه");
+      if (eligibility.qualifiedCategories.length === 0) {
+        missing.push("حداقل یک شاخه با ۱۰ نمونه‌کار تاییدشده");
+      }
+      return NextResponse.json(
+        {
+          success: false,
+          error: `برای انتشار پرونده این موارد باقی مانده است: ${missing.join("، ")}.`,
+          nextStep: eligibility.nextStep,
+        },
+        { status: 400 }
+      );
+    }
+
     await prisma.specialistProfile.update({
       where: { id: specialist.id },
       data: {
         agreedToTerms: true,
         termsAgreedAt: new Date(),
+        status: eligibility.status,
       },
     });
 
     return NextResponse.json({
       success: true,
       message: "پرونده متخصص با موفقیت تایید و منتشر شد.",
+      qualifiedCategories: eligibility.qualifiedCategories,
     });
   } catch (error: any) {
     console.error("[specialist/publish API error]", error);

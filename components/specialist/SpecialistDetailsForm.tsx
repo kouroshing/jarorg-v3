@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   MapPin,
@@ -16,12 +17,25 @@ import {
 import { saveSpecialistDetailsAction } from "@/app/actions/specialistOnboardingActions";
 import { NdaModal } from "@/components/specialist/NdaModal";
 
+// Leaflet needs the DOM; same dynamic import the order wizard uses.
+const LocationMapPicker = dynamic(() => import("@/components/order/LocationMapPicker"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-64 items-center justify-center rounded-2xl border border-jar-border bg-jar-canvas text-xs font-bold text-jar-muted">
+      در حال بارگذاری نقشه...
+    </div>
+  ),
+});
+
 interface Props {
   initialCity?: string | null;
   initialWorkArea?: string | null;
   initialBio?: string | null;
   initialEquipment?: string | null;
   initialAgreedToTerms?: boolean;
+  initialBaseLat?: number | null;
+  initialBaseLng?: number | null;
+  initialBaseAddress?: string | null;
   hasEligiblePortfolio: boolean;
 }
 
@@ -31,6 +45,9 @@ export default function SpecialistDetailsForm({
   initialBio,
   initialEquipment,
   initialAgreedToTerms,
+  initialBaseLat,
+  initialBaseLng,
+  initialBaseAddress,
   hasEligiblePortfolio,
 }: Props) {
   const router = useRouter();
@@ -39,6 +56,15 @@ export default function SpecialistDetailsForm({
   const [bio, setBio] = useState(initialBio || "");
   const [equipmentSummary, setEquipmentSummary] = useState(initialEquipment || "");
   const [agreedToTerms, setAgreedToTerms] = useState(Boolean(initialAgreedToTerms));
+  // Where this specialist travels from. Every proposal they make quotes travel
+  // from this point, so it is required before they can be activated.
+  const [baseCoords, setBaseCoords] = useState<{ lat: number; lng: number } | null>(
+    typeof initialBaseLat === "number" && typeof initialBaseLng === "number"
+      ? { lat: initialBaseLat, lng: initialBaseLng }
+      : null
+  );
+  const [baseAddress, setBaseAddress] = useState(initialBaseAddress || "");
+  const [baseDistrict, setBaseDistrict] = useState("");
   const [showNdaModal, setShowNdaModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -49,6 +75,11 @@ export default function SpecialistDetailsForm({
 
     if (city.trim().length < 2) {
       setError("لطفاً نام شهر محل فعالیت خود را وارد کنید.");
+      return;
+    }
+
+    if (!baseCoords) {
+      setError("لطفاً محل شروع حرکت خود را روی نقشه مشخص کنید تا هزینه ایاب‌وذهاب محاسبه شود.");
       return;
     }
 
@@ -63,6 +94,9 @@ export default function SpecialistDetailsForm({
         workArea: workArea.trim() || undefined,
         bio: bio.trim() || undefined,
         equipmentSummary: equipmentSummary.trim() || undefined,
+        baseLat: baseCoords.lat,
+        baseLng: baseCoords.lng,
+        baseAddress: baseAddress.trim() || baseDistrict || undefined,
         agreedToTerms: true,
       });
 
@@ -109,6 +143,36 @@ export default function SpecialistDetailsForm({
               <span className="text-[10px] text-jar-muted block">
                 پروژه‌های این شهر در اولویت معرفی به شما قرار خواهند گرفت.
               </span>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-jar-primary block">
+                محل شروع حرکت شما <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[10px] text-jar-muted block">
+                جار فاصله این نقطه تا محل پروژه را حساب می‌کند و هزینه ایاب‌وذهاب را خودکار به
+                پیشنهاد شما اضافه می‌کند. این نشانی هرگز به مشتری نمایش داده نمی‌شود.
+              </span>
+              <div className="overflow-hidden rounded-2xl border border-jar-border">
+                <LocationMapPicker
+                  district={baseDistrict}
+                  onChangeDistrict={setBaseDistrict}
+                  address={baseAddress}
+                  onChangeAddress={setBaseAddress}
+                  onChangeCoords={setBaseCoords}
+                  initialCoords={baseCoords ?? undefined}
+                />
+              </div>
+              {baseCoords ? (
+                <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  موقعیت ثبت شد{baseAddress ? ` — ${baseAddress}` : ""}
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-rose-600">
+                  هنوز نقطه‌ای انتخاب نشده است.
+                </span>
+              )}
             </div>
 
             {/* Work Area */}

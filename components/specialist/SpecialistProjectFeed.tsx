@@ -85,6 +85,10 @@ export default function SpecialistProjectFeed({
               status: "PENDING",
               message: null,
               proposedPrice: null,
+              // Mirrors what the server just stored, so the card shows the
+              // travel figure straight away instead of after a refresh.
+              travelFee: o.travel?.fee ?? null,
+              travelFeeOverride: null,
               createdAt: new Date().toISOString(),
             },
           };

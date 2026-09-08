@@ -13,6 +13,7 @@ export interface StepLocationProps {
   onChangeAddress: (val: string) => void;
   district: string;
   onChangeDistrict: (val: string) => void;
+  onChangeCoords?: (coords: { lat: number; lng: number }) => void;
 }
 
 const LocationMapPicker = dynamic(
@@ -35,6 +36,7 @@ export default function StepLocation({
   onChangeAddress,
   district,
   onChangeDistrict,
+  onChangeCoords,
 }: StepLocationProps) {
   return (
     <div className="w-full h-full" dir="rtl">
@@ -45,6 +47,7 @@ export default function StepLocation({
         onChangeDistrict={onChangeDistrict}
         address={address}
         onChangeAddress={onChangeAddress}
+        onChangeCoords={onChangeCoords}
       />
     </div>
   );

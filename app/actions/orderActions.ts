@@ -15,6 +15,8 @@ export interface CreateOrderInput {
   locationType: "CLIENT_LOCATION" | "SPECIALIST_ADVICE" | "JAR_STUDIO";
   locationAddress?: string;
   districtOrCity?: string;
+  locationLat?: number | null;
+  locationLng?: number | null;
   referenceLink?: string;
   moodboardUrls?: string[];
   projectDescription?: string;
@@ -77,6 +79,8 @@ export async function createOrderAction(input: CreateOrderInput) {
         locationType: input.locationType,
         locationAddress: input.locationAddress || null,
         districtOrCity: input.districtOrCity || null,
+        locationLat: input.locationLat ?? null,
+        locationLng: input.locationLng ?? null,
         referenceLink: input.referenceLink || null,
         moodboardUrls: input.moodboardUrls ? JSON.stringify(input.moodboardUrls) : null,
         projectDescription: input.projectDescription || null,
@@ -84,7 +88,11 @@ export async function createOrderAction(input: CreateOrderInput) {
         hourlyRate: input.hourlyRate,
         totalEstimatedPrice,
         depositAmount,
-        status: "PENDING_REVIEW" satisfies OrderStatus,
+        // Straight onto the specialist board. This used to be PENDING_REVIEW,
+        // which nothing moved an order out of and no query looked for: the job
+        // board, the admin dashboard, and the cancel button all filtered it out,
+        // so every new order landed somewhere no one could see it.
+        status: "MATCHING" satisfies OrderStatus,
         contactName: input.contactName || null,
         contactPhone: input.contactPhone || session.phone || null,
         userId: session.userId,

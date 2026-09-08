@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
+import { getMarketplaceSettings } from "@/lib/orders/settings";
+import { proposalTotal, quoteTravel } from "@/lib/orders/travel";
 import {
   type OrderStatus,
   OPEN_TO_APPLICANTS_STATUSES,
@@ -39,7 +41,24 @@ const submitInterestSchema = z.object({
     .positive("مبلغ پیشنهادی باید بیشتر از صفر باشد.")
     .optional()
     .nullable(),
-});
+  // Jar quotes travel automatically; a specialist may adjust it, but has to
+  // say why, and the client is shown both figures.
+  travelFeeOverride: z
+    .number()
+    .int("هزینه ایاب‌وذهاب باید عدد صحیح باشد.")
+    .min(0, "هزینه ایاب‌وذهاب نمی‌تواند منفی باشد.")
+    .optional()
+    .nullable(),
+  travelFeeOverrideReason: z
+    .string()
+    .trim()
+    .max(300, "توضیح نمی‌تواند بیشتر از ۳۰۰ کاراکتر باشد.")
+    .optional()
+    .nullable(),
+}).refine(
+  (v) => v.travelFeeOverride == null || (v.travelFeeOverrideReason?.length ?? 0) >= 5,
+  { message: "برای تغییر هزینه ایاب‌وذهاب باید دلیلش را بنویسید.", path: ["travelFeeOverrideReason"] }
+);
 
 export type SubmitProjectInterestInput = z.infer<typeof submitInterestSchema>;
 
@@ -70,11 +89,34 @@ export interface AvailableOrderSpecialistView {
   createdAt: string;
   interestsCount: number;
   hasApplied: boolean;
+  /**
+   * What Jar will add to this specialist's fee for getting to the shoot.
+   * null when either side has no coordinates — an older order, or a specialist
+   * who has not set their base — so the UI can say "not calculated" instead of
+   * showing a misleading zero.
+   */
+  travel: {
+    distanceKm: number;
+    fee: number;
+    isFree: boolean;
+  } | null;
+  /**
+   * Released only to the selected specialist, and only once payment has
+   * cleared. null in every other case — including for the specialist who won
+   * the job but whose client has not paid yet.
+   */
+  contact: {
+    name: string | null;
+    phone: string | null;
+    address: string | null;
+  } | null;
   myInterest: {
     id: string;
     status: string; // PENDING, WITHDRAWN, SELECTED, ACCEPTED, DECLINED, REJECTED, CANCELLED
     message: string | null;
     proposedPrice: number | null;
+    travelFee: number | null;
+    travelFeeOverride: number | null;
     createdAt: string;
   } | null;
 }
@@ -84,12 +126,21 @@ export interface ApplicantSpecialistView {
   specialistId: string;
   status: string;
   message: string | null;
+  /** The specialist's own fee, travel excluded. */
   proposedPrice: number | null;
+  /** Travel Jar quoted, and what the specialist charges if they adjusted it. */
+  travelFee: number | null;
+  travelFeeOverride: number | null;
+  travelFeeOverrideReason: string | null;
+  distanceKm: number | null;
+  /** proposedPrice plus the effective travel fee — what the client pays. */
+  totalPrice: number;
   createdAt: string;
   specialist: {
     id: string;
     displayName: string;
     city: string;
+    bio: string | null;
     equipment: string | null;
     hasStudio: boolean;
     isBlueTick: boolean;
@@ -158,6 +209,8 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
             status: true,
             message: true,
             proposedPrice: true,
+            travelFee: true,
+            travelFeeOverride: true,
             createdAt: true,
           },
         },
@@ -171,6 +224,12 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
       },
       orderBy: { createdAt: "desc" },
     });
+
+    const settings = await getMarketplaceSettings();
+    const base =
+      authCheck.specialistProfile?.baseLat != null && authCheck.specialistProfile?.baseLng != null
+        ? { lat: authCheck.specialistProfile.baseLat, lng: authCheck.specialistProfile.baseLng }
+        : null;
 
     const mapped: AvailableOrderSpecialistView[] = orders.map((o) => {
       const myInterest = o.interests[0] || null;
@@ -188,6 +247,14 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
         myInterest &&
         myInterest.status !== "WITHDRAWN" &&
         myInterest.status !== "DECLINED"
+      );
+
+      const quote = quoteTravel(
+        base,
+        o.locationLat != null && o.locationLng != null
+          ? { lat: o.locationLat, lng: o.locationLng }
+          : null,
+        settings
       );
 
       return {
@@ -212,12 +279,25 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
         createdAt: o.createdAt.toISOString(),
         interestsCount: o._count.interests,
         hasApplied,
+        travel: quote
+          ? { distanceKm: quote.distanceKm, fee: quote.fee, isFree: quote.isFree }
+          : null,
+        contact:
+          o.contactRevealedAt && o.selectedSpecialistId === session.userId
+            ? {
+                name: o.contactName,
+                phone: o.contactPhone,
+                address: o.locationAddress,
+              }
+            : null,
         myInterest: myInterest
           ? {
               id: myInterest.id,
               status: myInterest.status,
               message: myInterest.message,
               proposedPrice: myInterest.proposedPrice,
+              travelFee: myInterest.travelFee,
+              travelFeeOverride: myInterest.travelFeeOverride,
               createdAt: myInterest.createdAt.toISOString(),
             }
           : null,
@@ -259,12 +339,21 @@ export async function submitProjectInterestAction(
       };
     }
 
-    const { orderId, message, proposedPrice } = parsed.data;
+    const { orderId, message, proposedPrice, travelFeeOverride, travelFeeOverrideReason } =
+      parsed.data;
 
     // Verify order exists and is accepting applications
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, userId: true, status: true, contactPhone: true, categoryTitle: true },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        contactPhone: true,
+        categoryTitle: true,
+        locationLat: true,
+        locationLng: true,
+      },
     });
 
     if (!order) {
@@ -298,6 +387,27 @@ export async function submitProjectInterestAction(
       }
     }
 
+    // Quote travel from the specialist's registered base to the shoot. Computed
+    // server-side so the client and the specialist always see the same figure
+    // for the same trip; the specialist may override it, with a reason.
+    const settings = await getMarketplaceSettings();
+    const quote = quoteTravel(
+      authCheck.specialistProfile?.baseLat != null && authCheck.specialistProfile?.baseLng != null
+        ? { lat: authCheck.specialistProfile.baseLat, lng: authCheck.specialistProfile.baseLng }
+        : null,
+      order.locationLat != null && order.locationLng != null
+        ? { lat: order.locationLat, lng: order.locationLng }
+        : null,
+      settings
+    );
+
+    const travelData = {
+      distanceKm: quote?.distanceKm ?? null,
+      travelFee: quote?.fee ?? null,
+      travelFeeOverride: travelFeeOverride ?? null,
+      travelFeeOverrideReason: travelFeeOverride != null ? travelFeeOverrideReason ?? null : null,
+    };
+
     // Atomic creation / update and status transition using transaction
     const result = await prisma.$transaction(async (tx) => {
       let interest;
@@ -308,6 +418,7 @@ export async function submitProjectInterestAction(
           data: {
             message,
             proposedPrice: proposedPrice || null,
+            ...travelData,
             status: "PENDING",
             updatedAt: new Date(),
           },
@@ -319,6 +430,7 @@ export async function submitProjectInterestAction(
             specialistId: session.userId,
             message,
             proposedPrice: proposedPrice || null,
+            ...travelData,
             status: "PENDING",
           },
         });
@@ -535,6 +647,10 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
             specialistProfile: {
               select: {
                 id: true,
+                city: true,
+                bio: true,
+                equipmentSummary: true,
+                workArea: true,
                 portfolioItems: {
                   where: { categorySlug: order.categorySlug },
                   take: 6,
@@ -559,12 +675,26 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
       status: item.status,
       message: item.message,
       proposedPrice: item.proposedPrice,
+      travelFee: item.travelFee,
+      travelFeeOverride: item.travelFeeOverride,
+      travelFeeOverrideReason: item.travelFeeOverrideReason,
+      distanceKm: item.distanceKm,
+      totalPrice: proposalTotal(item),
       createdAt: item.createdAt.toISOString(),
       specialist: {
         id: item.specialist.id,
         displayName: item.specialist.displayName || "عکاس متخصص جار",
-        city: item.specialist.city || "تهران",
-        equipment: item.specialist.equipment,
+        // SpecialistProfile is where onboarding actually writes. Reading
+        // User.city here meant a specialist who filled the form properly showed
+        // a hard-coded "تهران" fallback instead of their real city.
+        city:
+          item.specialist.specialistProfile?.city ||
+          item.specialist.city ||
+          "—",
+        bio: item.specialist.specialistProfile?.bio ?? null,
+        equipment:
+          item.specialist.specialistProfile?.equipmentSummary ??
+          item.specialist.equipment,
         hasStudio: item.specialist.hasStudio,
         isBlueTick: item.specialist.requestedBlueTick,
         portfolioItems: item.specialist.specialistProfile?.portfolioItems || [],
@@ -610,6 +740,8 @@ export async function selectSpecialistForOrderAction(
 
     const { orderId: validOrderId, interestId: validInterestId } = parsed.data;
 
+    const { specialistCommission: commission } = await getMarketplaceSettings();
+
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: validOrderId },
@@ -642,7 +774,15 @@ export async function selectSpecialistForOrderAction(
 
       const interest = await tx.projectInterest.findUnique({
         where: { id: validInterestId },
-        select: { id: true, orderId: true, specialistId: true, status: true },
+        select: {
+          id: true,
+          orderId: true,
+          specialistId: true,
+          status: true,
+          proposedPrice: true,
+          travelFee: true,
+          travelFeeOverride: true,
+        },
       });
 
       if (!interest || interest.orderId !== validOrderId) {
@@ -653,24 +793,37 @@ export async function selectSpecialistForOrderAction(
         throw new Error("این متقاضی از انجام پروژه انصراف داده است و قابل انتخاب نیست.");
       }
 
-      // Mark interest as SELECTED (awaiting specialist's confirmation)
       await tx.projectInterest.update({
         where: { id: validInterestId },
         data: { status: "SELECTED" },
       });
 
-      // Update order to AWAITING_SPECIALIST_CONFIRMATION
+      // Freeze what was agreed onto the order. The proposal can still be edited
+      // afterwards; the price the client saw when they chose is the price they
+      // are charged. Commission is snapshotted too, so changing the platform
+      // rate later cannot re-price a deal that has already been struck.
+      const agreedBasePrice = interest.proposedPrice ?? 0;
+      const agreedTravelFee = interest.travelFeeOverride ?? interest.travelFee ?? 0;
+
       await tx.order.update({
         where: { id: validOrderId },
         data: {
-          status: "AWAITING_SPECIALIST_CONFIRMATION" satisfies OrderStatus,
+          // The specialist committed by quoting a price; asking them to confirm
+          // again was a second chance to drop out and bought nothing. The client
+          // now goes straight to payment.
+          status: "AWAITING_PAYMENT" satisfies OrderStatus,
           selectedSpecialistId: interest.specialistId,
+          agreedBasePrice,
+          agreedTravelFee,
+          agreedTotalPrice: agreedBasePrice + agreedTravelFee,
+          commissionPercent: commission,
         },
       });
 
       return {
         specialistId: interest.specialistId,
         categoryTitle: order.categoryTitle || "عکاسی",
+        agreedTotalPrice: agreedBasePrice + agreedTravelFee,
       };
     });
 
@@ -678,7 +831,7 @@ export async function selectSpecialistForOrderAction(
     await createNotification({
       userId: result.specialistId,
       title: "شما برای یک پروژه انتخاب شدید!",
-      message: `کارفرما شما را برای انجام پروژه «${result.categoryTitle}» انتخاب کرده است. لطفاً برای نهایی شدن، پروژه را بررسی و تأیید کنید.`,
+      message: `کارفرما شما را برای انجام پروژه «${result.categoryTitle}» انتخاب کرد. به‌محض پرداخت کارفرما، پروژه قطعی می‌شود و اطلاعات تماس در اختیارتان قرار می‌گیرد.`,
       type: "SUCCESS",
       link: `/specialist/projects`,
     });

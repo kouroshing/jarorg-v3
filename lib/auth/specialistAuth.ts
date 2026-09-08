@@ -28,6 +28,9 @@ export interface SpecialistEligibilityResult {
     workArea?: string | null;
     bio?: string | null;
     equipmentSummary?: string | null;
+    /** Where they travel from; used to quote the travel fee on each proposal. */
+    baseLat?: number | null;
+    baseLng?: number | null;
   };
   portfolioStats?: {
     hasEligibleCategory: boolean;
@@ -66,6 +69,8 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
           workArea: true,
           bio: true,
           equipmentSummary: true,
+          baseLat: true,
+          baseLng: true,
           portfolioItems: {
             select: {
               id: true,
@@ -164,6 +169,8 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
         workArea: profile.workArea,
         bio: profile.bio,
         equipmentSummary: profile.equipmentSummary,
+        baseLat: profile.baseLat,
+        baseLng: profile.baseLng,
       },
       portfolioStats,
     };
@@ -180,6 +187,8 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
       workArea: profile.workArea,
       bio: profile.bio,
       equipmentSummary: profile.equipmentSummary,
+      baseLat: profile.baseLat,
+      baseLng: profile.baseLng,
     },
     portfolioStats,
   };

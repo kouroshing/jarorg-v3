@@ -25,11 +25,6 @@ export type AuthActionResult =
   | { success: false; error: string };
 
 async function establishSessionForPhone(phoneDigits: string, defaultRole?: string, displayName?: string): Promise<void> {
-  // PRIORITY 2: Specialist registration is temporarily disabled
-  if (defaultRole === "SPECIALIST") {
-    throw new Error("ثبت‌نام عکاسان در حال حاضر امکان‌پذیر نیست.");
-  }
-
   const dbRole = dbRoleFromPhone(phoneDigits); // ADMIN or USER based on phone
   const sessionRole = sessionRoleFromPhone(phoneDigits);
 
@@ -156,10 +151,6 @@ export async function verifyOtpCode(
   const resolved = resolvePhoneForOtp(phone);
   if (!resolved.ok) {
     return { success: false, error: "شماره موبایل معتبر نیست." };
-  }
-
-  if (defaultRole === "SPECIALIST") {
-    return { success: false, error: "ثبت‌نام عکاسان در حال حاضر امکان‌پذیر نیست." };
   }
 
   const otp = sanitizeOtpInput(code);

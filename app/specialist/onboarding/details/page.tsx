@@ -89,6 +89,9 @@ export default async function OnboardingDetailsStepPage() {
           initialBio={onboardingState.bio}
           initialEquipment={onboardingState.equipmentSummary}
           initialAgreedToTerms={onboardingState.agreedToTerms ?? onboardingState.hasNda}
+          initialBaseLat={onboardingState.baseLat}
+          initialBaseLng={onboardingState.baseLng}
+          initialBaseAddress={onboardingState.baseAddress}
           hasEligiblePortfolio={hasEligible}
         />
       </main>

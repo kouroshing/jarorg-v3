@@ -143,6 +143,12 @@ model Order {
   locationAddress     String?  @map("location_address")
   districtOrCity      String?  @map("district_or_city")
 
+  // Precise point from the map picker, used only to compute the travel fee.
+  // Specialists are shown the district and the distance — never these, never
+  // locationAddress, and never contactPhone, until payment clears.
+  locationLat         Float?   @map("location_lat")
+  locationLng         Float?   @map("location_lng")
+
   // Moodboard & References
   referenceLink       String?  @map("reference_link")
   moodboardUrls       String?  @map("moodboard_urls") // JSON Array string of URLs
@@ -159,6 +165,25 @@ model Order {
   contactName         String?  @map("contact_name")
   contactPhone        String?  @map("contact_phone")
   adminCancelNote     String?  @map("admin_cancel_note")
+
+  // Snapshot of the accepted proposal, written when the client selects a
+  // specialist. Kept on the order so a later edit to the proposal cannot
+  // change what was agreed or what was charged.
+  agreedBasePrice     Int?     @map("agreed_base_price")
+  agreedTravelFee     Int?     @map("agreed_travel_fee")
+  agreedTotalPrice    Int?     @map("agreed_total_price")
+  commissionPercent   Int?     @map("commission_percent")
+
+  // Escrow: the client pays Jar in full; Jar settles the specialist after
+  // delivery, minus commissionPercent.
+  paidAt              DateTime? @map("paid_at")
+  paymentAuthority    String?   @unique @map("payment_authority")
+  paymentRefId        String?   @map("payment_ref_id")
+  settledAt           DateTime? @map("settled_at")
+  settledAmount       Int?      @map("settled_amount")
+
+  /// Set when payment clears. Until then the specialist sees no contact details.
+  contactRevealedAt   DateTime? @map("contact_revealed_at")
 
   userId               String?           @map("user_id")
   user                 User?             @relation("ClientOrders", fields: [userId], references: [id], onDelete: SetNull)
@@ -179,10 +204,19 @@ model ProjectInterest {
   orderId       String   @map("order_id")
   specialistId  String   @map("specialist_id")
   message       String?
+  /// The specialist's own fee. Travel is quoted separately, below.
   proposedPrice Int?     @map("proposed_price")
   status        String   @default("PENDING") // Real states: PENDING, SELECTED, ACCEPTED, DECLINED, WITHDRAWN, REJECTED, CANCELLED
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
+
+  /// Road distance estimate between the specialist's base and the shoot location.
+  distanceKm             Float?  @map("distance_km")
+  /// Travel fee Jar computed from distanceKm and the platform rate.
+  travelFee              Int?    @map("travel_fee")
+  /// Specialist's manual adjustment. When set, this is what the client pays.
+  travelFeeOverride      Int?    @map("travel_fee_override")
+  travelFeeOverrideReason String? @map("travel_fee_override_reason")
 
   order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   specialist User  @relation(fields: [specialistId], references: [id], onDelete: Cascade)
@@ -275,6 +309,15 @@ model PwaSettings {
   splashBackgroundColor String   @map("splash_background_color")
   showIosPrompt         Boolean  @default(true) @map("show_ios_prompt")
   galleryCommission     Int      @default(0) @map("gallery_commission") // Dynamic photo sale commission percentage (0 to 100)
+
+  // Marketplace settings. Defaults are zero on purpose: no money moves and no
+  // travel is charged until someone sets these in the admin panel.
+  /// Percent Jar keeps from the specialist's fee when settling a delivered order.
+  specialistCommission  Int      @default(0) @map("specialist_commission")
+  /// Distance a specialist travels before any fee applies.
+  travelFreeRadiusKm    Int      @default(8) @map("travel_free_radius_km")
+  /// Toman charged per kilometre beyond the free radius.
+  travelRatePerKm       Int      @default(0) @map("travel_rate_per_km")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
@@ -428,6 +471,13 @@ model SpecialistProfile {
   bio                String?
   equipmentSummary   String?   @map("equipment_summary")
   selectedCategories String?   @map("selected_categories") // JSON string of selected category slugs
+
+  /// Where the specialist travels from. Set on the map during onboarding and
+  /// used to compute the travel fee on every proposal they make.
+  baseLat            Float?    @map("base_lat")
+  baseLng            Float?    @map("base_lng")
+  baseAddress        String?   @map("base_address")
+
   agreedToTerms      Boolean   @default(false) @map("agreed_to_terms")
   termsAgreedAt      DateTime? @map("terms_agreed_at")
   createdAt          DateTime  @default(now()) @map("created_at")
