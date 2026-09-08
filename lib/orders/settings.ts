@@ -4,8 +4,9 @@ import type { TravelSettings } from "@/lib/orders/travel";
 
 /**
  * Marketplace settings, held on the PwaSettings singleton alongside
- * galleryCommission. Zero defaults are deliberate: no commission is taken and
- * no travel is charged until someone sets these in the admin panel.
+ * galleryCommission. Commission defaults to 20%; the travel rate defaults to
+ * zero, so no travel is charged until a per-kilometre price is set in the
+ * admin panel.
  */
 export type MarketplaceSettings = TravelSettings & {
   /** Percent Jar keeps from the specialist's fee when settling. */
@@ -13,7 +14,7 @@ export type MarketplaceSettings = TravelSettings & {
 };
 
 export const MARKETPLACE_DEFAULTS: MarketplaceSettings = {
-  specialistCommission: 0,
+  specialistCommission: 20,
   freeRadiusKm: 8,
   ratePerKm: 0,
 };

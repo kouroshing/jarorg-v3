@@ -315,10 +315,10 @@ model PwaSettings {
   showIosPrompt         Boolean @default(true) @map("show_ios_prompt")
   galleryCommission     Int     @default(0) @map("gallery_commission") // Dynamic photo sale commission percentage (0 to 100)
 
-  // Marketplace settings. Defaults are zero on purpose: no money moves and no
-  // travel is charged until someone sets these in the admin panel.
-  /// Percent Jar keeps from the specialist's fee when settling a delivered order.
-  specialistCommission Int      @default(0) @map("specialist_commission")
+  // Marketplace settings, editable in the admin panel.
+  /// Percent Jar keeps from the specialist's fee when settling a delivered
+  /// order. Never taken from the travel fee, which reimburses a real cost.
+  specialistCommission Int      @default(20) @map("specialist_commission")
   /// Distance a specialist travels before any fee applies.
   travelFreeRadiusKm   Int      @default(8) @map("travel_free_radius_km")
   /// Toman charged per kilometre beyond the free radius.
