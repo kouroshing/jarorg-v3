@@ -1,111 +1,87 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Search, MapPin, ChevronDown } from "lucide-react";
-import { HOME_CITIES } from "@/lib/home/mock-data";
+import Link from "next/link";
+import {
+  Calendar,
+  Phone,
+  ArrowLeft,
+  ChevronDown,
+} from "lucide-react";
 
 export function HeroSection() {
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [city, setCity] = useState<(typeof HOME_CITIES)[number]["id"]>("tehran");
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
-    params.set("city", city);
-    const qs = params.toString();
-    router.push(qs ? `/create-project?${qs}` : "/create-project");
-  };
-
   return (
-    <section className="relative overflow-hidden bg-gradient-to-b from-gray-50/60 via-white to-white pb-16 pt-6 sm:pb-24 sm:pt-10">
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(250,204,21,0.08),transparent)]"
-        aria-hidden
-      />
-
-      <div className="relative mx-auto max-w-4xl px-5 text-center sm:px-8">
-        <div className="animate-fade-up">
-          <p className="mb-6 text-xs font-medium tracking-wide text-gray-400">
-            پلتفرم جار
-          </p>
-
-          <h1 className="mx-auto max-w-3xl text-balance text-4xl font-extrabold leading-[1.15] tracking-tight text-black sm:text-5xl md:text-[3.25rem]">
-            لحظه‌هایت را با بهترین‌ها ثبت کن
-          </h1>
-
-          <form
-            onSubmit={handleSearch}
-            className="mx-auto mt-10 max-w-2xl animate-fade-up [animation-delay:120ms]"
-            style={{ animationFillMode: "both" }}
-          >
-            <div className="flex w-full flex-col gap-1 rounded-[24px] border border-gray-100 bg-white p-2.5 shadow-xl shadow-black/[0.04] transition-shadow duration-300 focus-within:shadow-2xl focus-within:shadow-black/[0.06] md:flex-row md:items-center md:gap-0 md:rounded-full md:p-2">
-              {/* ردیف اول — جستجوی خدمت */}
-              <div className="flex min-w-0 flex-1 items-center px-4 py-2.5 md:py-2">
-                <Search
-                  className="ml-3 h-5 w-5 shrink-0 text-gray-400"
-                  strokeWidth={2}
-                  aria-hidden
-                />
-                <label className="sr-only" htmlFor="hero-search">
-                  به چه خدمتی نیاز دارید؟
-                </label>
-                <input
-                  id="hero-search"
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="به چه خدمتی نیاز دارید؟"
-                  className="flex-1 border-none bg-transparent text-sm text-black outline-none placeholder:text-gray-400"
-                />
-              </div>
-
-              <div className="mx-5 h-[1px] bg-gray-100 md:hidden" aria-hidden />
-              <div
-                className="mx-2 hidden h-8 w-[1px] bg-gray-200 md:block"
-                aria-hidden
-              />
-
-              {/* ردیف دوم — شهر */}
-              <div className="relative flex items-center px-4 py-2.5 md:shrink-0 md:py-2">
-                <MapPin
-                  className="ml-3 h-5 w-5 shrink-0 text-gray-400"
-                  strokeWidth={2}
-                  aria-hidden
-                />
-                <select
-                  value={city}
-                  onChange={(e) =>
-                    setCity(
-                      e.target.value as (typeof HOME_CITIES)[number]["id"]
-                    )
-                  }
-                  aria-label="شهر"
-                  className="flex-1 cursor-pointer appearance-none border-none bg-transparent text-sm font-medium text-black outline-none md:min-w-[7rem] md:flex-none md:pr-6"
-                >
-                  {HOME_CITIES.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  className="pointer-events-none absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 md:left-3"
-                  aria-hidden
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="mt-1 w-full rounded-2xl bg-[#FACC15] py-3.5 text-sm font-bold text-black transition-all duration-200 hover:brightness-95 active:scale-[0.98] md:mt-0 md:w-auto md:shrink-0 md:rounded-full md:px-8 md:py-3"
-              >
-                جستجو
-              </button>
-            </div>
-          </form>
+    <section 
+      className="relative w-full min-h-[calc(100dvh-5rem)] md:min-h-[calc(100dvh-6rem)] flex flex-col items-center justify-center text-center px-4 sm:px-8 lg:px-12 py-10 sm:py-16" 
+      dir="rtl"
+    >
+      <div className="relative z-10 max-w-3xl mx-auto w-full space-y-6 sm:space-y-8 flex flex-col items-center justify-center">
+        
+        {/* Top Pill Tag */}
+        <div className="flex justify-center">
+          <div className="relative inline-flex items-center justify-center">
+            <span className="relative inline-flex items-center gap-2 sm:gap-2.5 rounded-full border border-jar-border bg-jar-surface/95 px-4 sm:px-5 py-1.5 text-xs sm:text-sm font-medium text-jar-primary backdrop-blur-xl shadow-xs transition-transform hover:scale-[1.01]">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-jar-logo opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-jar-logo" />
+              </span>
+              <span className="tracking-tight text-center">
+                پلتفرم هوشمند رزرو مستقیم عکاس و تصویربردار
+              </span>
+            </span>
+          </div>
         </div>
+
+        {/* Mega Headline & Balanced Subtitle */}
+        <div className="relative max-w-2xl mx-auto space-y-4 sm:space-y-5">
+          {/* Luminous Soft White Halo Behind Headline for Supreme Legibility */}
+          <div className="absolute -inset-x-12 -inset-y-8 -z-10 rounded-full bg-jar-surface/75 blur-2xl pointer-events-none" />
+
+          <div>
+            <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-[4rem] font-black tracking-tight leading-[1.2] sm:leading-[1.15] text-jar-primary text-balance">
+              رزرو مستقیم{" "}
+              <span className="text-jar-logo font-black">
+                عکاس و تصویربردار
+              </span>
+            </h1>
+          </div>
+
+          <div>
+            <p className="text-xs sm:text-sm md:text-base lg:text-lg font-medium text-jar-muted leading-relaxed sm:leading-loose max-w-xl mx-auto text-balance">
+              دسترسی سریع به عکاسان و تصویربرداران حرفه‌ای با ضمانت کیفیت و برآورد آنی قیمت در جار.
+            </p>
+          </div>
+        </div>
+
+        {/* CTA Buttons with Symmetrical Proportion */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4 w-full max-w-md sm:max-w-none mx-auto pt-1 sm:pt-2">
+          <Link
+            href="/order"
+            className="group inline-flex h-12 sm:h-13 w-full sm:w-auto items-center justify-center gap-2.5 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white px-6 sm:px-8 text-xs sm:text-sm md:text-base font-medium shadow-none transition-colors duration-200 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Calendar className="h-4.5 w-4.5 shrink-0 text-white" />
+            <span>ثبت هوشمند سفارش با بودجه دلخواه</span>
+            <ArrowLeft className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:-translate-x-1" />
+          </Link>
+
+          <a
+            href="tel:09100138383"
+            className="inline-flex h-12 sm:h-13 w-full sm:w-auto items-center justify-center gap-2.5 rounded-full border border-jar-border bg-jar-surface text-jar-primary px-6 sm:px-8 text-xs sm:text-sm md:text-base font-medium shadow-xs hover:bg-jar-soft transition-colors duration-200 cursor-pointer backdrop-blur-md whitespace-nowrap shrink-0"
+          >
+            <Phone className="h-4.5 w-4.5 shrink-0 text-jar-primary" />
+            <span>مشاوره تلفنی رایگان (۰۹۱۰۰۱۳۸۳۸۳)</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Scroll-Down Cue Button (مشاهده بیشتر) - Absolute bottom */}
+      <div className="absolute bottom-20 sm:bottom-22 md:bottom-6 inset-x-0 flex justify-center pointer-events-auto z-20">
+        <a
+          href="#details"
+          className="group inline-flex h-9 sm:h-10 items-center justify-center gap-2 rounded-full border border-jar-border bg-jar-surface hover:bg-jar-soft px-5 text-xs sm:text-sm font-medium text-jar-primary shadow-xs transition-colors duration-200 cursor-pointer"
+        >
+          <span>مشاهده بیشتر</span>
+          <ChevronDown className="w-3.5 h-3.5 text-jar-muted animate-bounce" />
+        </a>
       </div>
     </section>
   );

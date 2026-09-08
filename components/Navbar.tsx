@@ -3,66 +3,67 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Home, Plus, LogIn, User, Phone } from "lucide-react";
+import {
+  Home,
+  Plus,
+  LogIn,
+  User,
+  Phone,
+  BookOpen,
+  Wrench,
+  Menu,
+  X,
+  Sparkles,
+  Camera,
+  Calendar,
+  Layers,
+  ArrowLeft,
+  Briefcase,
+} from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
+import NotificationBell from "@/components/NotificationBell";
 
 export type AuthStatus = "guest" | "user" | "admin";
 
-const SUPPORT_TEL = "tel:02166468626";
-
-type SessionResponse = {
-  authenticated?: boolean;
-  role?: string | null;
-};
-
-function parseSessionResponse(data: SessionResponse): AuthStatus {
-  if (!data.authenticated) return "guest";
-  if (data.role === "admin") return "admin";
-  return "user";
+function useIsActive() {
+  const pathname = usePathname();
+  return useCallback(
+    (href: string) => {
+      if (href === "/") {
+        return pathname === "/";
+      }
+      return pathname?.startsWith(href) ?? false;
+    },
+    [pathname]
+  );
 }
 
 function useAuthStatus(initialAuth: AuthStatus) {
-  const pathname = usePathname();
   const [auth, setAuth] = useState<AuthStatus>(initialAuth);
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/session", {
-        cache: "no-store",
-        credentials: "same-origin",
-      });
-      const data = (await res.json()) as SessionResponse;
-      setAuth(parseSessionResponse(data));
-    } catch {
-      setAuth("guest");
-    }
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.role === "ADMIN") {
+          setAuth("admin");
+        } else if (data.userId) {
+          setAuth("user");
+        } else {
+          setAuth("guest");
+        }
+      })
+      .catch(() => setAuth("guest"));
   }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [pathname, refresh]);
-
-  useEffect(() => {
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
 
   return auth;
 }
 
-function useIsActive() {
-  const pathname = usePathname();
-  return (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
-}
-
-const desktopLinkBase =
-  "inline-flex items-center gap-2 text-sm font-medium transition-colors duration-200";
-
 function desktopLinkClass(active: boolean) {
-  return `${desktopLinkBase} ${
-    active ? "font-semibold text-black" : "text-gray-600 hover:text-black"
+  return `relative px-3 py-1.5 text-xs font-bold transition-all duration-300 ease-out ${
+    active
+      ? "text-jar-primary font-black after:absolute after:bottom-[-2px] after:left-2 after:right-2 after:h-[2px] after:bg-jar-primary after:rounded-full"
+      : "text-jar-muted hover:text-jar-primary"
   }`;
 }
 
@@ -71,20 +72,42 @@ type NavbarProps = {
 };
 
 export function Navbar({ initialAuth }: NavbarProps) {
+  const pathname = usePathname();
   const isActive = useIsActive();
   const auth = useAuthStatus(initialAuth);
   const isLoggedIn = auth !== "guest";
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
+
+  if (
+    pathname &&
+    (pathname.startsWith("/jaramooz") ||
+      pathname.startsWith("/join") ||
+      pathname.startsWith("/specialist") ||
+      pathname.startsWith("/order") ||
+      pathname.startsWith("/admin"))
+  ) {
+    return null;
+  }
 
   return (
     <>
-      {/* Top bar — mobile: compact row; desktop: taller + horizontal nav */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-gray-100 bg-white/95 pt-[env(safe-area-inset-top,0px)] shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/90">
-        <div className="mx-auto flex h-11 w-full max-w-5xl flex-row items-center justify-between gap-3 px-4 md:h-14 md:gap-6 md:px-8">
-          <BrandLogo variant="header" showWordmark />
+      {/* 1. Floating Frosted Luxury Header (Claude Light Editorial Style) */}
+      <header className="fixed inset-x-0 top-3 z-50 px-4 md:px-6" dir="rtl">
+        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between rounded-full border border-jar-border bg-jar-canvas/90 px-4 sm:px-6 backdrop-blur-md shadow-[0_2px_12px_rgba(31,30,29,0.04)]">
+          
+          {/* Right: Brand Logo (Persian RTL Anchor) */}
+          <div className="flex items-center gap-3">
+            <BrandLogo variant="header" showWordmark />
+          </div>
 
-          {/* Desktop navigation — hidden on mobile (bottom app bar instead) */}
+          {/* Center: Desktop Navigation Links */}
           <nav
-            className="hidden flex-1 items-center justify-center gap-6 md:flex"
+            className="hidden items-center justify-center gap-1 lg:flex"
             aria-label="ناوبری دسکتاپ"
           >
             <Link
@@ -92,38 +115,40 @@ export function Navbar({ initialAuth }: NavbarProps) {
               aria-current={isActive("/") ? "page" : undefined}
               className={desktopLinkClass(isActive("/"))}
             >
-              <Home className="h-[18px] w-[18px]" strokeWidth={2} />
-              خانه
+              صفحه اصلی
             </Link>
 
             <Link
-              href="/create-project"
-              aria-current={isActive("/create-project") ? "page" : undefined}
-              className={desktopLinkClass(isActive("/create-project"))}
+              href="/order"
+              aria-current={isActive("/order") ? "page" : undefined}
+              className={desktopLinkClass(isActive("/order"))}
             >
-              <Plus className="h-[18px] w-[18px]" strokeWidth={2.25} />
-              ثبت پروژه
+              ثبت پروژه و سفارش
             </Link>
 
-            {isLoggedIn ? (
-              <Link
-                href="/profile"
-                aria-current={isActive("/profile") ? "page" : undefined}
-                className={desktopLinkClass(isActive("/profile"))}
-              >
-                <User className="h-[18px] w-[18px]" strokeWidth={2} />
-                پروفایل
-              </Link>
-            ) : (
-              <Link
-                href="/login"
-                aria-current={isActive("/login") ? "page" : undefined}
-                className={desktopLinkClass(isActive("/login"))}
-              >
-                <LogIn className="h-[18px] w-[18px]" strokeWidth={2} />
-                ورود
-              </Link>
-            )}
+            <Link
+              href="/jaramooz"
+              aria-current={isActive("/jaramooz") ? "page" : undefined}
+              className={desktopLinkClass(isActive("/jaramooz"))}
+            >
+              آکادمی آموزش
+            </Link>
+
+            <Link
+              href="/contact"
+              aria-current={isActive("/contact") ? "page" : undefined}
+              className={desktopLinkClass(isActive("/contact"))}
+            >
+              تماس با ما
+            </Link>
+
+            <Link
+              href="/tools"
+              aria-current={isActive("/tools") ? "page" : undefined}
+              className={desktopLinkClass(isActive("/tools"))}
+            >
+              ابزارها
+            </Link>
 
             {auth === "admin" && (
               <Link
@@ -131,101 +156,284 @@ export function Navbar({ initialAuth }: NavbarProps) {
                 aria-current={isActive("/admin") ? "page" : undefined}
                 className={desktopLinkClass(isActive("/admin"))}
               >
-                پنل
+                پنل مدیریت
               </Link>
             )}
           </nav>
 
-          <a
-            href={SUPPORT_TEL}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 text-gray-600 shadow-sm transition-all duration-200 hover:border-gray-300 hover:text-black active:scale-95 md:h-9 md:gap-2 md:px-3.5"
-            aria-label="تماس پشتیبانی — ۰۲۱۶۶۴۶۸۶۲۶"
-          >
-            <Phone
-              className="h-4 w-4 shrink-0 md:h-[18px] md:w-[18px]"
-              strokeWidth={2}
-            />
-            <span className="text-[11px] font-semibold tracking-tight md:text-xs">
-              پشتیبانی
-            </span>
-          </a>
+          {/* Left: Actions, Profile, Terracotta CTA & Mobile Hamburger */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <NotificationBell />
+
+            {/* User Account / Profile */}
+            {isLoggedIn ? (
+              <Link
+                href="/profile"
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
+              >
+                <User className="h-3.5 w-3.5 text-jar-primary" />
+                <span>داشبورد</span>
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
+              >
+                <LogIn className="h-3.5 w-3.5 text-jar-muted" />
+                <span>ورود</span>
+              </Link>
+            )}
+
+            {/* Primary Jet-Black CTA: Book Project */}
+            <Link
+              href="/order"
+              className="hidden md:inline-flex h-9 sm:h-10 items-center justify-center gap-1.5 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white px-5 sm:px-6 text-xs sm:text-sm font-medium shadow-none transition-colors duration-200 cursor-pointer"
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              <span>ثبت سفارش</span>
+            </Link>
+
+            {/* Mobile Hamburger Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="flex h-9 w-9 lg:hidden items-center justify-center rounded-full border border-jar-border bg-jar-surface text-jar-primary hover:bg-jar-canvas transition-all duration-300 ease-out active:scale-[0.98] cursor-pointer shrink-0"
+              aria-label="منوی موبایل"
+            >
+              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
+
         </div>
       </header>
 
-      {/* Bottom app bar — mobile only */}
+      {/* 2. Mobile Drawer Navigation Overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity lg:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          <div
+            className="fixed top-20 right-4 left-4 rounded-3xl border border-[#E5E0D8] bg-[#FAF9F5] p-6 shadow-2xl backdrop-blur-2xl animate-in slide-in-from-top-4 duration-300 ease-out space-y-5"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between border-b border-jar-border pb-3">
+              <BrandLogo variant="header" showWordmark />
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-jar-soft text-jar-muted hover:bg-stone-200 transition-colors"
+                aria-label="بستن منو"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <nav className="flex flex-col gap-2">
+              <Link
+                href="/"
+                className={`flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-colors ${
+                  isActive("/") ? "bg-jar-primary/5 text-jar-primary font-black" : "text-jar-primary hover:bg-jar-soft"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Home className="h-4 w-4 text-jar-primary" />
+                  <span>صفحه اصلی</span>
+                </div>
+                <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+              </Link>
+
+              <Link
+                href="/order"
+                className={`flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-colors ${
+                  isActive("/order") ? "bg-jar-primary/5 text-jar-primary font-black" : "text-jar-primary hover:bg-jar-soft"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="h-4 w-4 text-jar-primary" />
+                  <span>ثبت سفارش عکاسی و فیلمبرداری</span>
+                </div>
+                <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+              </Link>
+
+              <Link
+                href="/jaramooz"
+                className={`flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-colors ${
+                  isActive("/jaramooz") ? "bg-jar-primary/5 text-jar-primary font-black" : "text-jar-primary hover:bg-jar-soft"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <BookOpen className="h-4 w-4 text-jar-primary" />
+                  <span>آکادمی آموزش (جارآموز)</span>
+                </div>
+                <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+              </Link>
+
+              <Link
+                href="/contact"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-3 rounded-xl text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all duration-300 ease-out"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Phone className="h-4 w-4 text-jar-primary" />
+                  <span>تماس و مشاوره رایگان</span>
+                </div>
+                <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+              </Link>
+
+              <Link
+                href="/tools"
+                className={`flex items-center justify-between p-3 rounded-xl text-xs font-bold transition-colors ${
+                  isActive("/tools") ? "bg-jar-primary/5 text-jar-primary font-black" : "text-jar-primary hover:bg-jar-soft"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Wrench className="h-4 w-4 text-jar-primary" />
+                  <span>ابزارهای عکاسی</span>
+                </div>
+                <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+              </Link>
+
+              {isLoggedIn ? (
+                <Link
+                  href="/profile"
+                  className="flex items-center justify-between px-4 py-3 rounded-full text-xs font-bold bg-jar-surface border border-jar-border text-jar-primary"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <User className="h-4 w-4 text-jar-primary" />
+                    <span>داشبورد کاربری</span>
+                  </div>
+                  <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  className="flex items-center justify-between px-4 py-3 rounded-full text-xs font-bold bg-jar-surface border border-jar-border text-jar-primary"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <LogIn className="h-4 w-4 text-jar-muted" />
+                    <span>ورود به حساب</span>
+                  </div>
+                  <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
+                </Link>
+              )}
+            </nav>
+
+            <div className="pt-2">
+              <Link
+                href="/order"
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white text-xs font-medium shadow-none transition-colors"
+              >
+                <Calendar className="h-4 w-4" />
+                <span>ثبت سفارش عکاسی و فیلمبرداری</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Floating Glassmorphic Mobile Bottom App Bar */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-gray-100 bg-white/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-1px_0_0_rgba(0,0,0,0.04)] backdrop-blur-md supports-[backdrop-filter]:bg-white/90 md:hidden"
-        aria-label="ناوبری موبایل"
+        className="fixed bottom-3 inset-x-4 z-40 md:hidden flex justify-center pointer-events-none"
+        aria-label="منوی دسترسی سریع موبایل"
+        dir="rtl"
       >
-        <ul className="mx-auto flex h-16 max-w-md flex-row items-center justify-around px-4">
-          <li>
+        <ul className="pointer-events-auto grid grid-cols-4 h-16 w-full max-w-md items-center rounded-full border border-jar-border bg-jar-canvas/90 px-2 py-1 shadow-[0_8px_30px_rgba(31,30,29,0.06)] backdrop-blur-xl">
+          <li className="flex justify-center">
             <Link
               href="/"
               aria-current={isActive("/") ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-medium transition-colors duration-200 ${
-                isActive("/")
-                  ? "font-semibold text-black"
-                  : "text-gray-500 hover:text-black"
+              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
+                isActive("/") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
               }`}
             >
-              <Home
-                className="h-6 w-6"
-                strokeWidth={isActive("/") ? 2.4 : 2}
-              />
+              <Home className="h-5 w-5" strokeWidth={isActive("/") ? 2.5 : 2} />
               <span>خانه</span>
             </Link>
           </li>
 
-          <li className="relative -translate-y-5">
+          <li className="flex justify-center">
             <Link
-              href="/create-project"
-              aria-label="ثبت پروژه"
-              aria-current={isActive("/create-project") ? "page" : undefined}
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-jar-yellow text-black shadow-glow ring-4 ring-white transition-transform duration-200 hover:scale-105 active:scale-95"
+              href="/order"
+              aria-current={isActive("/order") ? "page" : undefined}
+              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
+                isActive("/order") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
+              }`}
             >
-              <Plus className="h-7 w-7" strokeWidth={2.5} />
+              <Briefcase className="h-5 w-5" strokeWidth={isActive("/order") ? 2.5 : 2} />
+              <span>پروژه‌ها</span>
             </Link>
           </li>
 
-          <li>
+          <li className="flex justify-center">
+            <Link
+              href="/tools"
+              aria-current={isActive("/tools") ? "page" : undefined}
+              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
+                isActive("/tools") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
+              }`}
+            >
+              <Wrench className="h-5 w-5" strokeWidth={isActive("/tools") ? 2.5 : 2} />
+              <span>ابزارها</span>
+            </Link>
+          </li>
+
+          <li className="flex justify-center">
             {isLoggedIn ? (
               <Link
                 href="/profile"
                 aria-current={isActive("/profile") ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-medium transition-colors duration-200 ${
-                  isActive("/profile")
-                    ? "font-semibold text-black"
-                    : "text-gray-500 hover:text-black"
+                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
+                  isActive("/profile") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
                 }`}
               >
-                <User
-                  className="h-6 w-6"
-                  strokeWidth={isActive("/profile") ? 2.4 : 2}
-                />
+                <User className="h-5 w-5" strokeWidth={isActive("/profile") ? 2.5 : 2} />
                 <span>پروفایل</span>
               </Link>
             ) : (
               <Link
                 href="/login"
                 aria-current={isActive("/login") ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-medium transition-colors duration-200 ${
-                  isActive("/login")
-                    ? "font-semibold text-black"
-                    : "text-gray-500 hover:text-black"
+                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
+                  isActive("/login") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
                 }`}
               >
-                <LogIn
-                  className="h-6 w-6"
-                  strokeWidth={isActive("/login") ? 2.4 : 2}
-                />
-                <span className="max-w-[4.5rem] truncate text-center leading-tight">
-                  ورود
-                </span>
+                <User className="h-5 w-5" strokeWidth={isActive("/login") ? 2.5 : 2} />
+                <span>پروفایل</span>
               </Link>
             )}
           </li>
         </ul>
       </nav>
     </>
+  );
+}
+
+const STANDALONE_PREFIXES = [
+  "/order",
+  "/jaramooz",
+  "/admin",
+  "/specialist",
+  "/join",
+];
+
+export function MainLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  const isStandalone = pathname
+    ? STANDALONE_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+      )
+    : false;
+
+  if (isStandalone) {
+    return <div className="w-full min-h-dvh flex flex-col">{children}</div>;
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-[1360px] px-4 sm:px-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] pt-[calc(env(safe-area-inset-top,0px)+5rem)] md:pb-12 md:pt-[calc(env(safe-area-inset-top,0px)+6rem)]">
+      {children}
+    </main>
   );
 }

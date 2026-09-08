@@ -12,6 +12,9 @@ const staticDest = path.join(standaloneDir, ".next", "static");
 const publicSrc = path.join(root, "public");
 const publicDest = path.join(standaloneDir, "public");
 
+// Never ship a database into the build output — it would be served from public/.
+const BLOCKED = /\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3)$/i;
+
 function copyRecursive(src, dest) {
   if (!fs.existsSync(src)) return;
   fs.mkdirSync(dest, { recursive: true });
@@ -19,7 +22,9 @@ function copyRecursive(src, dest) {
     const from = path.join(src, entry.name);
     const to = path.join(dest, entry.name);
     if (entry.isDirectory()) copyRecursive(from, to);
-    else fs.copyFileSync(from, to);
+    else if (BLOCKED.test(entry.name)) {
+      console.warn(`[jar] skipped database file in public/: ${entry.name}`);
+    } else fs.copyFileSync(from, to);
   }
 }
 

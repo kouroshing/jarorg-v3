@@ -15,7 +15,7 @@ import { isValidOtpCode, OTP_TTL_MS } from "@/lib/auth/otp";
 import { OtpInput } from "@/components/login/OtpInput";
 
 const inputClasses =
-  "w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-black placeholder:text-gray-400 outline-none transition-all duration-200 focus:border-transparent focus:ring-2 focus:ring-jar-yellow";
+  "w-full rounded-xl border border-[#E5E0D8] bg-white px-4 py-3 text-sm text-[#141413] placeholder:text-[#A8A29A] outline-none transition-all duration-200 focus:border-[#CC785C] focus:ring-1 focus:ring-[#CC785C]";
 
 const RESEND_SECONDS = OTP_TTL_MS / 1000;
 
@@ -82,7 +82,7 @@ function LoginForm() {
     setError(null);
 
     if (!isValidOtpCode(otp)) {
-      setError("کد تأیید ۵ رقمی را کامل وارد کنید.");
+      setError("کد تأیید ۴ رقمی را کامل وارد کنید.");
       return;
     }
 
@@ -104,16 +104,25 @@ function LoginForm() {
     <div className="mx-auto flex min-h-[70dvh] w-full max-w-sm flex-col justify-center">
       <div className="animate-fade-up">
         <div className="mb-8 text-center">
-          <span className="text-4xl font-extrabold tracking-tight text-jar-yellow">
+          <span className="text-4xl font-black tracking-tight text-[#141413]">
             جار
           </span>
-          <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-black">
-            ورود / ثبت‌نام
+          {redirectTo.startsWith("/order") && (
+            <div className="mt-3 flex justify-center">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#CC785C]/10 text-[#CC785C] border border-[#CC785C]/20">
+                فرم آنلاین ثبت و رزرو سفارش
+              </span>
+            </div>
+          )}
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-[#141413]">
+            {redirectTo.startsWith("/order") ? "ورود جهت ثبت سفارش" : "ورود / ثبت‌نام"}
           </h1>
-          <p className="mt-2 text-sm leading-relaxed text-gray-500">
+          <p className="mt-2 text-sm leading-relaxed text-[#66605B]">
             {step === "phone"
-              ? "شماره موبایل خود را وارد کنید تا کد تأیید برایتان پیامک شود."
-              : `کد ۵ رقمی ارسال‌شده به ${phone} را وارد کنید.`}
+              ? redirectTo.startsWith("/order")
+                ? "برای ورود به فرم رزرو، شماره همراه خود را وارد کنید تا کد تأیید پیامک شود."
+                : "شماره موبایل خود را وارد کنید تا کد تأیید برایتان پیامک شود."
+              : `کد ۴ رقمی ارسال‌شده به ${phone} را وارد کنید.`}
           </p>
         </div>
 
@@ -152,7 +161,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isPending || !isValidIranMobileLocal(phone)}
-              className="group flex w-full items-center justify-center gap-2 rounded-full bg-jar-yellow px-7 py-3 text-sm font-bold text-black shadow-glow transition-all duration-200 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group flex w-full items-center justify-center gap-2 rounded-full bg-[#141413] hover:bg-[#282725] px-7 py-3 text-sm font-medium text-white shadow-none transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
             >
               {isPending ? (
                 <>
@@ -186,7 +195,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isPending || !isValidOtpCode(otp)}
-              className="group flex w-full items-center justify-center gap-2 rounded-full bg-jar-yellow px-7 py-3 text-sm font-bold text-black shadow-glow transition-all duration-200 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group flex w-full items-center justify-center gap-2 rounded-full bg-[#141413] hover:bg-[#282725] px-7 py-3 text-sm font-medium text-white shadow-none transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
             >
               {isPending ? (
                 <>
@@ -201,11 +210,11 @@ function LoginForm() {
               )}
             </button>
 
-            <div className="flex flex-col items-center gap-2 text-center text-sm text-gray-500">
+            <div className="flex flex-col items-center gap-2 text-center text-sm text-[#66605B]">
               {resendIn > 0 ? (
                 <p>
                   ارسال مجدد کد تا{" "}
-                  <span className="font-semibold text-black" dir="ltr">
+                  <span className="font-semibold text-[#141413]" dir="ltr">
                     {formatTimer(resendIn)}
                   </span>
                 </p>
@@ -214,7 +223,7 @@ function LoginForm() {
                   type="button"
                   onClick={handleResend}
                   disabled={isPending}
-                  className="font-medium text-black underline-offset-4 transition hover:text-jar-yellow hover:underline disabled:opacity-40"
+                  className="font-medium text-[#141413] underline-offset-4 transition hover:text-[#CC785C] hover:underline disabled:opacity-40"
                 >
                   ارسال مجدد کد
                 </button>
@@ -224,7 +233,7 @@ function LoginForm() {
                 type="button"
                 onClick={goBackToPhone}
                 disabled={isPending}
-                className="flex items-center gap-1 text-xs text-gray-400 transition hover:text-gray-600"
+                className="flex items-center gap-1 text-xs text-[#66605B] transition hover:text-[#141413]"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
                 تغییر شماره موبایل

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">جار</string>
+    <string name="title_activity_main">جار</string>
+    <string name="package_name">ir.app.jarorg.online.novinappsaz</string>
+    <string name="custom_url_scheme">ir.app.jarorg.online.novinappsaz</string>
+</resources>

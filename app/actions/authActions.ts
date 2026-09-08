@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import {
@@ -13,21 +14,55 @@ import {
 import { otpCodesMatch } from "@/lib/auth/otp-compare";
 import { createSession, clearSession } from "@/lib/auth/session";
 import { dbRoleFromPhone, sessionRoleFromPhone } from "@/lib/auth/roles";
+import {
+  checkOtpSendRateLimit,
+  recordOtpSend,
+} from "@/lib/auth/otp-rate-limit";
 import { sendOtpSms } from "@/lib/sms/send-otp";
 
 export type AuthActionResult =
   | { success: true }
   | { success: false; error: string };
 
-async function establishSessionForPhone(phoneDigits: string): Promise<void> {
-  const dbRole = dbRoleFromPhone(phoneDigits);
+async function establishSessionForPhone(phoneDigits: string, defaultRole?: string, displayName?: string): Promise<void> {
+  // PRIORITY 2: Specialist registration is temporarily disabled
+  if (defaultRole === "SPECIALIST") {
+    throw new Error("ثبت‌نام عکاسان در حال حاضر امکان‌پذیر نیست.");
+  }
+
+  const dbRole = dbRoleFromPhone(phoneDigits); // ADMIN or USER based on phone
   const sessionRole = sessionRoleFromPhone(phoneDigits);
 
-  const user = await prisma.user.upsert({
-    where: { phone: phoneDigits },
-    create: { phone: phoneDigits, role: dbRole },
-    update: { role: dbRole },
-  });
+  // If user already exists, we shouldn't downgrade SPECIALIST to USER.
+  // We only upgrade to ADMIN if dbRole is ADMIN.
+  let user = await prisma.user.findUnique({ where: { phone: phoneDigits } });
+  
+  const createData: any = { phone: phoneDigits, role: defaultRole || dbRole };
+  if (displayName) createData.displayName = displayName;
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: createData
+    });
+  } else {
+    let updateData: any = {};
+    if (displayName && !user.displayName) updateData.displayName = displayName;
+    
+    // If it's an admin phone, enforce ADMIN. Otherwise, keep existing role (which might be SPECIALIST).
+    if (dbRole === "ADMIN" && user.role !== "ADMIN") {
+      updateData.role = "ADMIN";
+    } else if (defaultRole && user.role !== defaultRole && user.role !== "ADMIN") {
+      // If a specific default role is requested (like SPECIALIST) and user isn't admin
+      updateData.role = defaultRole;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      user = await prisma.user.update({
+        where: { phone: phoneDigits },
+        data: updateData
+      });
+    }
+  }
 
   await createSession({
     userId: user.id,
@@ -38,10 +73,12 @@ async function establishSessionForPhone(phoneDigits: string): Promise<void> {
 
 async function signInUser(
   phoneDigits: string,
-  redirectTo: string
+  redirectTo: string,
+  defaultRole?: string,
+  displayName?: string
 ): Promise<never> {
-  await establishSessionForPhone(phoneDigits);
-  redirect(redirectTo);
+  await establishSessionForPhone(phoneDigits, defaultRole, displayName);
+  redirect(encodeURI(redirectTo));
 }
 
 /**
@@ -54,6 +91,17 @@ export async function sendOtpCode(phone: string): Promise<AuthActionResult> {
     return { success: false, error: "شماره موبایل معتبر نیست." };
   }
 
+  const isDev = process.env.NODE_ENV === "development";
+  if (!isDev) {
+    const ipList = headers().get("x-forwarded-for");
+    const ip = ipList ? ipList.split(',')[0].trim() : headers().get("x-real-ip") || "unknown";
+    
+    const rateLimitError = await checkOtpSendRateLimit(resolved.phoneDigits, ip);
+    if (rateLimitError) {
+      return { success: false, error: rateLimitError };
+    }
+  }
+
   const code = generateOtpCode();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
@@ -64,8 +112,9 @@ export async function sendOtpCode(phone: string): Promise<AuthActionResult> {
         phone: resolved.phoneDigits,
         code,
         expiresAt,
+        attempts: 0,
       },
-      update: { code, expiresAt },
+      update: { code, expiresAt, attempts: 0 },
     });
   } catch {
     return {
@@ -76,6 +125,11 @@ export async function sendOtpCode(phone: string): Promise<AuthActionResult> {
 
   try {
     await sendOtpSms(resolved.localPhone, code);
+    
+    const ipList = headers().get("x-forwarded-for");
+    const ip = ipList ? ipList.split(',')[0].trim() : headers().get("x-real-ip") || "unknown";
+    await recordOtpSend(resolved.phoneDigits, ip);
+    
     return { success: true };
   } catch (error) {
     await prisma.verificationCode
@@ -95,16 +149,22 @@ export async function sendOtpCode(phone: string): Promise<AuthActionResult> {
 export async function verifyOtpCode(
   phone: string,
   code: string,
-  redirectTo = "/profile"
+  redirectTo = "/profile",
+  defaultRole?: string,
+  displayName?: string
 ): Promise<AuthActionResult> {
   const resolved = resolvePhoneForOtp(phone);
   if (!resolved.ok) {
     return { success: false, error: "شماره موبایل معتبر نیست." };
   }
 
+  if (defaultRole === "SPECIALIST") {
+    return { success: false, error: "ثبت‌نام عکاسان در حال حاضر امکان‌پذیر نیست." };
+  }
+
   const otp = sanitizeOtpInput(code);
   if (!isValidOtpCode(otp)) {
-    return { success: false, error: "کد تأیید باید ۵ رقم باشد." };
+    return { success: false, error: "کد تأیید باید ۴ رقم باشد." };
   }
 
   try {
@@ -122,15 +182,44 @@ export async function verifyOtpCode(
     if (record.expiresAt.getTime() < Date.now()) {
       await prisma.verificationCode.delete({
         where: { phone: resolved.phoneDigits },
-      });
+      }).catch(() => {});
       return {
         success: false,
         error: "کد تأیید منقضی شده است. لطفاً کد جدید دریافت کنید.",
       };
     }
 
+    if (record.attempts >= 5) {
+      await prisma.verificationCode.delete({
+        where: { phone: resolved.phoneDigits },
+      }).catch(() => {});
+      return {
+        success: false,
+        error: "تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفاً کد جدید دریافت کنید.",
+      };
+    }
+
     if (!otpCodesMatch(record.code, otp)) {
-      return { success: false, error: "کد تأیید اشتباه است." };
+      const newAttempts = record.attempts + 1;
+      if (newAttempts >= 5) {
+        await prisma.verificationCode.delete({
+          where: { phone: resolved.phoneDigits },
+        }).catch(() => {});
+        return {
+          success: false,
+          error: "تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفاً کد جدید دریافت کنید.",
+        };
+      } else {
+        await prisma.verificationCode.update({
+          where: { phone: resolved.phoneDigits },
+          data: { attempts: newAttempts },
+        });
+        const remaining = 5 - newAttempts;
+        return {
+          success: false,
+          error: `کد تأیید اشتباه است. ${remaining} تلاش باقی‌مانده است.`,
+        };
+      }
     }
 
     await prisma.verificationCode.delete({
@@ -144,9 +233,12 @@ export async function verifyOtpCode(
   }
 
   try {
-    await signInUser(resolved.phoneDigits, redirectTo);
-  } catch (e) {
+    await signInUser(resolved.phoneDigits, redirectTo, defaultRole, displayName);
+  } catch (e: any) {
     if (isRedirectError(e)) throw e;
+    console.error("❌ CRITICAL DB ERROR ON OTP VERIFY (signInUser):");
+    console.error(e?.message || e);
+    console.error(JSON.stringify(e, null, 2));
     return {
       success: false,
       error: "ورود ناموفق بود. اتصال دیتابیس را بررسی کنید.",
@@ -170,7 +262,7 @@ export async function verifyOtpCodeInline(
 
   const otp = sanitizeOtpInput(code);
   if (!isValidOtpCode(otp)) {
-    return { success: false, error: "کد تأیید باید ۵ رقم باشد." };
+    return { success: false, error: "کد تأیید باید ۴ رقم باشد." };
   }
 
   try {
@@ -188,15 +280,44 @@ export async function verifyOtpCodeInline(
     if (record.expiresAt.getTime() < Date.now()) {
       await prisma.verificationCode.delete({
         where: { phone: resolved.phoneDigits },
-      });
+      }).catch(() => {});
       return {
         success: false,
         error: "کد تأیید منقضی شده است. لطفاً کد جدید دریافت کنید.",
       };
     }
 
+    if (record.attempts >= 5) {
+      await prisma.verificationCode.delete({
+        where: { phone: resolved.phoneDigits },
+      }).catch(() => {});
+      return {
+        success: false,
+        error: "تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفاً کد جدید دریافت کنید.",
+      };
+    }
+
     if (!otpCodesMatch(record.code, otp)) {
-      return { success: false, error: "کد تأیید اشتباه است." };
+      const newAttempts = record.attempts + 1;
+      if (newAttempts >= 5) {
+        await prisma.verificationCode.delete({
+          where: { phone: resolved.phoneDigits },
+        }).catch(() => {});
+        return {
+          success: false,
+          error: "تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفاً کد جدید دریافت کنید.",
+        };
+      } else {
+        await prisma.verificationCode.update({
+          where: { phone: resolved.phoneDigits },
+          data: { attempts: newAttempts },
+        });
+        const remaining = 5 - newAttempts;
+        return {
+          success: false,
+          error: `کد تأیید اشتباه است. ${remaining} تلاش باقی‌مانده است.`,
+        };
+      }
     }
 
     await prisma.verificationCode.delete({
@@ -211,7 +332,10 @@ export async function verifyOtpCodeInline(
 
   try {
     await establishSessionForPhone(resolved.phoneDigits);
-  } catch {
+  } catch (e: any) {
+    console.error("❌ CRITICAL DB ERROR ON OTP VERIFY INLINE (establishSession):");
+    console.error(e?.message || e);
+    console.error(JSON.stringify(e, null, 2));
     return {
       success: false,
       error: "ورود ناموفق بود. اتصال دیتابیس را بررسی کنید.",

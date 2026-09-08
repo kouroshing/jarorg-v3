@@ -4,7 +4,7 @@ import { useRef, type KeyboardEvent, type ClipboardEvent } from "react";
 import { sanitizeOtpInput, OTP_LENGTH } from "@/lib/auth/otp";
 
 const boxClasses =
-  "h-12 w-10 rounded-xl border border-gray-200 bg-gray-50 text-center text-lg font-bold text-black outline-none transition-all duration-200 focus:border-transparent focus:ring-2 focus:ring-jar-yellow sm:h-14 sm:w-11";
+  "h-12 w-10 rounded-xl border border-[#E5E0D8] bg-white text-center text-lg font-bold text-[#141413] outline-none transition-all duration-200 focus:border-[#CC785C] focus:ring-1 focus:ring-[#CC785C] sm:h-14 sm:w-11";
 
 type OtpInputProps = {
   value: string;
@@ -77,7 +77,7 @@ export function OtpInput({
       className="flex justify-center gap-2"
       dir="ltr"
       role="group"
-      aria-label="کد تأیید ۵ رقمی"
+      aria-label="کد تأیید ۴ رقمی"
     >
       {Array.from({ length: OTP_LENGTH }).map((_, index) => (
         <input
@@ -87,7 +87,7 @@ export function OtpInput({
           }}
           type="text"
           inputMode="numeric"
-          autoComplete={index === 0 ? "one-time-code" : "off"}
+          autoComplete="one-time-code"
           maxLength={OTP_LENGTH}
           disabled={disabled}
           autoFocus={autoFocus && index === 0}

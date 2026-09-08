@@ -26,14 +26,37 @@ yarn-error.log*
 .env*.local
 .env
 
-# sqlite (local dev)
-prisma/*.db
-prisma/*.db-journal
+# sqlite database — lives on the persistent disk (/app/data), never in git
+# and never under public/, which is served to anyone.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+/data/
+
+# android signing key and env dumps — must never be committed
+signing.keystore
+*.keystore
+envs.txt
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
-# uploaded expert avatars (keep directory via .gitkeep)
-/public/uploads/experts/*
-!/public/uploads/experts/.gitkeep
+# user uploads — runtime data on the Liara `uploads` persistent disk, not source.
+# Keep the directory skeleton via .gitkeep so fresh clones have the paths.
+/public/uploads/*
+!/public/uploads/*/
+/public/uploads/*/*
+!/public/uploads/**/.gitkeep
+
+# local browser profile used for debugging (80 MB)
+/.chrome-user-data/
+
+# build output and one-off archives
+*.log
+!npm-debug.log*
+/project.zip
+*.zip

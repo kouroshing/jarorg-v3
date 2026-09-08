@@ -1,13 +1,6 @@
 /**
- * cPanel "Setup Node.js App" — Application startup file.
- *
- * Point cPanel to this file as the entry point, then set environment variables:
- *   PORT (usually assigned by cPanel), DATABASE_URL, AUTH_SECRET
- *
- * Before first start on the server:
- *   1. npm ci
- *   2. npm run build          → creates .next/standalone + copies static assets
- *   3. npx prisma db push     → creates MySQL tables
+ * Optional standalone entry (cPanel / manual deploy).
+ * Liara uses `npm start` → `next start` — see README.md.
  */
 
 const path = require("path");

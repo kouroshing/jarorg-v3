@@ -21,22 +21,23 @@ export function BrandLogo({
   const isFooter = variant === "footer";
 
   const mark = (
-    <Image
-      src={LOGO_SRC}
-      alt={LOGO_ALT}
-      width={isFooter ? 52 : 32}
-      height={isFooter ? 40 : 28}
-      priority={variant === "header" && !isFooter}
-      className={`shrink-0 object-contain ${
-        isFooter ? "h-10 w-auto opacity-80 grayscale" : "h-7 w-auto md:h-8"
-      } ${className}`.trim()}
-    />
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 701 701"
+      preserveAspectRatio="xMidYMid meet"
+      className={`shrink-0 fill-current h-8 w-auto text-jar-logo ${className}`.trim()}
+      aria-label={LOGO_ALT}
+      role="img"
+    >
+      <path d="M1548,1006a77.61,77.61,0,0,1-14.12,44.76h0A78,78,0,1,1,1548,1006Z" transform="translate(-847.5 -900.5)"/>
+      <path d="M1548.5,1182.5v187.64c0,127.78-103.58,231.36-231.36,231.36H1078.86c-127.78,0-231.36-103.58-231.36-231.36V1131.86c0-127.78,103.58-231.36,231.36-231.36H1272v132H1077.36a99.86,99.86,0,0,0-99.86,99.86v236.28a99.86,99.86,0,0,0,99.86,99.86h236.28a99.86,99.86,0,0,0,99.86-99.86V1182.5Z" transform="translate(-847.5 -900.5)"/>
+    </svg>
   );
 
   const content = showWordmark ? (
     <span className="inline-flex items-center gap-2">
       {mark}
-      <span className="text-base font-extrabold tracking-tight text-black md:text-lg">
+      <span className={`text-sm sm:text-base font-black tracking-tight ${isFooter ? "text-white" : "text-jar-primary"}`}>
         جار
       </span>
     </span>
@@ -58,3 +59,5 @@ export function BrandLogo({
     </Link>
   );
 }
+
+export default BrandLogo;

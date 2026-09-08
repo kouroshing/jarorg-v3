@@ -27,7 +27,7 @@ export async function checkProjectSubmissionRateLimit(
   });
 
   if (tooSoon) {
-    return "لطفاً چند لحظه صبر کنید و دوباره تلاش نکنید.";
+    return "لطفاً چند لحظه صبر کنید و دوباره تلاش کنید.";
   }
 
   const count = await prisma.project.count({

@@ -4,23 +4,41 @@ module.exports = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./node_modules/@premieroctet/next-admin/dist/**/*.{js,ts,jsx,tsx,mjs}",
+    "./node_modules/@tremor/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: "class",
+  presets: [require("@premieroctet/next-admin/preset")],
   theme: {
     extend: {
       colors: {
-        // Reusable "Jar" brand palette (light minimalist theme).
+        // Reusable "Jar" brand palette (Anthropic / Claude editorial theme).
         jar: {
-          // Premium vibrant gold-yellow accent — the single brand color.
-          yellow: "#FACC15",
+          logo: '#CC785C',        // نارنجی سفالی نشان
+          canvas: '#FAF9F5',      // پس‌زمینه کاغذ گرم
+          surface: '#FFFFFF',     // پنل‌ها و کارت‌ها
+          primary: '#141413',     // مشکی خالص دکمه‌های اصلی و متون
+          primaryHover: '#282725',
+          border: '#E5E0D8',      // خطوط و بردرها
+          muted: '#66605B',       // متن‌های ثانویه و توضیحات
+          soft: '#F3F1EC',        // بک‌گراند هاور و غیرفعال
+          yellow: '#FACC15',
         },
       },
       fontFamily: {
-        // Vazirmatn (loaded via next/font) with clean sans-serif fallbacks.
-        sans: ["var(--font-vazirmatn)", "system-ui", "sans-serif"],
+        sans: ["Vazirmatn", "var(--font-vazirmatn)", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
       },
       boxShadow: {
         // Soft yellow glow used by the central "Create" action.
         glow: "0 8px 30px -6px rgba(250, 204, 21, 0.45)",
+        xs: "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+        "2xs": "0 1px 1px 0 rgba(0, 0, 0, 0.03)",
+      },
+      spacing: {
+        7.5: "1.875rem",
+        8.5: "2.125rem",
+        13: "3.25rem",
+        15: "3.75rem",
       },
       backdropBlur: {
         xs: "2px",
@@ -34,10 +52,20 @@ module.exports = {
           "0%": { opacity: "0", transform: "translateY(8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "fade-in": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "slide-up": {
+          "0%": { transform: "translateY(100%)" },
+          "100%": { transform: "translateY(0)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-step": "fade-step 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "fade-in": "fade-in 0.35s ease-out forwards",
+        "slide-up": "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards",
       },
     },
   },

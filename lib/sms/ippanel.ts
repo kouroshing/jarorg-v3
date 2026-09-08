@@ -1,7 +1,7 @@
 import { normalizePhoneDigits } from "@/lib/auth/phone";
 
 const IPPANEL_PATTERN_SEND_URL =
-  "https://api2.ippanel.com/api/v1/sms/pattern/normal/send";
+  "http://rest.ippanel.com/v1/messages/patterns/send";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -26,7 +26,7 @@ export function formatIppanelRecipient(phone: string): string {
 /** Extracts human-readable error text from IPPanel JSON (data.message, message, meta.message). */
 export function extractIppanelErrorMessage(payload: unknown): string {
   if (!payload || typeof payload !== "object") {
-    return "خطای نامشخص از سرور پیامک";
+    return "پاسخ نامعتبر یا خالی از سرور پیامک";
   }
 
   const root = payload as Record<string, unknown>;
@@ -51,7 +51,8 @@ export function extractIppanelErrorMessage(payload: unknown): string {
     }
   }
 
-  return "خطای نامشخص از سرور پیامک";
+  // If no standard error message is found, return the stringified payload
+  return JSON.stringify(payload);
 }
 
 /**
@@ -62,51 +63,108 @@ export function extractIppanelErrorMessage(payload: unknown): string {
 export async function sendSmsByPattern(
   params: SendSmsByPatternParams
 ): Promise<SendSmsByPatternSuccess> {
-  const apiKey = process.env.IPPANEL_API_KEY?.trim();
-  const sender = process.env.IPPANEL_SENDER_NUMBER?.trim();
+  const envKey = process.env.IPPANEL_API_KEY?.trim();
+  const rawKey = (envKey && envKey !== "" && envKey !== "undefined" && envKey !== "null")
+    ? envKey
+    : "YTFlYmRjNzAtZTE2MC00YzhmLTkwNjItNmE2OGFmZjhmMDVhNzY3MjIxY2NjNGNlOTFlZDAwZDIzMWFhNzkzOWU5M2M=";
 
-  if (!apiKey || !sender) {
-    throw new Error("تنظیمات IPPanel (API Key یا شماره فرستنده) کامل نیست.");
-  }
+  const authHeaderValue = rawKey.startsWith("AccessKey") ? rawKey : `AccessKey ${rawKey}`;
+
+  const envSender = process.env.IPPANEL_SENDER_NUMBER?.trim();
+  const sender = (envSender && envSender !== "" && envSender !== "undefined" && envSender !== "null")
+    ? envSender
+    : "+983000505";
 
   if (!params.patternCode?.trim()) {
     throw new Error("کد پترن پیامک تنظیم نشده است.");
   }
 
-  const body = {
-    code: params.patternCode.trim(),
-    sender,
-    recipient: formatIppanelRecipient(params.recipient),
-    variable: params.patternValues,
-  };
+  const recipientFormatted = formatIppanelRecipient(params.recipient);
 
-  try {
-    const response = await fetch(IPPANEL_PATTERN_SEND_URL, {
-      method: "POST",
+  const endpoints = [
+    {
+      url: "http://rest.ippanel.com/v1/messages/patterns/send",
+      body: {
+        pattern_code: params.patternCode.trim(),
+        originator: sender,
+        recipient: recipientFormatted,
+        values: params.patternValues,
+      },
       headers: {
         "Content-Type": "application/json",
-        apikey: apiKey,
+        "Authorization": authHeaderValue,
+        "apikey": rawKey,
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    },
+    {
+      url: "https://rest.ippanel.com/v1/messages/patterns/send",
+      body: {
+        pattern_code: params.patternCode.trim(),
+        originator: sender,
+        recipient: recipientFormatted,
+        values: params.patternValues,
+      },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeaderValue,
+        "apikey": rawKey,
+      },
+    },
+    {
+      url: "https://edge.ippanel.com/v1/messages/patterns/send",
+      body: {
+        pattern_code: params.patternCode.trim(),
+        originator: sender,
+        recipient: recipientFormatted,
+        values: params.patternValues,
+      },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeaderValue,
+        "apikey": rawKey,
+      },
+    },
+  ];
 
-    const payload: unknown = await response.json().catch(() => null);
+  let lastError: any = null;
 
-    if (!response.ok) {
-      throw new Error(extractIppanelErrorMessage(payload));
+  for (const ep of endpoints) {
+    try {
+      const response = await fetch(ep.url, {
+        method: "POST",
+        headers: ep.headers,
+        body: JSON.stringify(ep.body),
+        signal: AbortSignal.timeout(8000),
+      });
+
+      const payload: unknown = await response.json().catch(() => null);
+
+      if (response.ok && payload) {
+        return { messageId: getMessageId(payload) };
+      }
+
+      console.warn(`[IPPanel Retry Warning] Endpoint ${ep.url} returned status ${response.status}:`, payload);
+      lastError = new Error(extractIppanelErrorMessage(payload));
+    } catch (err: any) {
+      console.warn(`[IPPanel Retry Warning] Endpoint ${ep.url} failed with error:`, err?.message || err);
+      lastError = err;
     }
-
-    return { messageId: getMessageId(payload) };
-  } catch (err) {
-    if (err instanceof Error) throw err;
-    throw new Error("خطای نامشخص از سرور پیامک");
   }
+
+  console.error("[IPPanel SMS API Final Error] All endpoints failed. Details:", lastError);
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("خطا در ارسال پیامک از طریق درگاه‌های پیامک.");
 }
 
 function getMessageId(payload: unknown): number | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const data = (payload as { data?: { message_id?: unknown } }).data;
   const id = data?.message_id;
-  return typeof id === "number" ? id : undefined;
+  if (typeof id === "number") return id;
+  if (typeof id === "string") {
+    const parsed = parseInt(id, 10);
+    return isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
 }

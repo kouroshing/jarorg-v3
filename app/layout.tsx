@@ -1,59 +1,172 @@
 import type { Metadata, Viewport } from "next";
-import { Vazirmatn } from "next/font/google";
+import Script from "next/script";
+import { headers } from "next/headers";
+import "@fontsource/vazirmatn/index.css";
+import "@fontsource/vazirmatn/300.css";
+import "@fontsource/vazirmatn/400.css";
+import "@fontsource/vazirmatn/500.css";
+import "@fontsource/vazirmatn/600.css";
+import "@fontsource/vazirmatn/700.css";
+import "@fontsource/vazirmatn/800.css";
+import "@fontsource/vazirmatn/900.css";
 import "./globals.css";
+import "leaflet/dist/leaflet.css";
 import { NavbarWrapper } from "@/components/NavbarWrapper";
+import { MainLayout } from "@/components/Navbar";
+import IosInstallPrompt from "@/components/IosInstallPrompt";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import { getPwaSettings } from "@/app/actions/pwaActions";
+import ReactGrab from "@/components/ReactGrab";
 
-// Vazirmatn: crisp Persian + Latin glyphs, exposed as a CSS variable so
-// Tailwind's `font-sans` token can reference it.
-const vazirmatn = Vazirmatn({
-  subsets: ["arabic", "latin"],
-  variable: "--font-vazirmatn",
-  display: "swap",
-});
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/['"]/g, "")?.replace(/\/$/, "") || "https://jarorg.ir";
 
-export const metadata: Metadata = {
-  title: "جار | پلتفرم رزرو خدمات بصری",
-  description: "ثبت سفارش عکاسی، فیلم‌برداری و خدمات بصری",
-  applicationName: "جار",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: {
-    capable: true,
-    title: "جار",
-    statusBarStyle: "default",
-  },
-  icons: {
-    apple: "/app-icon.png",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const headersList = headers();
+  const host = (headersList.get("x-forwarded-host") || headersList.get("host") || "").toLowerCase();
+  const referer = (headersList.get("referer") || "").toLowerCase();
 
-// Viewport + PWA / iOS Add to Home Screen. `viewportFit: cover` enables safe-area insets.
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: "cover",
-  themeColor: "#ffffff",
-};
+  const isJaramooz = host.includes("jaramooz.ir") || referer.includes("/jaramooz");
 
-export default function RootLayout({
+  if (isJaramooz) {
+    return {
+      metadataBase: new URL(siteUrl),
+      title: {
+        default: "جار آموز | آموزش تخصصی عکاسی و فیلمبرداری",
+        template: "%s | جار آموز",
+      },
+      description: "پلتفرم آموزشی تخصصی عکاسی، فیلم‌برداری و خدمات بصری",
+      applicationName: "جار آموز",
+      manifest: "/manifest.webmanifest",
+      icons: {
+        icon: [
+          { url: "/appstore-images-jaramooz/android/launchericon-192x192.png", sizes: "192x192", type: "image/png" },
+          { url: "/appstore-images-jaramooz/android/launchericon-512x512.png", sizes: "512x512", type: "image/png" },
+        ],
+        apple: [
+          { url: "/appstore-images-jaramooz/ios/180.png", sizes: "180x180", type: "image/png" },
+          { url: "/appstore-images-jaramooz/ios/152.png", sizes: "152x152", type: "image/png" },
+          { url: "/appstore-images-jaramooz/ios/120.png", sizes: "120x120", type: "image/png" },
+        ],
+      },
+      robots: {
+        index: true,
+        follow: true,
+        googleBot: {
+          index: true,
+          follow: true,
+          "max-video-preview": -1,
+          "max-image-preview": "large",
+          "max-snippet": -1,
+        },
+      },
+      other: {
+        google: "notranslate",
+      },
+    };
+  }
+
+  return {
+    metadataBase: new URL(siteUrl),
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        "max-video-preview": -1,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+      },
+    },
+    title: {
+      default: "جار | پلتفرم رزرو خدمات بصری",
+      template: "%s | جار",
+    },
+    description: "ثبت سفارش عکاسی, فیلم‌برداری و خدمات بصری",
+    applicationName: "جار",
+    manifest: "/manifest.webmanifest",
+    openGraph: {
+      type: "website",
+      locale: "fa_IR",
+      url: siteUrl,
+      siteName: "جار",
+      title: "جار | پلتفرم رزرو خدمات بصری",
+      description: "ثبت سفارش عکاسی, فیلم‌برداری و خدمات بصری",
+      images: [{ url: "/app-icon.png", width: 512, height: 512, alt: "جار" }],
+    },
+    twitter: {
+      card: "summary",
+      title: "جار | پلتفرم رزرو خدمات بصری",
+      description: "ثبت سفارش عکاسی, فیلم‌برداری و خدمات بصری",
+      images: ["/app-icon.png"],
+    },
+    appleWebApp: {
+      capable: true,
+      title: "جار",
+      statusBarStyle: "default",
+    },
+    icons: {
+      icon: [
+        { url: "/android/launchericon-192x192.png", sizes: "192x192", type: "image/png" },
+        { url: "/android/launchericon-512x512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: [
+        { url: "/ios/180.png", sizes: "180x180", type: "image/png" },
+        { url: "/ios/152.png", sizes: "152x152", type: "image/png" },
+        { url: "/ios/120.png", sizes: "120x120", type: "image/png" },
+      ],
+    },
+    other: {
+      google: "notranslate",
+    },
+  };
+}
+
+export async function generateViewport(): Promise<Viewport> {
+  const headersList = headers();
+  const host = (headersList.get("x-forwarded-host") || headersList.get("host") || "").toLowerCase();
+  const referer = (headersList.get("referer") || "").toLowerCase();
+
+  const isJaramooz = host.includes("jaramooz.ir") || referer.includes("/jaramooz");
+
+  return {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+    themeColor: isJaramooz ? "#006097" : "#CC785C",
+  };
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const pwaRes = await getPwaSettings().catch(() => ({ success: false, data: null }));
+  const showIosPrompt = pwaRes.success && pwaRes.data ? pwaRes.data.showIosPrompt : true;
+
   return (
-    // RTL + Persian as the base direction/language for native mirroring.
-    <html lang="fa" dir="rtl" className={vazirmatn.variable}>
-      <body className="min-h-dvh bg-white font-sans">
+    <html lang="fa" dir="rtl" translate="no" className="notranslate" suppressHydrationWarning>
+      <head>
+        {process.env.NODE_ENV === "development" && (
+          <Script
+            src="/react-grab.js"
+            crossOrigin="anonymous"
+            strategy="beforeInteractive"
+          />
+        )}
+      </head>
+      <body className="min-h-dvh bg-jar-canvas font-sans antialiased text-jar-primary">
+        {process.env.NODE_ENV === "development" && <ReactGrab />}
         <NavbarWrapper />
 
-        {/*
-          Top: safe-area + pt-20 / md:pt-24 clearance for fixed header.
-          Bottom: mobile app bar clearance; md resets to normal padding.
-        */}
-        <main className="mx-auto w-full max-w-5xl px-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] pt-[calc(env(safe-area-inset-top,0px)+5rem)] md:px-8 md:pb-12 md:pt-[calc(env(safe-area-inset-top,0px)+6rem)]">
+        <MainLayout>
           {children}
-        </main>
+        </MainLayout>
+
+        <IosInstallPrompt showPrompt={showIosPrompt} />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

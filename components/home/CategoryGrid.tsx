@@ -1,16 +1,24 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { HOME_CATEGORIES } from "@/lib/home/mock-data";
 
 export function CategoryGrid() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <section
       id="services"
       className="border-t border-gray-100 py-16 sm:py-24"
       aria-labelledby="categories-heading"
     >
-      <div className="mx-auto max-w-5xl px-5 sm:px-8">
+      <div className="mx-auto max-w-[1360px] px-4 sm:px-8">
         <div className="mb-10 flex items-end justify-between gap-4 sm:mb-12">
           <div className="text-right">
             <h2
@@ -24,7 +32,7 @@ export function CategoryGrid() {
             </p>
           </div>
           <Link
-            href="/create-project"
+            href="/order"
             className="hidden shrink-0 items-center gap-1 text-sm font-semibold text-gray-600 transition-colors hover:text-black sm:inline-flex"
           >
             همه خدمات
@@ -36,11 +44,11 @@ export function CategoryGrid() {
           {HOME_CATEGORIES.map((cat, index) => (
             <Link
               key={cat.id}
-              href={cat.href}
+              href="/order"
               className={`group relative overflow-hidden rounded-3xl border border-gray-100 bg-white transition-all duration-500 ease-out hover:border-gray-200 hover:shadow-lg ${cat.className}`}
               style={{ animationDelay: `${index * 60}ms` }}
             >
-              {cat.imageUrl ? (
+              {mounted && cat.imageUrl ? (
                 <Image
                   src={cat.imageUrl}
                   alt=""

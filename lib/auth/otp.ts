@@ -5,12 +5,12 @@ import {
   toEnglishDigits,
 } from "@/lib/auth/phone";
 
-export const OTP_LENGTH = 5;
+export const OTP_LENGTH = 4;
 export const OTP_TTL_MS = 2 * 60 * 1000;
 
 /** Cryptographically weak but sufficient for short-lived SMS OTP. */
 export function generateOtpCode(): string {
-  const n = Math.floor(10000 + Math.random() * 90000);
+  const n = Math.floor(1000 + Math.random() * 9000);
   return String(n);
 }
 

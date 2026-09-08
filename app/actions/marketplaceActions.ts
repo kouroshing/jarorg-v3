@@ -1,0 +1,1042 @@
+"use server";
+
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/auth/session";
+import { revalidatePath } from "next/cache";
+import { createNotification } from "@/lib/notifications";
+
+// -------------------------------------------------------------
+// Validation Schemas
+// -------------------------------------------------------------
+
+const orderIdSchema = z.string().uuid("شناسه سفارش نامعتبر است.");
+
+const interestIdSchema = z.string().uuid("شناسه پیشنهاد نامعتبر است.");
+
+const selectSpecialistSchema = z.object({
+  orderId: z.string().uuid("شناسه سفارش نامعتبر است."),
+  interestId: z.string().uuid("شناسه متقاضی نامعتبر است."),
+});
+
+const submitInterestSchema = z.object({
+  orderId: z.string().uuid("شناسه سفارش نامعتبر است."),
+  message: z
+    .string()
+    .trim()
+    .min(5, "متن پیام معرفی باید حداقل ۵ کاراکتر باشد.")
+    .max(1000, "متن پیام نمی‌تواند بیشتر از ۱۰۰۰ کاراکتر باشد."),
+  proposedPrice: z
+    .number()
+    .int("مبلغ پیشنهادی باید عدد صحیح باشد.")
+    .positive("مبلغ پیشنهادی باید بیشتر از صفر باشد.")
+    .optional()
+    .nullable(),
+});
+
+export type SubmitProjectInterestInput = z.infer<typeof submitInterestSchema>;
+
+// -------------------------------------------------------------
+// Specialist Authorization & Eligibility Engine
+export type { SpecialistEligibilityResult, SpecialistStatus } from "@/lib/auth/specialistAuth";
+import { getAuthorizedSpecialist } from "@/lib/auth/specialistAuth";
+
+export interface AvailableOrderSpecialistView {
+  id: string;
+  categorySlug: string;
+  categoryTitle: string;
+  isFlexibleSchedule: boolean;
+  bookingDate: string | null;
+  timeSlot: string | null;
+  durationHours: number;
+  locationType: string;
+  districtOrCity: string | null;
+  referenceLink: string | null;
+  moodboardUrls: string[];
+  projectDescription: string | null;
+  isAutoPriced: boolean;
+  hourlyRate: number;
+  totalEstimatedPrice: number;
+  depositAmount: number;
+  status: string;
+  selectedSpecialistId: string | null;
+  createdAt: string;
+  interestsCount: number;
+  hasApplied: boolean;
+  myInterest: {
+    id: string;
+    status: string; // PENDING, WITHDRAWN, SELECTED, ACCEPTED, DECLINED, REJECTED, CANCELLED
+    message: string | null;
+    proposedPrice: number | null;
+    createdAt: string;
+  } | null;
+}
+
+export interface ApplicantSpecialistView {
+  id: string;
+  specialistId: string;
+  status: string;
+  message: string | null;
+  proposedPrice: number | null;
+  createdAt: string;
+  specialist: {
+    id: string;
+    displayName: string;
+    city: string;
+    equipment: string | null;
+    hasStudio: boolean;
+    isBlueTick: boolean;
+    portfolioItems: {
+      id: string;
+      fileUrl: string;
+      mediaType: string;
+      title: string | null;
+    }[];
+  };
+}
+
+// -------------------------------------------------------------
+// 1. Get Available Orders for Specialist Feed
+// -------------------------------------------------------------
+export async function getAvailableOrdersForSpecialistAction(): Promise<{
+  success: boolean;
+  error?: string;
+  redirectTo?: string;
+  orders?: AvailableOrderSpecialistView[];
+}> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    // Specialist Authorization Guard
+    const authCheck = await getAuthorizedSpecialist(session.userId);
+    if (!authCheck.isSpecialist) {
+      return {
+        success: false,
+        error: authCheck.error,
+        redirectTo: authCheck.redirectTo,
+      };
+    }
+
+    // Orders that are open for proposals OR where this specialist is selected/has applied
+    const orders = await prisma.order.findMany({
+      where: {
+        OR: [
+          {
+            status: { in: ["DEPOSIT_PAID", "HAS_APPLICANTS", "MATCHING"] },
+            NOT: {
+              OR: [
+                { userId: session.userId },
+                ...(session.phone ? [{ contactPhone: session.phone }] : []),
+              ],
+            },
+          },
+          {
+            selectedSpecialistId: session.userId,
+          },
+          {
+            interests: {
+              some: { specialistId: session.userId },
+            },
+          },
+        ],
+      },
+      include: {
+        interests: {
+          where: { specialistId: session.userId },
+          select: {
+            id: true,
+            status: true,
+            message: true,
+            proposedPrice: true,
+            createdAt: true,
+          },
+        },
+        _count: {
+          select: {
+            interests: {
+              where: { status: { in: ["PENDING", "SELECTED", "ACCEPTED"] } },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const mapped: AvailableOrderSpecialistView[] = orders.map((o) => {
+      const myInterest = o.interests[0] || null;
+      let moodboardList: string[] = [];
+      try {
+        if (o.moodboardUrls) {
+          moodboardList = JSON.parse(o.moodboardUrls);
+        }
+      } catch {
+        moodboardList = [];
+      }
+
+      // Considered applied if an active (non-withdrawn, non-declined) interest exists
+      const hasApplied = !!(
+        myInterest &&
+        myInterest.status !== "WITHDRAWN" &&
+        myInterest.status !== "DECLINED"
+      );
+
+      return {
+        id: o.id,
+        categorySlug: o.categorySlug,
+        categoryTitle: o.categoryTitle || o.categorySlug,
+        isFlexibleSchedule: o.isFlexibleSchedule,
+        bookingDate: o.bookingDate,
+        timeSlot: o.timeSlot,
+        durationHours: o.durationHours,
+        locationType: o.locationType,
+        districtOrCity: o.districtOrCity,
+        referenceLink: o.referenceLink,
+        moodboardUrls: moodboardList,
+        projectDescription: o.projectDescription,
+        isAutoPriced: o.isAutoPriced,
+        hourlyRate: o.hourlyRate,
+        totalEstimatedPrice: o.totalEstimatedPrice,
+        depositAmount: o.depositAmount,
+        status: o.status,
+        selectedSpecialistId: o.selectedSpecialistId,
+        createdAt: o.createdAt.toISOString(),
+        interestsCount: o._count.interests,
+        hasApplied,
+        myInterest: myInterest
+          ? {
+              id: myInterest.id,
+              status: myInterest.status,
+              message: myInterest.message,
+              proposedPrice: myInterest.proposedPrice,
+              createdAt: myInterest.createdAt.toISOString(),
+            }
+          : null,
+      };
+    });
+
+    return { success: true, orders: mapped };
+  } catch (error: any) {
+    console.error("Error in getAvailableOrdersForSpecialistAction:", error);
+    return { success: false, error: "خطا در دریافت لیست پروژه‌های فعال." };
+  }
+}
+
+// -------------------------------------------------------------
+// 2. Submit Project Interest / Proposal
+// -------------------------------------------------------------
+export async function submitProjectInterestAction(
+  rawInput: SubmitProjectInterestInput
+): Promise<{ success: boolean; error?: string; redirectTo?: string; interestId?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsed = submitInterestSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      const firstErr = parsed.error.issues[0]?.message || "اطلاعات وارد شده نامعتبر است.";
+      return { success: false, error: firstErr };
+    }
+
+    // Specialist Authorization Guard
+    const authCheck = await getAuthorizedSpecialist(session.userId);
+    if (!authCheck.isSpecialist) {
+      return {
+        success: false,
+        error: authCheck.error,
+        redirectTo: authCheck.redirectTo,
+      };
+    }
+
+    const { orderId, message, proposedPrice } = parsed.data;
+
+    // Verify order exists and is accepting applications
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, userId: true, status: true, contactPhone: true, categoryTitle: true },
+    });
+
+    if (!order) {
+      return { success: false, error: "سفارش موردنظر یافت نشد." };
+    }
+
+    if (
+      order.status !== "DEPOSIT_PAID" &&
+      order.status !== "HAS_APPLICANTS" &&
+      order.status !== "MATCHING"
+    ) {
+      return {
+        success: false,
+        error: "این پروژه در حال حاضر امکان پذیرش متقاضی جدید ندارد.",
+      };
+    }
+
+    if (order.userId === session.userId || (order.contactPhone && order.contactPhone === session.phone)) {
+      return { success: false, error: "شما نمی‌توانید برای سفارش ثبت‌شده توسط خودتان پیشنهاد ارسال کنید." };
+    }
+
+    // Check existing interest record
+    const existing = await prisma.projectInterest.findUnique({
+      where: {
+        orderId_specialistId: {
+          orderId,
+          specialistId: session.userId,
+        },
+      },
+    });
+
+    if (existing) {
+      if (existing.status === "PENDING" || existing.status === "SELECTED" || existing.status === "ACCEPTED") {
+        return { success: false, error: "شما قبلاً برای این پروژه اعلام آمادگی ثبت کرده‌اید." };
+      }
+    }
+
+    // Atomic creation / update and status transition using transaction
+    const result = await prisma.$transaction(async (tx) => {
+      let interest;
+      if (existing) {
+        // Re-activate previously withdrawn or declined proposal
+        interest = await tx.projectInterest.update({
+          where: { id: existing.id },
+          data: {
+            message,
+            proposedPrice: proposedPrice || null,
+            status: "PENDING",
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        interest = await tx.projectInterest.create({
+          data: {
+            orderId,
+            specialistId: session.userId,
+            message,
+            proposedPrice: proposedPrice || null,
+            status: "PENDING",
+          },
+        });
+      }
+
+      // Advance order status to HAS_APPLICANTS if it was DEPOSIT_PAID or MATCHING
+      if (order.status === "DEPOSIT_PAID" || order.status === "MATCHING") {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: "HAS_APPLICANTS" },
+        });
+      }
+
+      return interest;
+    });
+
+    // Notify client internally if user ID is linked
+    if (order.userId) {
+      const specialistName = authCheck.user?.displayName || "یک متخصص و عکاس";
+      const projectTitle = order.categoryTitle || "عکاسی";
+      await createNotification({
+        userId: order.userId,
+        title: "پیشنهاد جدید برای پروژه",
+        message: `${specialistName} برای سفارش «${projectTitle}» اعلام آمادگی کرد.`,
+        type: "INFO",
+        link: `/order/${orderId}/applicants`,
+      });
+    }
+
+    revalidatePath("/specialist/projects");
+    revalidatePath(`/order/${orderId}`);
+
+    return { success: true, interestId: result.id };
+  } catch (error: any) {
+    console.error("Error in submitProjectInterestAction:", error);
+    return { success: false, error: "خطا در ثبت اعلام علاقه‌مندی. لطفاً مجدداً تلاش کنید." };
+  }
+}
+
+// -------------------------------------------------------------
+// 3. Withdraw Project Interest (Specialist Action)
+// -------------------------------------------------------------
+/**
+ * Allows a specialist to withdraw their proposal before being selected by the client.
+ * Sets status to WITHDRAWN (preserves history).
+ */
+export async function withdrawProjectInterestAction(
+  interestId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedId = interestIdSchema.safeParse(interestId);
+    if (!parsedId.success) {
+      return { success: false, error: "شناسه پیشنهاد نامعتبر است." };
+    }
+
+    const validInterestId = parsedId.data;
+
+    const interest = await prisma.projectInterest.findUnique({
+      where: { id: validInterestId },
+      include: {
+        order: {
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            selectedSpecialistId: true,
+            categoryTitle: true,
+          },
+        },
+      },
+    });
+
+    if (!interest) {
+      return { success: false, error: "پیشنهاد موردنظر یافت نشد." };
+    }
+
+    // Ownership check: only the specialist who submitted can withdraw
+    if (interest.specialistId !== session.userId) {
+      return { success: false, error: "شما مجاز به لغو این پیشنهاد نیستید." };
+    }
+
+    if (interest.status === "WITHDRAWN") {
+      return { success: false, error: "این پیشنهاد قبلاً لغو شده است." };
+    }
+
+    // Cannot withdraw after being selected or accepted
+    if (
+      interest.status === "SELECTED" ||
+      interest.status === "ACCEPTED" ||
+      interest.order.selectedSpecialistId === session.userId
+    ) {
+      return {
+        success: false,
+        error: "امکان لغو پیشنهاد پس از انتخاب توسط کارفرما وجود ندارد. لطفاً در صورت عدم امکان انجام، از گزینه «رد پیشنهاد» استفاده کنید.",
+      };
+    }
+
+    // Atomic withdrawal transaction
+    await prisma.$transaction(async (tx) => {
+      await tx.projectInterest.update({
+        where: { id: validInterestId },
+        data: { status: "WITHDRAWN" },
+      });
+
+      // Check if there are other active PENDING interests
+      const remainingActiveCount = await tx.projectInterest.count({
+        where: {
+          orderId: interest.orderId,
+          status: "PENDING",
+        },
+      });
+
+      if (remainingActiveCount === 0 && interest.order.status === "HAS_APPLICANTS") {
+        await tx.order.update({
+          where: { id: interest.orderId },
+          data: { status: "MATCHING" },
+        });
+      }
+    });
+
+    // Notify client internally
+    if (interest.order.userId) {
+      await createNotification({
+        userId: interest.order.userId,
+        title: "انصراف متقاضی از پروژه",
+        message: `یکی از متقاضیان از پیشنهاد خود برای سفارش «${interest.order.categoryTitle || "عکاسی"}» انصراف داد.`,
+        type: "INFO",
+        link: `/order/${interest.orderId}/applicants`,
+      });
+    }
+
+    revalidatePath("/specialist/projects");
+    revalidatePath(`/order/${interest.orderId}`);
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in withdrawProjectInterestAction:", error);
+    return { success: false, error: "خطا در لغو پیشنهاد." };
+  }
+}
+
+// -------------------------------------------------------------
+// 4. Get Applicants For Client's Order
+// -------------------------------------------------------------
+export async function getOrderApplicantsForClientAction(orderId: string): Promise<{
+  success: boolean;
+  error?: string;
+  orderStatus?: string;
+  selectedSpecialistId?: string | null;
+  applicants?: ApplicantSpecialistView[];
+}> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "برای مشاهده متقاضیان باید وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedOrderId = orderIdSchema.safeParse(orderId);
+    if (!parsedOrderId.success) {
+      return {
+        success: false,
+        error: parsedOrderId.error.issues[0]?.message || "شناسه سفارش نامعتبر است.",
+      };
+    }
+
+    const validOrderId = parsedOrderId.data;
+
+    const order = await prisma.order.findUnique({
+      where: { id: validOrderId },
+      select: {
+        id: true,
+        userId: true,
+        contactPhone: true,
+        status: true,
+        categorySlug: true,
+        selectedSpecialistId: true,
+      },
+    });
+
+    if (!order) {
+      return { success: false, error: "سفارش موردنظر یافت نشد." };
+    }
+
+    // Ownership or Admin check
+    const isOwner =
+      (order.userId && order.userId === session.userId) ||
+      (order.contactPhone && order.contactPhone === session.phone);
+    const isAdmin = session.role === "admin";
+
+    if (!isOwner && !isAdmin) {
+      return { success: false, error: "شما مجاز به مشاهده متقاضیان این سفارش نیستید." };
+    }
+
+    // Exclude WITHDRAWN interests from client's active applicants view
+    const interests = await prisma.projectInterest.findMany({
+      where: {
+        orderId: validOrderId,
+        status: { not: "WITHDRAWN" },
+      },
+      include: {
+        specialist: {
+          select: {
+            id: true,
+            displayName: true,
+            city: true,
+            equipment: true,
+            hasStudio: true,
+            requestedBlueTick: true,
+            specialistProfile: {
+              select: {
+                id: true,
+                portfolioItems: {
+                  where: { categorySlug: order.categorySlug },
+                  take: 6,
+                  select: {
+                    id: true,
+                    fileUrl: true,
+                    mediaType: true,
+                    title: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const mapped: ApplicantSpecialistView[] = interests.map((item) => ({
+      id: item.id,
+      specialistId: item.specialistId,
+      status: item.status,
+      message: item.message,
+      proposedPrice: item.proposedPrice,
+      createdAt: item.createdAt.toISOString(),
+      specialist: {
+        id: item.specialist.id,
+        displayName: item.specialist.displayName || "عکاس متخصص جار",
+        city: item.specialist.city || "تهران",
+        equipment: item.specialist.equipment,
+        hasStudio: item.specialist.hasStudio,
+        isBlueTick: item.specialist.requestedBlueTick,
+        portfolioItems: item.specialist.specialistProfile?.portfolioItems || [],
+      },
+    }));
+
+    return {
+      success: true,
+      orderStatus: order.status,
+      selectedSpecialistId: order.selectedSpecialistId,
+      applicants: mapped,
+    };
+  } catch (error: any) {
+    console.error("Error in getOrderApplicantsForClientAction:", error);
+    return { success: false, error: "خطا در دریافت لیست متقاضیان پروژه." };
+  }
+}
+
+// -------------------------------------------------------------
+// 5. Select Specialist For Order (Client Action - Step 1 of Confirmation)
+// -------------------------------------------------------------
+/**
+ * Client selects a specialist.
+ * Order moves to AWAITING_SPECIALIST_CONFIRMATION.
+ * Interest moves to SELECTED.
+ * Other applicants are NOT rejected yet, preserving fallback options.
+ */
+export async function selectSpecialistForOrderAction(
+  orderId: string,
+  interestId: string
+): Promise<{ success: boolean; error?: string; selectedSpecialistId?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsed = selectSpecialistSchema.safeParse({ orderId, interestId });
+    if (!parsed.success) {
+      const firstErr = parsed.error.issues[0]?.message || "شناسه‌های ورودی نامعتبر هستند.";
+      return { success: false, error: firstErr };
+    }
+
+    const { orderId: validOrderId, interestId: validInterestId } = parsed.data;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: validOrderId },
+        select: {
+          id: true,
+          userId: true,
+          contactPhone: true,
+          status: true,
+          selectedSpecialistId: true,
+          categoryTitle: true,
+        },
+      });
+
+      if (!order) {
+        throw new Error("سفارش موردنظر یافت نشد.");
+      }
+
+      const isOwner =
+        (order.userId && order.userId === session.userId) ||
+        (order.contactPhone && order.contactPhone === session.phone);
+      const isAdmin = session.role === "admin";
+
+      if (!isOwner && !isAdmin) {
+        throw new Error("شما دسترسی لازم برای انتخاب متخصص این سفارش را ندارید.");
+      }
+
+      if (order.status === "CONFIRMED" || order.status === "COMPLETED" || order.status === "CANCELLED") {
+        throw new Error("این سفارش در وضعیت نهایی است و امکان انتخاب مجدد وجود ندارد.");
+      }
+
+      const interest = await tx.projectInterest.findUnique({
+        where: { id: validInterestId },
+        select: { id: true, orderId: true, specialistId: true, status: true },
+      });
+
+      if (!interest || interest.orderId !== validOrderId) {
+        throw new Error("درخواست متقاضی معتبر نیست.");
+      }
+
+      if (interest.status === "WITHDRAWN" || interest.status === "DECLINED") {
+        throw new Error("این متقاضی از انجام پروژه انصراف داده است و قابل انتخاب نیست.");
+      }
+
+      // Mark interest as SELECTED (awaiting specialist's confirmation)
+      await tx.projectInterest.update({
+        where: { id: validInterestId },
+        data: { status: "SELECTED" },
+      });
+
+      // Update order to AWAITING_SPECIALIST_CONFIRMATION
+      await tx.order.update({
+        where: { id: validOrderId },
+        data: {
+          status: "AWAITING_SPECIALIST_CONFIRMATION",
+          selectedSpecialistId: interest.specialistId,
+        },
+      });
+
+      return {
+        specialistId: interest.specialistId,
+        categoryTitle: order.categoryTitle || "عکاسی",
+      };
+    });
+
+    // Notify selected specialist
+    await createNotification({
+      userId: result.specialistId,
+      title: "شما برای یک پروژه انتخاب شدید!",
+      message: `کارفرما شما را برای انجام پروژه «${result.categoryTitle}» انتخاب کرده است. لطفاً برای نهایی شدن، پروژه را بررسی و تأیید کنید.`,
+      type: "SUCCESS",
+      link: `/specialist/projects`,
+    });
+
+    revalidatePath(`/order/${validOrderId}`);
+    revalidatePath("/specialist/projects");
+
+    return { success: true, selectedSpecialistId: result.specialistId };
+  } catch (error: any) {
+    console.error("Error in selectSpecialistForOrderAction:", error);
+    return {
+      success: false,
+      error: error?.message || "خطایی در فرآیند انتخاب متخصص رخ داد.",
+    };
+  }
+}
+
+// -------------------------------------------------------------
+// 6. Confirm Specialist Selection (Specialist Action - Step 2 of Confirmation)
+// -------------------------------------------------------------
+/**
+ * The selected specialist confirms that they accept the project.
+ * Order moves to CONFIRMED.
+ * Interest moves to ACCEPTED.
+ * All other applicants for this order are now REJECTED.
+ */
+export async function confirmSpecialistSelectionAction(
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedId = orderIdSchema.safeParse(orderId);
+    if (!parsedId.success) {
+      return { success: false, error: "شناسه سفارش نامعتبر است." };
+    }
+
+    const validOrderId = parsedId.data;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: validOrderId },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          selectedSpecialistId: true,
+          categoryTitle: true,
+        },
+      });
+
+      if (!order) {
+        throw new Error("سفارش موردنظر یافت نشد.");
+      }
+
+      if (order.selectedSpecialistId !== session.userId) {
+        throw new Error("شما متخصص منتخب این پروژه نیستید.");
+      }
+
+      if (order.status !== "AWAITING_SPECIALIST_CONFIRMATION") {
+        throw new Error("وضعیت پروژه در انتظار تأیید شما نیست.");
+      }
+
+      // Accept this specialist's interest
+      await tx.projectInterest.updateMany({
+        where: {
+          orderId: validOrderId,
+          specialistId: session.userId,
+        },
+        data: { status: "ACCEPTED" },
+      });
+
+      // Reject all other applicants
+      await tx.projectInterest.updateMany({
+        where: {
+          orderId: validOrderId,
+          specialistId: { not: session.userId },
+          status: { in: ["PENDING", "SELECTED"] },
+        },
+        data: { status: "REJECTED" },
+      });
+
+      // Finalize order status to CONFIRMED
+      await tx.order.update({
+        where: { id: validOrderId },
+        data: { status: "CONFIRMED" },
+      });
+
+      return {
+        userId: order.userId,
+        categoryTitle: order.categoryTitle || "عکاسی",
+      };
+    });
+
+    // Notify client that specialist confirmed
+    if (result.userId) {
+      await createNotification({
+        userId: result.userId,
+        title: "تأیید پروژه توسط متخصص",
+        message: `متخصص انتخابی انجام پروژه «${result.categoryTitle}» را تأیید کرد و هماهنگی نهایی شد.`,
+        type: "SUCCESS",
+        link: `/order/${validOrderId}`,
+      });
+    }
+
+    revalidatePath(`/order/${validOrderId}`);
+    revalidatePath("/specialist/projects");
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in confirmSpecialistSelectionAction:", error);
+    return {
+      success: false,
+      error: error?.message || "خطا در تأیید نهایی پروژه.",
+    };
+  }
+}
+
+// -------------------------------------------------------------
+// 7. Decline Specialist Selection (Specialist Action)
+// -------------------------------------------------------------
+/**
+ * The selected specialist declines the project.
+ * Interest moves to DECLINED.
+ * selectedSpecialistId is cleared.
+ * Order returns to HAS_APPLICANTS (if other active proposals exist) or MATCHING.
+ */
+export async function declineSpecialistSelectionAction(
+  orderId: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedId = orderIdSchema.safeParse(orderId);
+    if (!parsedId.success) {
+      return { success: false, error: "شناسه سفارش نامعتبر است." };
+    }
+
+    const validOrderId = parsedId.data;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: validOrderId },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          selectedSpecialistId: true,
+          categoryTitle: true,
+        },
+      });
+
+      if (!order) {
+        throw new Error("سفارش موردنظر یافت نشد.");
+      }
+
+      if (order.selectedSpecialistId !== session.userId) {
+        throw new Error("شما متخصص منتخب این پروژه نیستید.");
+      }
+
+      if (order.status !== "AWAITING_SPECIALIST_CONFIRMATION") {
+        throw new Error("این پروژه در وضعیت در انتظار تأیید قرار ندارد.");
+      }
+
+      // Mark this interest as DECLINED
+      await tx.projectInterest.updateMany({
+        where: {
+          orderId: validOrderId,
+          specialistId: session.userId,
+        },
+        data: { status: "DECLINED" },
+      });
+
+      // Check remaining pending interests
+      const remainingPendingCount = await tx.projectInterest.count({
+        where: {
+          orderId: validOrderId,
+          status: "PENDING",
+        },
+      });
+
+      const nextStatus = remainingPendingCount > 0 ? "HAS_APPLICANTS" : "MATCHING";
+
+      await tx.order.update({
+        where: { id: validOrderId },
+        data: {
+          selectedSpecialistId: null,
+          status: nextStatus,
+        },
+      });
+
+      return {
+        userId: order.userId,
+        categoryTitle: order.categoryTitle || "عکاسی",
+      };
+    });
+
+    // Notify client that specialist declined so they can choose someone else
+    if (result.userId) {
+      await createNotification({
+        userId: result.userId,
+        title: "عدم پذیرش پروژه توسط متخصص",
+        message: `متخصص انتخابی امکان پذیرش پروژه «${result.categoryTitle}» را نداشت. شما می‌توانید از میان سایر متقاضیان، فرد دیگری را انتخاب کنید.`,
+        type: "WARNING",
+        link: `/order/${validOrderId}/applicants`,
+      });
+    }
+
+    revalidatePath(`/order/${validOrderId}`);
+    revalidatePath("/specialist/projects");
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in declineSpecialistSelectionAction:", error);
+    return {
+      success: false,
+      error: error?.message || "خطا در رد پیشنهاد پروژه.",
+    };
+  }
+}
+
+// -------------------------------------------------------------
+// 8. Cancel Order By Client
+// -------------------------------------------------------------
+/**
+ * Client cancels their order.
+ * Sets order to CANCELLED and marks active interests as CANCELLED.
+ */
+export async function cancelOrderByClientAction(
+  orderId: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session || !session.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedId = orderIdSchema.safeParse(orderId);
+    if (!parsedId.success) {
+      return { success: false, error: "شناسه سفارش نامعتبر است." };
+    }
+
+    const validOrderId = parsedId.data;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: validOrderId },
+        select: {
+          id: true,
+          userId: true,
+          contactPhone: true,
+          status: true,
+          selectedSpecialistId: true,
+          categoryTitle: true,
+          createdAt: true,
+        },
+      });
+
+      if (!order) {
+        throw new Error("سفارش موردنظر یافت نشد.");
+      }
+
+      const isOwner =
+        (order.userId && order.userId === session.userId) ||
+        (order.contactPhone && order.contactPhone === session.phone);
+      const isAdmin = session.role === "admin";
+
+      if (!isOwner && !isAdmin) {
+        throw new Error("شما دسترسی لازم برای لغو این سفارش را ندارید.");
+      }
+
+      if (order.status === "COMPLETED" || order.status === "CANCELLED") {
+        throw new Error("امکان لغو سفارشی که قبلاً تکمیل یا لغو شده است وجود ندارد.");
+      }
+
+      // Security: Disallow simple client cancellation if a specialist is selected or order is CONFIRMED
+      if (
+        order.status === "CONFIRMED" ||
+        order.status === "AWAITING_SPECIALIST_CONFIRMATION" ||
+        order.selectedSpecialistId
+      ) {
+        throw new Error(
+          "امکان لغو مستقیم این سفارش وجود ندارد؛ متخصص برای این پروژه انتخاب یا قطعی شده است. لطفاً برای لغو یا تغییرات با پشتیبانی جار تماس بگیرید."
+        );
+      }
+
+      const ALLOWED_CANCEL_STATUSES = ["PENDING_DEPOSIT", "DEPOSIT_PAID", "MATCHING", "HAS_APPLICANTS"];
+      if (!ALLOWED_CANCEL_STATUSES.includes(order.status)) {
+        throw new Error("وضعیت فعلی سفارش امکان لغو مستقیم توسط کارفرما را ندارد.");
+      }
+
+      // Enforce 72-hour cancellation rule (Only allow cancel after 72 hours from order creation)
+      const orderCreatedAt = new Date(order.createdAt).getTime();
+      const now = Date.now();
+      const hoursElapsed = (now - orderCreatedAt) / (1000 * 60 * 60);
+
+      if (hoursElapsed < 72 && session?.role !== "admin") {
+        const remainingMs = 72 * 3600 * 1000 - (now - orderCreatedAt);
+        const remainingHours = Math.floor(remainingMs / (1000 * 3600));
+        const remainingMinutes = Math.floor((remainingMs % (1000 * 3600)) / (1000 * 60));
+        throw new Error(
+          `امکان لغو سفارش تا ۷۲ ساعت پس از ثبت سفارش وجود ندارد. زمان باقی‌مانده تا فعال‌سازی امکان لغو: ${remainingHours} ساعت و ${remainingMinutes} دقیقه.`
+        );
+      }
+
+      // Fetch active applicant specialists to notify
+      const activeInterests = await tx.projectInterest.findMany({
+        where: {
+          orderId: validOrderId,
+          status: { in: ["PENDING", "SELECTED", "ACCEPTED"] },
+        },
+        select: { specialistId: true },
+      });
+
+      await tx.order.update({
+        where: { id: validOrderId },
+        data: { status: "CANCELLED" },
+      });
+
+      await tx.projectInterest.updateMany({
+        where: {
+          orderId: validOrderId,
+          status: { in: ["PENDING", "SELECTED"] },
+        },
+        data: { status: "CANCELLED" },
+      });
+
+      return {
+        specialistIds: activeInterests.map((i) => i.specialistId),
+        categoryTitle: order.categoryTitle || "عکاسی",
+      };
+    });
+
+    // Notify affected specialists
+    for (const specId of result.specialistIds) {
+      await createNotification({
+        userId: specId,
+        title: "لغو سفارش توسط کارفرما",
+        message: `سفارش «${result.categoryTitle}» توسط کارفرما لغو شد.`,
+        type: "WARNING",
+        link: `/specialist/projects`,
+      });
+    }
+
+    revalidatePath(`/order/${validOrderId}`);
+    revalidatePath("/specialist/projects");
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in cancelOrderByClientAction:", error);
+    return {
+      success: false,
+      error: error?.message || "خطا در لغو سفارش.",
+    };
+  }
+}

@@ -1,9 +1,11 @@
 import type { ProjectStatus } from "@/lib/db/enums";
+import { getProjectServiceLabel, SERVICE_TYPE_LABELS_FA } from "@/lib/projects/services";
 
 export type ProfileProject = {
   id: string;
   createdAt: string;
   serviceType: string;
+  serviceDetails: string | null;
   brief: string;
   contactName: string | null;
   status: ProjectStatus;
@@ -15,13 +17,8 @@ export type ProfileUser = {
   memberSince: string;
 };
 
-import { SERVICE_TYPE_LABELS_FA } from "@/lib/projects/services";
-
-const SERVICE_LABELS: Record<string, string> = SERVICE_TYPE_LABELS_FA;
-
 export function projectTitle(project: ProfileProject): string {
-  if (project.contactName?.trim()) return project.contactName.trim();
-  return SERVICE_LABELS[project.serviceType] ?? "درخواست مشاوره";
+  return getProjectServiceLabel(project.serviceType, project.serviceDetails);
 }
 
-export const PROFILE_SERVICE_LABELS = SERVICE_LABELS;
+export const PROFILE_SERVICE_LABELS = SERVICE_TYPE_LABELS_FA;

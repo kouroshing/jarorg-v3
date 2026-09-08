@@ -1,0 +1,170 @@
+- `[x]` 1. **Modify app/profile/page.tsx**
+  - `[x]` Fetch successful `GalleryOrder` and `GalleryPurchase` records.
+  - `[x]` Serialize purchase history data.
+  - `[x]` Pass serialized data to `ProfileDashboard`.
+- `[x]` 2. **Modify app/profile/ProfileDashboard.tsx**
+  - `[x]` Redefine tabs to `orders` and `settings`.
+  - `[x]` Build "سفارش‌های من" tab rendering purchased albums cards & consultation requests.
+  - `[x]` Build "مشخصات حساب کاربری" tab rendering profile settings form.
+- `[x]` 3. **Implement Conditional Specialist Card**
+  - `[x]` Create premium specialist dashboard entry card for expert users linking to `/profile`.
+  - `[x]` Keep the standard conversion plan card for regular users linking to `/profile/upgrade`.
+- `[x]` 4. **Redesign Orders Page with Snapp Trips UI**
+  - `[x]` Implement active/history sub-tabs inside My Orders section.
+  - `[x]` Redesign project cards matching Snapp Trips format (expert avatar on right, name/specialty, price/budget pill, location/thumbnails preview, and action buttons).
+  - `[x]` Fetch Google Drive thumbnails in parallel for completed/delivered projects on server-side.
+- `[x]` 5. **Create Order Download Page**
+  - `[x]` Build customer order download page at `app/orders/[id]/download/page.tsx` listing final Google Drive deliverables.
+  - `[x]` Build Next.js API route `/api/orders/[id]/download-zip` to bundle deliverables into a ZIP stream using `jszip`.
+  - `[x]` Add sticky bottom bar in download page allowing one-click download of ZIP archive.
+- `[x]` 6. **Inject Snapp-style Mock Data**
+  - `[x]` Design `MOCK_PROJECTS` list with active project details (cancel/routing options) and completed projects containing Unsplash preview thumbnails.
+  - `[x]` Inject mock data when the database projects array is empty to show the premium interface.
+- `[x]` 7. **Differentiate 50% Deposit vs Full Payment on Download Page**
+  - `[x]` Add `paymentStatus` field to database using Prisma and run sync successfully.
+  - `[x]` Implement `DEPOSIT_50` mode with warning banner alert, watermarked visual thumbnails, low-quality ZIP downloads, and checkout buttons.
+  - `[x]` Implement `FULL` mode showing original clear photos and full quality download ZIP button.
+  - `[x]` Add mock URLs (`/orders/mock-deposit/download` and `/orders/mock-full/download`) to easily review both payment states visually.
+- `[x]` 8. **Refactor Profile Settings to Dedicated Edit Page**
+  - `[x]` Remove profile settings tab and logout button from the main dashboard component.
+  - `[x]` Add a gear gear-styled "ویرایش مشخصات" settings button in main dashboard header linking to `/profile/edit`.
+  - `[x]` Create `/profile/edit` page displaying display name inputs, save action triggers, back navigation button, and logout triggers at the bottom.
+- `[x]` 9. **Implement Gallery Empty State Explore CTA**
+  - `[x]` Refactor purchased albums empty state to include a centered flat button: "🔍 مشاهده و خرید آلبوم‌ها در اکسپلور".
+  - `[x]` Connect button to Next.js routing path `/explore`.
+- `[x]` 10. **Replace Active Order Cancel Button with Disabled Chat Option**
+  - `[x]` Remove the cancel order button in active project cards.
+  - `[x]` Render a disabled chat button "💬 چت (به‌زودی)" with pointer-events-none and low opacity.
+- `[x]` 11. **Remove Duplicate Header and Position Sub-tabs Capsule Directly under Conversion Banner**
+  - `[x]` Remove the redundant "سفارش‌های من" heading row above the tabs.
+  - `[x]` Move the active/history tabs capsule directly under the specialist conversion card.
+  - `[x]` Set standard spacing using `mt-[#8]` to ensure a minimal, clean look.
+- `[x]` 12. **Refactor Specialist Upgrade Page**
+  - `[x]` Change period labels in switcher: "دوره ۳ ماهه" -> "دوره ۱ ماهه", "دوره سالانه" -> "دوره ۶ ماهه".
+  - `[x]` Delete visual noise: active plan black top card and mobile sticky bottom banner.
+  - `[x]` Hide Pro and Ultra plans completely, leaving only Basic centered and wide.
+  - `[x]` Adjust header margins and styling paddings.
+- `[x]` 13. **Create Public Plans Page & Onboarding Flow**
+  - `[x]` Create public `/plans` route displaying Basic Plan priced at 0 / "رایگان".
+  - `[x]` Handle session checks in plans activation: redirect to `/login` if offline, redirect to `/specialist/onboarding` if online.
+  - `[x]` Build onboarding form at `/specialist/onboarding` for portfolio images upload categorized by genres.
+  - `[x]` Implement file upload API `/api/specialist/onboarding/upload` integrating with Google Drive.
+  - `[x]` Create onboarding submission action submitting portfolios, activating basic plan, and promoting role to specialist.
+- `[x]` 14. **Restore Pro & Ultra and Lock Basic Permanent**
+  - `[x]` Restore Pro and Ultra plans, connecting pricing and period details to the billing switcher toggle (1-month / 6-month).
+  - `[x]` Set Jar Basic period label as permanent ("دائمی / همیشگی") and fix pricing at "۰ تومان / رایگان".
+  - `[x]` Update Jar Basic features list (green check for 500MB storage, add green check for Jar Shati QR sales).
+- `[x]` 15. **Create Specialist Onboarding Step 1 (Stepper)**
+  - `[x]` Add unique nullable handle field in `User` schema and run `npx prisma db push --accept-data-loss` to sync database safely.
+  - `[x]` Write `checkHandleAvailability(handle)` server action verifying username availability.
+  - `[x]` Implement step state management (`currentStep` 1 & 2) in onboarding form.
+  - `[x]` Build step 1 fields: Full Name, Avatar Upload with instant preview, exclusive handle input with live check, and Bio textarea (max 150 chars).
+  - `[x]` Disable continue button if validation is unfulfilled, transition to step 2 on step 1 approval.
+- `[x]` 16. **Implement Specialist Onboarding Step 2 (Blue Tick Stepper)**
+  - `[x]` Add `requestedBlueTick` field inside `User` schema and run `npx prisma db push --accept-data-loss` to sync database.
+  - `[x]` Integrate step 2 verified badge selection layout with two selection cards ("شرکت در آزمون" & "ادامه بدون تیک").
+  - `[x]` Connect card actions to save state and transition to genres upload (step 3).
+  - `[x]` Build back navigation controls to return to step 1 and step 2.
+- `[x]` 17. **Implement Specialist Onboarding Step 3 (Dynamic Genres & Bulk Portfolios Upload)**
+  - `[x]` Build dynamic categories state array initialized with "پرتره", "فضای باز", and "استودیویی".
+  - `[x]` Provide features to add categories (max 5) and delete/rename category genres.
+  - `[x]` Implement 10-slot responsive placeholder grid per category with bulk upload capability.
+  - `[x]` Add close delete buttons on thumbnails and live counters ("آپلود شده: X از ۱۰").
+  - `[x]` Enforce strict validation: minimum 3 categories with at least 10 photos uploaded in each to activate sticky final bar "ثبت نهایی و فعال‌سازی حساب متخصص".
+- `[x]` 18. **Store Step 3 Portfolios Locally and Remove Body Size Limits**
+  - `[x]` Refactor `/api/specialist/onboarding/upload` route to store files locally inside `public/uploads/portfolio/`.
+  - `[x]` Disable Next.js body size limit checks for onboarding uploads (`sizeLimit: "500mb"`).
+  - `[x]` Verify role synchronization update to specialist and dashboard redirections.
+- `[x]` 19. **Temporarily Disable Specialist Registration and Upgrades**
+  - `[x]` Convert specialist conversion link to a disabled `div` with styling properties (opacity-50, pointer-events-none, cursor-not-allowed).
+  - `[x]` Change card text to "💼 ثبت‌نام متخصصین (موقتاً غیرفعال)" inside `ProfileDashboard.tsx`.
+  - `[x]` Update `PlansClientPage.tsx` to set basic plan `disabled: true` and modify button label to "💼 ثبت‌نام متخصصین (موقتاً غیرفعال)".
+- `[x]` 20. **Unify Direct Booking Flow (Modal & Double SMS Dispatch)**
+  - `[x]` Unify reserve buttons and central plus nav triggers to call `handleOpenBookingFlow` using global CustomEvents (`open-direct-booking`).
+  - `[x]` Build `DirectBookingModal` rendering SMS OTP inline login if guest, and a 6-question project intake form if authenticated.
+  - `[x]` Write `submitProjectForm` server action compiling form fields into a structured text message, setting Kavenegar/IPPanel webhook trigger template.
+  - `[x]` Dispatches the compiled SMS simultaneously to `09100138383` and `09126301407` on submission.
+- `[x]` 21. **Connect submitProjectForm to IPPanel api2 Gateway**
+  - `[x]` Update `bookingActions.ts` to fetch and check env configurations (`IPPANEL_API_KEY`, `IPPANEL_SENDER_NUMBER`, `ADMIN_NOTIF_PATTERN_CODE`, `ADMIN_MOBILES`).
+  - `[x]` Implement HTTP POST trigger calling IPPanel api2 pattern send endpoint (`https://api2.ippanel.com/api/v1/sms/pattern/normal/send`).
+  - `[x]` Map variables robustly (`description`, `details`, `text`, `name`, `summary`, etc.) to prevent variables mismatch in panel templates.
+  - `[x]` Send SMS simultaneously for each admin resolved from split comma array in try/catch block.
+- `[x]` 22. **Align submitProjectForm to 6-Variable IPPanel values Schema**
+  - `[x]` Update `bookingActions.ts` values payload to exactly match 6 variables (`name`, `description`, `link`, `budget`, `phone`, `time`) inside the `"values"` JSON key.
+  - `[x]` Auto-replace empty links with `"ندارد"`.
+  - `[x]` Send parallel POST requests via `Promise.all` while safeguarding exceptions inside the loop.
+- `[x]` 23. **AppSec Auditing, Rate Limiting & QA Verification**
+  - `[x]` Implement database/session checks inside `submitProjectForm` to avoid unauthorized access.
+  - `[x]` Add lightweight rolling window in-memory rate limiter (max 2/5 min per User & IP) to prevent SMS bombing/depletion.
+  - `[x]` Integrate server-side length constraints checks (name <= 50, summary <= 500 chars).
+  - `[x]` Create automated mock test runner script `scratch/test_booking.js` and verify all code paths.
+- `[x]` 24. **Migrate to Persistent Database-backed 24h Rate Limiting**
+  - `[x]` Convert rate limit logic from in-memory maps to Prisma database query on the `Project` model (`prisma.project.count`).
+  - `[x]` Enforce rule: max 2 submissions per 24 hours per phone number (`contactPhone`).
+  - `[x]` Save successful project requests to database (`prisma.project.create`) mapping questions to correct columns before dispatching IPPanel SMS.
+- `[x]` 25. **Fix Expert Profile Page Crash & Integrate FlowStep inline OTP**
+  - `[x]` Convert `app/experts/[id]/page.tsx` from Server Component to Client Component (`"use client"`) to allow button onClick event dispatching.
+  - `[x]` Refactor `DirectBookingModal.tsx` to handle state checks via `flowStep`: `'ENTER_PHONE'`, `'ENTER_CODE'`, `'PROJECT_FORM'`.
+  - `[x]` Autofill phone number inside project form automatically on successful inline verification.
+  - `[x]` Style OTP and SMS phone entries with flat, SE mobile-friendly layouts matching yellow/navy colors of Jar.
+- `[x]` 26. **Connect Homepage Cards to Direct Booking Modal Wizard**
+  - `[x]` Convert `app/page.tsx` into a Client Component to handle modal toggles and states.
+  - `[x]` Pass `onOpenBooking` prop callback to `HeroSection` and `TopExperts` components.
+  - `[x]` Convert cards link tags to clickable divs and buttons executing the booking modal, passing the selected specialist's name to compile inside IPPanel SMS variables.
+- `[x]` 27. **Lock TopExperts Section behind Glassmorphic Overlay**
+  - `[x]` Wrap the entire `TopExperts` section inside a `relative` and `overflow-hidden` container.
+  - `[x]` Insert a full-bleed absolute glassmorphic overlay (`backdrop-blur-[5px] bg-white/65 z-20`) to block mouse clicks and touch events.
+  - `[x]` Design centered pulsing navy coming soon badge: `"🔒 این بخش به‌زودی فعال می‌شود"`.
+- `[x]` 28. **Delete create-project Directory and Clean Codebase References**
+  - `[x]` Delete the obsolete `app/create-project` folder and files.
+  - `[x]` Refactor dead navigation links to `/create-project` inside `Navbar.tsx`, `CtaBanner.tsx`, `CategoryGrid.tsx`, `HomeFooter.tsx`, `ProfileDashboard.tsx`, `contact/page.tsx`, and `explore/[id]/page.tsx` to trigger direct booking modal or be client-safe.
+  - `[x]` Remove sitemap page route reference in `app/sitemap.ts`.
+- `[x]` 29. **Refactor Specialist Hero Card Spacing & Texts**
+  - `[x]` Adjust vertical padding (`pt-16` on mobile) to prevent title text from overlapping with the absolute top sparkles badge.
+  - `[x]` Rename main title to: `"پلتفرم رزرو مستقیم عکاسان ارشد"` and sub-description to: `"دسترسی فوری و بدون واسطه to برترین هنرمندان تجاری پلتفرم جارآموز"`.
+  - `[x]` Compact the glassmorphic profile card on mobile using smaller padding (`p-4`) and gap (`gap-3.5`).
+  - `[x]` Rename yellow card CTA button to: `"شروع رزرو آنی و ثبت پروژه"`.
+- `[x]` 30. **Lock Explore Button and Show Coming Soon Toast**
+  - `[x]` Add local toast state management inside `Navbar.tsx` (`toastMessage` / `triggerToast`).
+  - `[x]` Replace desktop and bottom navigation "Explore" links with buttons dispatching the "🔒 بخش اکسپلور به‌زودی فعال می‌شود" toast.
+  - `[x]` Reduce Explore button opacity (`opacity-70`) and add `cursor-not-allowed` to reflect lock state.
+- `[x]` 31. **Generalize Hero Profile Card to Full-Scale Media Services**
+  - `[x]` Set avatar layout wrapping `div` and image to be perfectly circular (`rounded-full shadow-xl`).
+  - `[x]` Change profile name to `"تیم ارشد آتلیه جار"`.
+  - `[x]` Change specialty subtext to represent universal commercial production: `"مجری پروژه‌های عکاسی، فیلمبرداری و ساخت تیزر تبلیغاتی"`.
+  - `[x]` Tighten the card wrapper padding to `p-4` and reduce spacing gap to `gap-3.5 sm:gap-5` for cozy layout, updating `onOpenBooking` payload to the new generalized team name.
+- `[x]` 32. **Migrate Booking Flow to Dedicated Single-page Form**
+  - `[x]` Delete obsolete modal components directory `components/create-project/`.
+  - `[x]` Remove `DirectBookingModal` imports, states, and hooks from `Navbar.tsx` and `app/page.tsx`, making the main page a static Server Component.
+  - `[x]` Change booking CTA triggers globally (`Navbar.tsx`, `HeroSection.tsx`, `TopExperts.tsx`, `CategoryGrid.tsx`, `CtaBanner.tsx`, `HomeFooter.tsx`, `contact/page.tsx`, and `ProfileDashboard.tsx`) to link directly to the new `/booking` route.
+  - `[x]` Create `/booking` route (`app/booking/page.tsx`) with an Auth Guard query string redirector (`/login?redirect=/booking`).
+  - `[x]` Build responsive single-page form (`app/booking/BookingFormClient.tsx`) displaying all 6 fields in a beautiful flat glassmorphic layout, using custom mustard (#FFC107) and dark blue (#086095) focus coloring.
+- `[x]` 34. **Refactor Tools Page Layout & Locked Tools**
+  - `[x]` Move "آکادمی آموزش جارآموز" card to the first position and increase its padding and height to a prominent taller layout.
+  - `[x]` Move "نقشه لوکیشن‌ها و عمارت‌ها" card to the second position, disable its click navigation, and add a full-bleed absolute blur coming soon overlay badge.
+  - `[x]` Create a new third tool card "ادیت عکس هوشمند جار" in light purple theme, with custom Sparkles icon, locked under the same coming soon blur overlay badge.
+- `[x]` 36. **Fix IPPanel API 401 Authentication Header Format**
+  - `[x]` Inject legacy `"apikey"` header alongside standard `"Authorization"` header configuration inside the server action helper `app/actions/bookingActions.ts`.
+  - `[x]` Inject legacy `"apikey"` header alongside standard `"Authorization"` header configuration inside the SMS service helper `lib/sms/ippanel.ts`.
+- `[x]` 38. **Implement Permissive Real-time Phone Normalizer**
+  - `[x]` Add `normalizePermissiveIranMobile` helper to `lib/auth/phone.ts` converting Persian/Arabic digits, stripping non-numeric characters, replacing `0098`/`98` with `0`, and adding missing leading `0` to numbers starting with `9`.
+  - `[x]` Integrate normalizer to real-time `onChange` state updater inside project intake form `BookingFormClient.tsx`.
+  - `[x]` Set input field `maxLength` to 15 to allow full pasting of international formats before sanitization.
+- `[x]` 40. **Support Plain English String Keys for IPPanel Pattern SMS**
+  - `[x]` Clean all percent-wrapped keys (e.g. `%name%` to `name`) inside `bookingActions.ts` and `lib/sms/project-created.ts` and cast values to String to resolve the "params.name is required" IPPanel parsing issue.
+  - `[x]` Centralize all booking SMS notification dispatch to use the unified helper `sendSmsByPattern` with standardized rest.ippanel.com body payload schema: pattern_code, originator, recipient, values.
+- `[x]` 43. **Prepare PWA Assets and Manifest configurations**
+  - `[x]` Update default PWA configuration in database and `app/actions/pwaActions.ts` setting name to "جار | رزرو آنلاین عکاس".
+  - `[x]` Copy and export explicit resolution icon files (`public/icon-192.png` and `public/icon-512.png`) inside the `public/` directory.
+  - `[x]` Refactor metadata manifest generator `app/manifest.ts` to map resolutions correctly.
+- `[x]` 47. **Unified JarAmooz Purchase & Registration Modal (`JarAmoozPurchaseModal`)**
+  - `[x]` Built global React Context Provider `JarAmoozPurchaseContext` and hook `useJarAmoozPurchaseModal`.
+  - `[x]` Wrapped `app/jaramooz/layout.tsx` with `<JarAmoozPurchaseProvider>` for site-wide modal access.
+  - `[x]` Built `JarAmoozPurchaseModal` featuring:
+    - Step 1: Tel keypad mobile input, 09+11-digit strict validation, "دریافت کد تایید" action button, loading spinner.
+    - Step 2: Auto-submitting 4-digit OTP entry, 120s countdown timer with resend trigger, phone change action button.
+    - Step 3: Gateway transfer loading state, automatic `/api/jaramooz/payment/initiate` execution, `window.location.href` payment redirect.
+    - Modern UI: `bg-black/60 backdrop-blur-md` overlay, `rounded-3xl` glass card, ESC key & backdrop close handlers.
+  - `[x]` Connected all buy, enroll, and register triggers (`PurchaseButtonWrapper`, `SyllabusAccordion`) across JarAmooz to `openPurchaseModal({ courseId, title, price })`.
+- `[x]` 48. **Verify and Run Type-Check**
+  - `[x]` Run `npx tsc --noEmit` and `npm run build` and confirm zero errors.

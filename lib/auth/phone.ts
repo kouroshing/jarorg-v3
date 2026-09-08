@@ -37,3 +37,30 @@ export function phoneToLocalDisplay(digits: string): string {
   if (d.startsWith("98") && d.length >= 12) return `0${d.slice(2)}`;
   return d;
 }
+
+/** Highly permissive normalizer for Iran mobile input */
+export function normalizePermissiveIranMobile(raw: string): string {
+  // 1. Convert Persian/Arabic digits to English digits
+  let cleaned = toEnglishDigits(raw);
+
+  // 2. Remove all non-numeric characters
+  cleaned = cleaned.replace(/\D/g, "");
+
+  // 3. Handle international prefixes: 0098... or 98...
+  if (cleaned.startsWith("0098")) {
+    cleaned = "0" + cleaned.slice(4);
+  } else if (cleaned.startsWith("98") && cleaned.length > 10) {
+    cleaned = "0" + cleaned.slice(2);
+  }
+
+  // 4. Handle missing leading zero: if starts with 9, prepend 0
+  if (cleaned.startsWith("9") && !cleaned.startsWith("98")) {
+    cleaned = "0" + cleaned;
+  } else if (cleaned.startsWith("9") && cleaned.length === 10) {
+    cleaned = "0" + cleaned;
+  } else if (cleaned === "9") {
+    cleaned = "09";
+  }
+
+  return cleaned;
+}

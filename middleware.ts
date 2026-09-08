@@ -3,24 +3,23 @@ import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { verifySessionToken } from "@/lib/auth/jwt";
 import { isAdminSession } from "@/lib/auth/admin";
 
-const LEGACY_APP_HOST = "app.jarorg.ir";
-const CANONICAL_ORIGIN = "https://jarorg.ir";
-
 // Paths that require a signed-in user.
-const PROTECTED_PREFIXES = ["/profile", "/admin"];
+const PROTECTED_PREFIXES = ["/profile", "/admin", "/order"];
 
 export async function middleware(request: NextRequest) {
-  const hostname = request.nextUrl.hostname.toLowerCase();
+  const { pathname } = request.nextUrl;
 
-  if (hostname === LEGACY_APP_HOST) {
-    const destination = new URL(
-      `${request.nextUrl.pathname}${request.nextUrl.search}`,
-      CANONICAL_ORIGIN
-    );
-    return NextResponse.redirect(destination, 308);
+  // 0. Always bypass middleware redirects/auth for Digital Asset Links (.well-known)
+  if (pathname.startsWith("/.well-known/")) {
+    return NextResponse.next();
   }
 
-  const { pathname } = request.nextUrl;
+  const hostHeader = request.headers.get("host")?.toLowerCase() || "";
+
+  // Permanent redirect for jaramooz.ir domain
+  if (hostHeader === "jaramooz.ir" || hostHeader === "www.jaramooz.ir") {
+    return NextResponse.redirect("https://app.jarorg.ir/jaramooz", 301);
+  }
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySessionToken(token) : null;
@@ -33,7 +32,8 @@ export async function middleware(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
-    loginUrl.searchParams.set("redirect", pathname);
+    const target = pathname + (request.nextUrl.search || "");
+    loginUrl.searchParams.set("redirect", target);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -46,10 +46,16 @@ export async function middleware(request: NextRequest) {
   }
 
   if (session && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = request.nextUrl.searchParams.get("redirect") || "/profile";
-    url.search = "";
-    return NextResponse.redirect(url);
+    const redirectTo = request.nextUrl.searchParams.get("redirect") || "/profile";
+    try {
+      const targetUrl = new URL(redirectTo, request.nextUrl.origin);
+      return NextResponse.redirect(targetUrl);
+    } catch {
+      const fallbackUrl = request.nextUrl.clone();
+      fallbackUrl.pathname = "/profile";
+      fallbackUrl.search = "";
+      return NextResponse.redirect(fallbackUrl);
+    }
   }
 
   return NextResponse.next();
@@ -57,6 +63,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|uploads|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|json)$).*)",
   ],
 };

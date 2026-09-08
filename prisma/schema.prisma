@@ -1,24 +1,58 @@
 // Prisma schema for Jar.
-// Use MySQL DATABASE_URL (local/prod) and run npx prisma db push
+// SQLite on the `data` persistent disk: DATABASE_URL="file:../data/jar.db"
+// (resolves to /app/data/jar.db in production — see liara.json).
+// Never point this under public/: everything there is served without auth.
+// Local: npx prisma migrate dev | Production (Liara shell): npx prisma migrate deploy
 
 generator client {
   provider = "prisma-client-js"
 }
 
+generator nextAdmin {
+  provider = "next-admin-generator-prisma"
+}
+
 datasource db {
-  provider = "mysql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 /// Platform user identified by mobile number.
 model User {
-  id          String   @id @default(uuid())
-  phone       String   @unique
-  displayName String?  @map("display_name")
-  role        String   @default("USER")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  phone        String   @unique
+  displayName  String?  @map("display_name")
+  role         String   @default("USER")
+  usedStorage  Float    @default(0) @map("used_storage")
+  storageLimit Float    @default(2147483648) @map("storage_limit")
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  projects Project[]
+  onboardingStatus      String  @default("not_started") @map("onboarding_status")
+  specialistRoles       String? @map("specialist_roles")
+  hasStudio             Boolean @default(false) @map("has_studio")
+  studioImages          String? @map("studio_images")
+  city                  String? @map("specialist_city")
+  locationTypes         String? @map("location_types")
+  equipment             String? @map("specialist_equipment")
+  pricingGenres         String? @map("pricing_genres")
+  has100DaysMasterclass Boolean @default(false) @map("has_100_days_masterclass")
+  planId                String? @map("plan_id")
+  planExpiresAt         DateTime? @map("plan_expires_at")
+  handle                String? @unique @map("handle")
+  requestedBlueTick     Boolean @default(false) @map("requested_blue_tick")
+
+  projects           Project[]
+  purchases          Purchase[]
+  notifications      Notification[]
+  transactions       Transaction[]
+  galleryProjects    GalleryProject[]
+  withdrawalRequests WithdrawalRequest[]
+  walletBalance      Float               @default(0) @map("wallet_balance")
+  unseenSales        Int                 @default(0) @map("unseen_sales")
+  specialistProfile  SpecialistProfile?
+  orders             Order[]             @relation("ClientOrders")
+  assignedOrders     Order[]             @relation("SelectedSpecialistOrders")
+  projectInterests   ProjectInterest[]
 
   @@map("users")
 }
@@ -41,28 +75,42 @@ model Expert {
 model VerificationCode {
   phone     String   @id
   code      String
+  attempts  Int      @default(0)
   expiresAt DateTime @map("expires_at")
 
   @@map("verification_codes")
 }
 
+/// OTP send audit for rate limiting (one row per send attempt).
+model OtpSendLog {
+  id     String   @id @default(uuid())
+  phone  String
+  sentAt DateTime @default(now()) @map("sent_at")
+
+  @@index([phone, sentAt])
+  @@map("otp_send_logs")
+}
+
 /// Consultation / lead request submitted from the public form.
 model Project {
-  id                String   @id @default(uuid())
-  createdAt         DateTime @default(now()) @map("created_at")
-  serviceType       String   @map("service_type")
-  city              String   @default("tehran")
-  brief             String
-  referenceLink     String?  @map("reference_link")
-  serviceDetails    String?  @map("service_details")
-  contactName       String?  @map("contact_name")
-  contactPhone      String?  @map("contact_phone")
-  preferredCallTime String?  @map("preferred_call_time")
-  budget            String?
-  adminNotes        String?  @map("admin_notes")
-  bookingRoute      String   @default("meeting_request") @map("booking_route")
-  status            String   @default("PENDING")
-  financialModel    String   @default("45_45_10_split") @map("financial_model")
+  id                  String   @id @default(uuid())
+  createdAt           DateTime @default(now()) @map("created_at")
+  serviceType         String   @map("service_type")
+  city                String   @default("tehran")
+  brief               String
+  referenceLink       String?  @map("reference_link")
+  serviceDetails      String?  @map("service_details")
+  contactName         String?  @map("contact_name")
+  contactPhone        String?  @map("contact_phone")
+  preferredCallTime   String?  @map("preferred_call_time")
+  budget              String?
+  adminNotes          String?  @map("admin_notes")
+  bookingRoute        String   @default("meeting_request") @map("booking_route")
+  status              String   @default("PENDING")
+  paymentStatus       String   @default("FULL") @map("payment_status")
+  financialModel      String   @default("45_45_10_split") @map("financial_model")
+  googleDriveFolderId String?  @map("google_drive_folder_id")
+  totalSize           Float    @default(0) @map("total_size")
 
   userId String? @map("user_id")
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -72,4 +120,355 @@ model Project {
 
   @@index([createdAt])
   @@map("projects")
+}
+
+/// Comprehensive photography and videography orders submitted via /order.
+model Order {
+  id                  String   @id @default(uuid())
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Service category
+  categorySlug        String   @map("category_slug")
+  categoryTitle       String?  @map("category_title")
+
+  // Scheduling
+  isFlexibleSchedule  Boolean  @default(true) @map("is_flexible_schedule")
+  bookingDate         String?  @map("booking_date")
+  timeSlot            String?  @map("time_slot")
+  durationHours       Int      @default(2) @map("duration_hours")
+
+  // Location
+  locationType        String   @default("SPECIALIST_ADVICE") @map("location_type") // CLIENT_LOCATION, SPECIALIST_ADVICE, JAR_STUDIO
+  locationAddress     String?  @map("location_address")
+  districtOrCity      String?  @map("district_or_city")
+
+  // Moodboard & References
+  referenceLink       String?  @map("reference_link")
+  moodboardUrls       String?  @map("moodboard_urls") // JSON Array string of URLs
+  projectDescription  String?  @map("project_description")
+
+  // Pricing & Deposit
+  isAutoPriced        Boolean  @default(true) @map("is_auto_priced")
+  hourlyRate          Int      @map("hourly_rate")
+  totalEstimatedPrice Int      @map("total_estimated_price")
+  depositAmount       Int      @default(0) @map("deposit_amount")
+  status              String   @default("MATCHING") // Real states: PENDING_DEPOSIT, DEPOSIT_PAID, MATCHING, HAS_APPLICANTS, AWAITING_SPECIALIST_CONFIRMATION, CONFIRMED, COMPLETED, CANCELLED
+
+  // Client info
+  contactName         String?  @map("contact_name")
+  contactPhone        String?  @map("contact_phone")
+  adminCancelNote     String?  @map("admin_cancel_note")
+
+  userId               String?           @map("user_id")
+  user                 User?             @relation("ClientOrders", fields: [userId], references: [id], onDelete: SetNull)
+
+  selectedSpecialistId String?           @map("selected_specialist_id")
+  selectedSpecialist   User?             @relation("SelectedSpecialistOrders", fields: [selectedSpecialistId], references: [id], onDelete: SetNull)
+
+  interests            ProjectInterest[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+/// Specialist interest / proposal submitted for an Order.
+model ProjectInterest {
+  id            String   @id @default(uuid())
+  orderId       String   @map("order_id")
+  specialistId  String   @map("specialist_id")
+  message       String?
+  proposedPrice Int?     @map("proposed_price")
+  status        String   @default("PENDING") // Real states: PENDING, SELECTED, ACCEPTED, DECLINED, WITHDRAWN, REJECTED, CANCELLED
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  specialist User  @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, specialistId])
+  @@index([orderId])
+  @@index([specialistId])
+  @@map("project_interests")
+}
+
+/// Course offered in Jaramooz educational platform.
+model Course {
+  id                 String   @id @default(uuid())
+  title              String
+  description        String
+  price              Int
+  slug               String   @unique
+  image              String
+  spotplayerCourseId String?  @map("spotplayer_course_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  purchases Purchase[]
+
+  @@map("courses")
+}
+
+/// Purchase record for courses.
+model Purchase {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  courseId   String   @map("course_id")
+  status     String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  amount     Int?     @map("amount")
+  authority  String?  @unique
+  refId      String?  @map("ref_id")
+  licenseKey String?  @map("license_key")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@map("purchases")
+}
+
+model DiscountCode {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  discountPercent Int       @map("discount_percent")
+  maxAmount       Int?      @map("max_amount")
+  targetPlan      String?   @map("target_plan")
+  targetPlanId    String?   @map("target_plan_id")
+  targetPhone     String?   @map("target_phone")
+  durationMonths  Int?      @map("duration_months")
+  maxUsage        Int       @map("max_usage")
+  usedCount       Int       @default(0) @map("used_count")
+  expiresAt       DateTime? @map("expires_at")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@map("discount_codes")
+}
+
+/// Dynamic subscription plans for specialists.
+model Plan {
+  id            String   @id @default(uuid())
+  key           String   @unique
+  nameFa        String   @map("name_fa")
+  price3Months  Int      @map("price_3_months")
+  price12Months Int      @map("price_12_months")
+  features      String
+  maxStorage    Int      @default(0) @map("max_storage")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  transactions  Transaction[]
+
+  @@map("plans")
+}
+
+/// Settings and customizations for the Progressive Web App (PWA).
+model PwaSettings {
+  id                    String   @id @default("system-config")
+  shortName             String   @map("short_name")
+  fullName              String   @map("full_name")
+  description           String
+  appIcon               String   @map("app_icon")
+  appleTouchIcon        String   @map("apple_touch_icon")
+  themeColor            String   @map("theme_color")
+  splashBackgroundColor String   @map("splash_background_color")
+  showIosPrompt         Boolean  @default(true) @map("show_ios_prompt")
+  galleryCommission     Int      @default(0) @map("gallery_commission") // Dynamic photo sale commission percentage (0 to 100)
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("pwa_settings")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  title     String
+  message   String
+  type      String    @default("INFO") // INFO, SUCCESS, WARNING
+  channel   String    @default("IN_APP") // IN_APP, SMS, EMAIL
+  isRead    Boolean   @default(false) @map("is_read")
+  readAt    DateTime? @map("read_at")
+  link      String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  title     String
+  content   String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("notification_templates")
+}
+
+model Transaction {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  planId         String   @map("plan_id")
+  amount         Int
+  durationMonths Int      @default(3) @map("duration_months")
+  discountCode   String?  @map("discount_code")
+  status         String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  authority      String   @unique
+  refId          String?  @map("ref_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+model GalleryProject {
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  title             String
+  slug              String            @unique
+  accessCode        String?           @unique @map("access_code")
+  price             Int               @default(0) // Price per shot/photo
+  discountThreshold Int?              @map("discount_threshold")
+  discountedPrice   Int?              @map("discounted_price")
+  description       String?
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  photos    GalleryPhoto[]
+  orders    GalleryOrder[]
+  purchases GalleryPurchase[]
+
+  @@map("gallery_projects")
+}
+
+model GalleryPhoto {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  originalUrl    String   @map("original_url")
+  watermarkedUrl String?  @map("watermarked_url") // watermarked preview thumbnail URL
+  fileName       String   @map("file_name")
+  fileSize       Int      @map("file_size") // in bytes
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  project    GalleryProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  orderItems GalleryOrderItem[]
+
+  @@map("gallery_photos")
+}
+
+model GalleryOrder {
+  id        String             @id @default(uuid())
+  phone     String             @map("phone") // customer's phone number
+  projectId String             @map("project_id")
+  amount    Int
+  status    String             @default("PENDING") // PENDING, SUCCESS, FAILED
+  authority String?            @unique
+  refId     String?            @map("ref_id")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  project GalleryProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   GalleryOrderItem[]
+
+  @@map("gallery_orders")
+}
+
+model GalleryOrderItem {
+  id      String @id @default(uuid())
+  orderId String @map("order_id")
+  photoId String @map("photo_id")
+
+  order GalleryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  photo GalleryPhoto @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@map("gallery_order_items")
+}
+
+model WithdrawalRequest {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id") // The photographer user making the request
+  amount       Float
+  shabaNumber  String   @map("shaba_number")
+  status       String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  trackingCode String?  @map("tracking_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("withdrawal_requests")
+}
+
+model GalleryPurchase {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  clientPhone       String   @map("client_phone")
+  purchasedPhotoIds String   @map("purchased_photo_ids") // comma-separated photo IDs
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  project GalleryProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("gallery_purchases")
+}
+
+model SpecialistProfile {
+  id                 String    @id @default(uuid())
+  userId             String    @unique @map("user_id")
+  status             String    @default("INCOMPLETE") // SpecialistStatus: INCOMPLETE, PENDING_REVIEW, ACTIVE, SUSPENDED
+  city               String?
+  workArea           String?   @map("work_area")
+  bio                String?
+  equipmentSummary   String?   @map("equipment_summary")
+  selectedCategories String?   @map("selected_categories") // JSON string of selected category slugs
+  agreedToTerms      Boolean   @default(false) @map("agreed_to_terms")
+  termsAgreedAt      DateTime? @map("terms_agreed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portfolioItems PortfolioItem[]
+
+  @@map("specialist_profiles")
+}
+
+/// Specialist portfolio items categorized by service category
+model PortfolioItem {
+  id           String   @id @default(uuid())
+  specialistId String   @map("specialist_id")
+  categorySlug String   @map("category_slug")
+  categoryType String   @map("category_type") // PERSONAL or COMMERCIAL
+  fileUrl      String   @map("file_url")
+  mediaType    String   @map("media_type") // IMAGE or VIDEO
+  title        String?
+  caption      String?
+  fileSize     Int?     @map("file_size")
+  reviewStatus String   @default("PENDING") @map("review_status") // PENDING, APPROVED, REJECTED
+  rejectionReason String? @map("rejection_reason")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  specialist SpecialistProfile @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+
+  @@map("portfolio_items")
+}
+
+/// Audit log for tracking administrative actions and system modifications.
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?  @map("actor_id")
+  action      String
+  targetModel String   @map("target_model")
+  targetId    String   @map("target_id")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([targetModel, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

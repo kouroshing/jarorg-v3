@@ -1,6 +1,6 @@
 export default function AdminLoading() {
   return (
-    <div className="mx-auto w-full max-w-5xl animate-pulse">
+    <div className="mx-auto w-full max-w-[1360px] animate-pulse px-4 sm:px-8">
       <div className="mb-8 space-y-3">
         <div className="h-4 w-28 rounded-full bg-gray-100" />
         <div className="h-8 w-56 rounded-full bg-gray-100" />

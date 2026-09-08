@@ -1,0 +1,9 @@
+{
+  "appId": "ir.app.jarorg.online.novinappsaz",
+  "appName": "جار",
+  "webDir": "public",
+  "server": {
+    "url": "https://app.jarorg.ir",
+    "cleartext": true
+  }
+}

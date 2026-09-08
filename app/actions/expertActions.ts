@@ -1,6 +1,7 @@
 "use server";
 
 import { randomBytes } from "crypto";
+import xss from "xss";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { z } from "zod";
@@ -8,13 +9,10 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { isAdminSession } from "@/lib/auth/admin";
-
-const EXPERT_UPLOAD_DIR = path.join(
-  process.cwd(),
-  "public",
-  "uploads",
-  "experts"
-);
+import {
+  expertAvatarPublicUrl,
+  getExpertUploadDir,
+} from "@/lib/storage/uploads";
 const MAX_AVATAR_BYTES = 512 * 1024;
 
 const avatarUploadSchema = z.object({
@@ -142,16 +140,17 @@ export async function uploadExpertAvatar(input: {
   }
 
   const filename = `${Date.now()}-${randomBytes(4).toString("hex")}.jpg`;
-  const filePath = path.join(EXPERT_UPLOAD_DIR, filename);
+  const uploadDir = getExpertUploadDir();
+  const filePath = path.join(uploadDir, filename);
 
   try {
-    await mkdir(EXPERT_UPLOAD_DIR, { recursive: true });
+    await mkdir(uploadDir, { recursive: true });
     await writeFile(filePath, buffer);
   } catch {
     return { success: false, error: "ذخیره تصویر ناموفق بود." };
   }
 
-  return { success: true, url: `/uploads/experts/${filename}` };
+  return { success: true, url: expertAvatarPublicUrl(filename) };
 }
 
 /** Admin: list all experts (newest first). */
@@ -162,6 +161,14 @@ export async function getExperts(): Promise<ExpertsSuccess | ActionError> {
   try {
     const experts = await prisma.expert.findMany({
       orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        imageUrl: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+      },
     });
     return { success: true, experts };
   } catch {
@@ -187,9 +194,9 @@ export async function createExpert(
   try {
     const expert = await prisma.expert.create({
       data: {
-        name: parsed.data.name,
+        name: xss(parsed.data.name),
         imageUrl: parsed.data.imageUrl,
-        description: parsed.data.description,
+        description: xss(parsed.data.description),
         isActive: parsed.data.isActive ?? true,
       },
     });
@@ -224,9 +231,9 @@ export async function updateExpert(
     const expert = await prisma.expert.update({
       where: { id: idParsed.data.id },
       data: {
-        name: parsed.data.name,
+        name: xss(parsed.data.name),
         imageUrl: parsed.data.imageUrl,
-        description: parsed.data.description,
+        description: xss(parsed.data.description),
         isActive: parsed.data.isActive ?? true,
       },
     });

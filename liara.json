@@ -1,0 +1,18 @@
+{
+  "app": "jarorg",
+  "platform": "next",
+  "port": 3000,
+  "build": {
+    "disabled": false
+  },
+  "disks": [
+    {
+      "name": "uploads",
+      "mountTo": "/app/public/uploads"
+    },
+    {
+      "name": "data",
+      "mountTo": "/app/data"
+    }
+  ]
+}

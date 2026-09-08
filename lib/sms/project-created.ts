@@ -5,7 +5,7 @@ import { sendSmsByPattern } from "@/lib/sms/ippanel";
 
 function getAdminNotificationPatternCode(): string | undefined {
   return (
-    process.env.NEXT_PUBLIC_ADMIN_NOTIF_PATTERN_CODE?.trim() ||
+    process.env.ADMIN_NOTIF_PATTERN_CODE?.trim() ||
     process.env.IPPANEL_PATTERN_ADMIN?.trim() ||
     undefined
   );
@@ -16,6 +16,7 @@ export type ProjectCreatedSmsPayload = {
   contactName: string;
   serviceType: string;
   projectId: string;
+  preferredCallTime?: string | null;
 };
 
 /**
@@ -59,15 +60,21 @@ async function dispatchProjectCreatedSms(
 
   const adminPhone = getAdminPhoneDigits();
   if (adminPattern && adminPhone) {
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/['"]/g, "")?.replace(/\/$/, "") || "https://jarorg.ir";
+    const projectLink = `${siteUrl}/admin/projects?q=${payload.projectId}`;
+
     tasks.push(
       sendPatternSafe("admin", payload.projectId, () =>
         sendSmsByPattern({
           recipient: adminPhone,
           patternCode: adminPattern,
           patternValues: {
-            name: payload.contactName,
-            phone: phoneDisplay,
-            service,
+            name: String(payload.contactName),
+            phone: String(phoneDisplay),
+            description: String(service),
+            link: String(projectLink),
+            time: String(payload.preferredCallTime || "مشخص نشده"),
+            budget: "مشخص نشده"
           },
         })
       )

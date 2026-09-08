@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import xss from "xss";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
@@ -17,6 +18,7 @@ import {
   getOfferingById,
 } from "@/lib/projects/service-offerings";
 import { checkProjectSubmissionRateLimit } from "@/lib/projects/submission-rate-limit";
+import { triggerEvent } from "@/lib/jarchiEngine";
 const projectInputSchema = z
   .object({
     serviceAudience: z.enum(SERVICE_AUDIENCES),
@@ -115,7 +117,7 @@ export async function submitProjectRequest(
 
     const offering = getOfferingById(data.serviceOfferingId)!;
 
-    const brief = composeBriefWithOffering(offering, data.briefNotes, null);
+    const brief = composeBriefWithOffering(offering, xss(data.briefNotes), null);
 
     const serviceDetails = buildOfferingServiceDetailsJson(offering, null);
 
@@ -141,7 +143,7 @@ export async function submitProjectRequest(
         brief,
         referenceLink: data.referenceLink ?? null,
         serviceDetails,
-        contactName: data.name,
+        contactName: xss(data.name),
         contactPhone,
         preferredCallTime: data.callTime,
         budget: data.budget,
@@ -152,11 +154,27 @@ export async function submitProjectRequest(
       },
     });
 
+    let targetUserId = session?.userId ?? null;
+    if (!targetUserId && contactPhone) {
+      const matchedUser = await prisma.user.findUnique({
+        where: { phone: contactPhone },
+        select: { id: true }
+      });
+      if (matchedUser) {
+        targetUserId = matchedUser.id;
+      }
+    }
+
+    if (targetUserId) {
+      triggerEvent("new-project-created", { userId: targetUserId, projectId: project.id });
+    }
+
     sendProjectCreatedSmsNotifications({
       contactPhone,
       contactName: data.name,
       serviceType: project.serviceType,
       projectId: project.id,
+      preferredCallTime: project.preferredCallTime,
     });
 
     return { success: true, id: project.id };
@@ -207,7 +225,7 @@ export async function updateProjectLead(
           ? { status: parsed.data.status }
           : {}),
         ...(parsed.data.adminNotes !== undefined
-          ? { adminNotes: parsed.data.adminNotes }
+          ? { adminNotes: xss(parsed.data.adminNotes) }
           : {}),
       },
     });
@@ -235,26 +253,151 @@ export async function updateProjectNote(input: {
   return updateProjectLead({ id: input.id, adminNotes: input.adminNotes });
 }
 
+export type GetAdminProjectsParams = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  q?: string;
+};
+
 export type GetAdminProjectsResult =
-  | { success: true; projects: AdminProjectRecord[] }
+  | {
+      success: true;
+      projects: AdminProjectRecord[];
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }
   | { success: false; error: string };
 
-/** Admin-only: all projects for lead management. */
-export async function getAdminProjects(): Promise<GetAdminProjectsResult> {
+const ADMIN_PAGE_SIZE = 20;
+
+/** Admin-only: paginated projects for lead management. */
+export async function getAdminProjects(
+  params: GetAdminProjectsParams = {}
+): Promise<GetAdminProjectsResult> {
+  const session = await getSession();
+  if (!session || !isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز." };
+  }
+
+  const page = Math.max(1, params.page ?? 1);
+  const limit = Math.min(50, Math.max(1, params.limit ?? ADMIN_PAGE_SIZE));
+  const skip = (page - 1) * limit;
+
+  const where: {
+    status?: string;
+    OR?: Array<{
+      id?: string;
+      contactName?: { contains: string };
+      contactPhone?: { contains: string };
+      brief?: { contains: string };
+    }>;
+  } = {};
+
+  const statusFilter = params.status?.trim();
+  if (
+    statusFilter &&
+    statusFilter !== "all" &&
+    (ADMIN_STATUSES as readonly string[]).includes(statusFilter)
+  ) {
+    where.status = statusFilter;
+  }
+
+  const query = params.q?.trim();
+  if (query) {
+    where.OR = [
+      { id: query },
+      { contactName: { contains: query } },
+      { contactPhone: { contains: query } },
+      { brief: { contains: query } },
+    ];
+  }
+
+  try {
+    const [projects, total] = await Promise.all([
+      prisma.project.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          createdAt: true,
+          serviceType: true,
+          serviceDetails: true,
+          city: true,
+          brief: true,
+          contactName: true,
+          contactPhone: true,
+          preferredCallTime: true,
+          budget: true,
+          referenceLink: true,
+          status: true,
+          adminNotes: true,
+          expert: { select: { name: true } },
+        },
+      }),
+      prisma.project.count({ where }),
+    ]);
+
+    return {
+      success: true,
+      projects,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+  } catch {
+    return { success: false, error: "خطا در دریافت پروژه‌ها." };
+  }
+}
+
+/** Admin-only: Manually activate a course purchase and generate a simulated license. */
+export async function manuallyApprovePurchase(input: {
+  purchaseId: string;
+}): Promise<{ success: boolean; error?: string }> {
   const session = await getSession();
   if (!session || !isAdminSession(session)) {
     return { success: false, error: "دسترسی غیرمجاز." };
   }
 
   try {
-    const projects = await prisma.project.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        expert: { select: { name: true } },
+    const purchase = await prisma.purchase.findUnique({
+      where: { id: input.purchaseId },
+    });
+
+    if (!purchase) {
+      return { success: false, error: "تراکنش یافت نشد." };
+    }
+
+    if (purchase.status === "SUCCESS") {
+      return { success: true };
+    }
+
+    const testLicenseKey = `SP-TEST-LIC-${Math.random()
+      .toString(36)
+      .substring(2, 10)
+      .toUpperCase()}-${Math.random()
+      .toString(36)
+      .substring(2, 10)
+      .toUpperCase()}`;
+
+    await prisma.purchase.update({
+      where: { id: input.purchaseId },
+      data: {
+        status: "SUCCESS",
+        licenseKey: testLicenseKey,
       },
     });
-    return { success: true, projects };
-  } catch {
-    return { success: false, error: "خطا در دریافت پروژه‌ها." };
+
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error) {
+    console.error("[manually_approve_purchase_error]", error);
+    return { success: false, error: "خطا در تایید تراکنش و صدور لایسنس." };
   }
 }
+

@@ -1,6 +1,6 @@
 export default function RootLoading() {
   return (
-    <div className="mx-auto w-full max-w-5xl animate-pulse px-5 py-8 md:px-8">
+    <div className="mx-auto w-full max-w-[1360px] animate-pulse px-4 py-8 sm:px-8">
       <div className="mb-8 h-12 rounded-2xl border border-gray-100 bg-gray-50" />
 
       <div className="mb-8 space-y-4 rounded-3xl border border-gray-100 bg-gray-50 p-6">
