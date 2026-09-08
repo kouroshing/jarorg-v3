@@ -126,8 +126,8 @@ export async function createWithdrawalRequest(
       return { success: false, error: "شماره شبا وارد شده نامعتبر است. باید با IR شروع شده و ۲۶ کاراکتر باشد." };
     }
 
-    if (amount <= 0) {
-      return { success: false, error: "مبلغ درخواستی تسویه حساب باید بیشتر از صفر باشد." };
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return { success: false, error: "مبلغ درخواستی تسویه حساب باید عددی صحیح و بیشتر از صفر باشد." };
     }
 
     const res = await prisma.$transaction(async (tx) => {
@@ -141,13 +141,14 @@ export async function createWithdrawalRequest(
       }
 
       // Deduct immediately
-      await tx.user.update({
+      const updated = await tx.user.update({
         where: { id: session.userId },
         data: {
           walletBalance: {
             decrement: amount
           }
-        }
+        },
+        select: { walletBalance: true }
       });
 
       // Log request
@@ -157,6 +158,19 @@ export async function createWithdrawalRequest(
           amount,
           shabaNumber: cleanShaba,
           status: "PENDING"
+        }
+      });
+
+      // Every balance change gets a ledger row, so a specialist can always see
+      // why their wallet holds what it holds.
+      await tx.walletEntry.create({
+        data: {
+          userId: session.userId,
+          amount: -amount,
+          type: "WITHDRAWAL",
+          balanceAfter: updated.walletBalance,
+          withdrawalId: request.id,
+          note: `درخواست تسویه به شبا ${cleanShaba.slice(0, 6)}…${cleanShaba.slice(-4)}`
         }
       });
 
@@ -264,12 +278,24 @@ export async function updateWithdrawalStatus(
 
       // If rejected, refund balance to user
       if (status === "REJECTED") {
-        await tx.user.update({
+        const refunded = await tx.user.update({
           where: { id: request.userId },
           data: {
             walletBalance: {
               increment: request.amount
             }
+          },
+          select: { walletBalance: true }
+        });
+
+        await tx.walletEntry.create({
+          data: {
+            userId: request.userId,
+            amount: request.amount,
+            type: "WITHDRAWAL_REFUND",
+            balanceAfter: refunded.walletBalance,
+            withdrawalId: request.id,
+            note: "بازگشت مبلغ به دلیل رد شدن درخواست تسویه"
           }
         });
       }

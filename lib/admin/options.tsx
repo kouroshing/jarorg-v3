@@ -692,7 +692,7 @@ export const options: NextAdminOptions = {
       },
     },
     PwaSettings: {
-      title: "تنظیمات PWA و مانیفست",
+      title: "تنظیمات پلتفرم و مارکت‌پلیس",
       icon: "Cog6ToothIcon",
       aliases: {
         id: "شناسه",
@@ -701,10 +701,34 @@ export const options: NextAdminOptions = {
         description: "توضیحات",
         themeColor: "رنگ تم",
         galleryCommission: "درصد کارمزد فروش عکس گالری",
+        specialistCommission: "درصد کمیسیون جار از دستمزد متخصص",
+        travelFreeRadiusKm: "شعاع رایگان ایاب‌وذهاب (کیلومتر)",
+        travelRatePerKm: "نرخ ایاب‌وذهاب به ازای هر کیلومتر (تومان)",
         showIosPrompt: "نمایش پرامپت نصب در iOS",
       },
       list: {
-        display: ["shortName", "fullName", "galleryCommission", "showIosPrompt"],
+        display: [
+          "shortName",
+          "specialistCommission",
+          "travelRatePerKm",
+          "travelFreeRadiusKm",
+          "galleryCommission",
+        ],
+      },
+      edit: {
+        fields: {
+          specialistCommission: {
+            helperText:
+              "درصدی که جار از دستمزد متخصص برمی‌دارد. از هزینه ایاب‌وذهاب کمیسیون گرفته نمی‌شود. صفر یعنی بدون کمیسیون.",
+          },
+          travelRatePerKm: {
+            helperText:
+              "هزینه هر کیلومتر فراتر از شعاع رایگان. رفت‌وبرگشت حساب می‌شود. صفر یعنی ایاب‌وذهاب رایگان است.",
+          },
+          travelFreeRadiusKm: {
+            helperText: "تا این فاصله هیچ هزینه ایاب‌وذهابی از مشتری گرفته نمی‌شود.",
+          },
+        },
       },
     },
     Project: {

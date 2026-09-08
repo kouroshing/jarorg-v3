@@ -59,13 +59,26 @@ export async function GET(request: Request) {
           }
         });
 
-        await tx.user.update({
+        const credited = await tx.user.update({
           where: { id: order.project.userId },
           data: {
             walletBalance: {
               increment: expertShare
             }
-          }
+          },
+          select: { walletBalance: true }
+        });
+
+        // Same ledger the order settlements write to, so the wallet statement
+        // shows gallery sales and project payouts side by side.
+        await tx.walletEntry.create({
+          data: {
+            userId: order.project.userId,
+            amount: expertShare,
+            type: "GALLERY_SALE",
+            balanceAfter: credited.walletBalance,
+            note: `فروش عکس از آلبوم «${order.project.title}»`,
+          },
         });
       });
 
@@ -118,13 +131,26 @@ export async function GET(request: Request) {
           }
         });
 
-        await tx.user.update({
+        const credited = await tx.user.update({
           where: { id: order.project.userId },
           data: {
             walletBalance: {
               increment: expertShare
             }
-          }
+          },
+          select: { walletBalance: true }
+        });
+
+        // Same ledger the order settlements write to, so the wallet statement
+        // shows gallery sales and project payouts side by side.
+        await tx.walletEntry.create({
+          data: {
+            userId: order.project.userId,
+            amount: expertShare,
+            type: "GALLERY_SALE",
+            balanceAfter: credited.walletBalance,
+            note: `فروش عکس از آلبوم «${order.project.title}»`,
+          },
         });
       });
 
