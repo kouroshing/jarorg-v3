@@ -1,7 +1,9 @@
 /** App-level enums (stored as String in SQLite; use native enums when on MySQL). */
 
-export const USER_ROLES = ["USER", "ADMIN"] as const;
-export type UserRole = (typeof USER_ROLES)[number];
+// User roles live in lib/auth/roles.ts. This file used to declare its own
+// USER_ROLES = ["USER", "ADMIN"] with a parseUserRole() that mapped anything
+// unrecognised to "USER" — which would have quietly demoted every SPECIALIST
+// the first time somebody called it. Nothing did, and both are now gone.
 
 export const PROJECT_STATUSES = [
   "PENDING",
@@ -21,10 +23,6 @@ const LEGACY_STATUS_MAP: Record<string, ProjectStatus> = {
   completed: "COMPLETED",
   canceled: "CANCELED",
 };
-
-export function parseUserRole(value: string): UserRole {
-  return value === "ADMIN" ? "ADMIN" : "USER";
-}
 
 export function parseProjectStatus(value: string): ProjectStatus {
   if ((PROJECT_STATUSES as readonly string[]).includes(value)) {

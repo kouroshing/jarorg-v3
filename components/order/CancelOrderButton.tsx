@@ -4,6 +4,7 @@ import React, { useState, useEffect, useTransition } from "react";
 import { XCircle, Loader2, Lock, Clock, AlertTriangle } from "lucide-react";
 import { cancelOrderByClientAction } from "@/app/actions/marketplaceActions";
 import { useRouter } from "next/navigation";
+import { isClientCancellable } from "@/lib/orders/status";
 
 interface CancelOrderButtonProps {
   orderId: string;
@@ -54,10 +55,9 @@ export default function CancelOrderButton({
     return () => clearInterval(interval);
   }, [createdTimestamp]);
 
-  const ALLOWED_STATUSES = ["PENDING_DEPOSIT", "DEPOSIT_PAID", "MATCHING", "HAS_APPLICANTS"];
   const isEligibleStatus =
     isOwnerOrAdmin &&
-    ALLOWED_STATUSES.includes(orderStatus) &&
+    isClientCancellable(orderStatus) &&
     !hasSelectedSpecialist;
 
   if (!isEligibleStatus) {

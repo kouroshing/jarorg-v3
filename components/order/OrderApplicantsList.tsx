@@ -21,6 +21,7 @@ import {
   selectSpecialistForOrderAction,
 } from "@/app/actions/marketplaceActions";
 import { formatPrice } from "./BudgetSlider";
+import { parseOrderStatus } from "@/lib/orders/status";
 
 interface OrderApplicantsListProps {
   orderId: string;
@@ -74,8 +75,10 @@ export default function OrderApplicantsList({
   };
 
 
-  const isAwaitingConfirmation = currentStatus === "AWAITING_SPECIALIST_CONFIRMATION";
-  const isFinalMatched = currentStatus === "CONFIRMED" || currentStatus === "MATCHED";
+  const isAwaitingConfirmation =
+    parseOrderStatus(currentStatus) === "AWAITING_SPECIALIST_CONFIRMATION";
+  // Legacy rows still store "MATCHED"; parseOrderStatus folds it into CONFIRMED.
+  const isFinalMatched = parseOrderStatus(currentStatus) === "CONFIRMED";
 
   // Selected applicant if in confirmation or matched
   const selectedApplicant = applicants.find(

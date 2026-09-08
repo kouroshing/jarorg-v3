@@ -1,10 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // Type errors fail the build again. They were ignored, which left the project
+  // with no automated check at all — `tsc --noEmit` passes today, so the switch
+  // was costing safety and buying nothing.
   eslint: {
+    // Still ignored: there is no eslint config in the repo yet, so enabling this
+    // would fail the build on missing setup rather than on real problems.
     ignoreDuringBuilds: true,
   },
   images: {

@@ -38,29 +38,9 @@ export function phoneToLocalDisplay(digits: string): string {
   return d;
 }
 
-/** Highly permissive normalizer for Iran mobile input */
-export function normalizePermissiveIranMobile(raw: string): string {
-  // 1. Convert Persian/Arabic digits to English digits
-  let cleaned = toEnglishDigits(raw);
-
-  // 2. Remove all non-numeric characters
-  cleaned = cleaned.replace(/\D/g, "");
-
-  // 3. Handle international prefixes: 0098... or 98...
-  if (cleaned.startsWith("0098")) {
-    cleaned = "0" + cleaned.slice(4);
-  } else if (cleaned.startsWith("98") && cleaned.length > 10) {
-    cleaned = "0" + cleaned.slice(2);
-  }
-
-  // 4. Handle missing leading zero: if starts with 9, prepend 0
-  if (cleaned.startsWith("9") && !cleaned.startsWith("98")) {
-    cleaned = "0" + cleaned;
-  } else if (cleaned.startsWith("9") && cleaned.length === 10) {
-    cleaned = "0" + cleaned;
-  } else if (cleaned === "9") {
-    cleaned = "09";
-  }
-
-  return cleaned;
-}
+// A second normalizer, `normalizePermissiveIranMobile`, used to live here and
+// produced the local `09…` form instead of the canonical `98…` one. Nothing
+// imported it, but test scripts wrote `09…` rows directly, so the users table
+// ended up holding both shapes — the same person as two accounts, and profile
+// lookups on contactPhone silently missing their own orders.
+// `normalizePhoneDigits` above is the only normalizer. Keep it that way.

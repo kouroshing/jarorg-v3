@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { OrderStatus } from "@/lib/orders/status";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     if (!merchantId || merchantId === "sandbox") {
       await prisma.order.update({
         where: { id: orderId },
-        data: { status: "DEPOSIT_PAID" },
+        data: { status: "DEPOSIT_PAID" satisfies OrderStatus },
       });
       return NextResponse.redirect(new URL(`/order/${orderId}?payment=success`, request.url));
     }
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
     if (verifyRes.ok && (verifyData?.data?.code === 100 || verifyData?.data?.code === 101)) {
       await prisma.order.update({
         where: { id: orderId },
-        data: { status: "DEPOSIT_PAID" },
+        data: { status: "DEPOSIT_PAID" satisfies OrderStatus },
       });
       return NextResponse.redirect(new URL(`/order/${orderId}?payment=success`, request.url));
     } else {

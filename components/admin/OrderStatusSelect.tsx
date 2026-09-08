@@ -3,19 +3,10 @@
 import React from "react";
 import type { CustomInputProps } from "@premieroctet/next-admin";
 
-export const ORDER_STATUS_OPTIONS = [
-  { value: "PENDING_REVIEW", label: "در حال بررسی اولیه ادمین (PENDING_REVIEW)" },
-  { value: "CONTACTED", label: "تماس گرفته شد / در حال پیگیری (CONTACTED)" },
-  { value: "IN_PROGRESS", label: "در حال انجام پروژه (IN_PROGRESS)" },
-  { value: "CONFIRMED", label: "سفارش قطعی و تایید شده (CONFIRMED)" },
-  { value: "COMPLETED", label: "پروژه انجام و تحویل شده (COMPLETED)" },
-  { value: "CANCELLED", label: "لغو شده (CANCELLED)" },
-  { value: "PENDING_DEPOSIT", label: "در انتظار پرداخت بیعانه (PENDING_DEPOSIT)" },
-  { value: "DEPOSIT_PAID", label: "بیعانه پرداخت شده (DEPOSIT_PAID)" },
-  { value: "MATCHING", label: "در حال جستجو و تطبیق متخصص (MATCHING)" },
-  { value: "HAS_APPLICANTS", label: "دارای پیشنهاد متخصصان (HAS_APPLICANTS)" },
-  { value: "AWAITING_SPECIALIST_CONFIRMATION", label: "در انتظار تایید متخصص (AWAITING_SPECIALIST_CONFIRMATION)" },
-] as const;
+// Built from lib/orders/status.ts, so the dropdown always offers exactly the
+// states the rest of the app understands — and lists them in flow order.
+export { ORDER_STATUS_OPTIONS } from "@/lib/orders/status";
+import { ORDER_STATUS_OPTIONS } from "@/lib/orders/status";
 
 export const SPECIALIST_STATUS_OPTIONS = [
   { value: "INCOMPLETE", label: "اطلاعات ناقص (INCOMPLETE)" },
@@ -37,7 +28,7 @@ export const PROPOSAL_STATUS_OPTIONS = [
   { value: "REJECTED", label: "رد شده (REJECTED)" },
 ] as const;
 
-export type OrderStatusValue = typeof ORDER_STATUS_OPTIONS[number]["value"];
+export type { OrderStatus as OrderStatusValue } from "@/lib/orders/status";
 
 export default function OrderStatusSelect({
   name,

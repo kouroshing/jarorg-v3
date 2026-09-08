@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
+import type { OrderStatus } from "@/lib/orders/status";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -83,7 +84,7 @@ export async function createOrderAction(input: CreateOrderInput) {
         hourlyRate: input.hourlyRate,
         totalEstimatedPrice,
         depositAmount,
-        status: "PENDING_REVIEW",
+        status: "PENDING_REVIEW" satisfies OrderStatus,
         contactName: input.contactName || null,
         contactPhone: input.contactPhone || session.phone || null,
         userId: session.userId,

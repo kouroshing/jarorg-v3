@@ -5,6 +5,7 @@ import { approvePortfolioAction } from "@/app/actions/adminActionHandlers";
 import { prisma } from "@/lib/prisma";
 import { RenderBadges, RenderImageGallery } from "./formatters";
 import AdminBrandHeader from "@/components/admin/AdminBrandHeader";
+import { ORDER_STATUSES, isOrderStatus } from "@/lib/orders/status";
 
 export const options: NextAdminOptions = {
   title: "جار و جار آموز",
@@ -148,25 +149,9 @@ export const options: NextAdminOptions = {
         ],
         fields: {
           status: {
-            validate: (value) => {
-              const allowed = [
-                "PENDING_REVIEW",
-                "CONTACTED",
-                "IN_PROGRESS",
-                "PENDING_DEPOSIT",
-                "DEPOSIT_PAID",
-                "MATCHING",
-                "HAS_APPLICANTS",
-                "AWAITING_SPECIALIST_CONFIRMATION",
-                "CONFIRMED",
-                "COMPLETED",
-                "CANCELLED",
-              ];
-              return (
-                (typeof value === "string" && allowed.includes(value)) ||
-                `وضعیت نامعتبر است. مقادیر مجاز: ${allowed.join(", ")}`
-              );
-            },
+            validate: (value) =>
+              isOrderStatus(value) ||
+              `وضعیت نامعتبر است. مقادیر مجاز: ${ORDER_STATUSES.join(", ")}`,
           },
           moodboardUrls: {
             format: "json",
@@ -174,22 +159,9 @@ export const options: NextAdminOptions = {
         },
         hooks: {
           beforeDb: async (data) => {
-            const allowed = [
-              "PENDING_REVIEW",
-              "CONTACTED",
-              "IN_PROGRESS",
-              "PENDING_DEPOSIT",
-              "DEPOSIT_PAID",
-              "MATCHING",
-              "HAS_APPLICANTS",
-              "AWAITING_SPECIALIST_CONFIRMATION",
-              "CONFIRMED",
-              "COMPLETED",
-              "CANCELLED",
-            ];
-            if (data.status && typeof data.status === "string" && !allowed.includes(data.status)) {
+            if (data.status && !isOrderStatus(data.status)) {
               throw new HookError(400, {
-                error: `وضعیت نامعتبر است: ${data.status}. مقادیر مجاز عبارتند از: ${allowed.join(", ")}`,
+                error: `وضعیت نامعتبر است: ${data.status}. مقادیر مجاز عبارتند از: ${ORDER_STATUSES.join(", ")}`,
               });
             }
 

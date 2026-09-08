@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
-import { parseProjectStatus } from "@/lib/db/enums";
+import { isSpecialistRole } from "@/lib/auth/roles";
 import type { ProfileUser } from "@/lib/profile/types";
 import { ProfileDashboard } from "./ProfileDashboard";
 import { SpecialistDashboard } from "./SpecialistDashboard";
@@ -241,10 +241,10 @@ export default async function ProfilePage({
     memberSince,
   };
 
-  const isSpecialistUser =
-    (session.role as string) === "specialist" ||
-    user?.role?.toLowerCase() === "specialist" ||
-    session.phone === "989100138383";
+  // The session role is only "user" or "admin" — a specialist is identified by
+  // the database role. The previous check also compared session.role against
+  // "specialist", which can never match, and hard-coded one phone number.
+  const isSpecialistUser = isSpecialistRole(user?.role);
 
   const forceCustomer = searchParams?.role === "customer";
   const isSpecialist = isSpecialistUser && !forceCustomer;

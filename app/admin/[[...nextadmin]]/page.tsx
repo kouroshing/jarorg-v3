@@ -10,6 +10,10 @@ import SpecialistPortfolioReviewWidget from "@/components/admin/SpecialistPortfo
 import AdminDashboard, { DashboardData } from "@/components/admin/AdminDashboard";
 import AdminBrandHeader from "@/components/admin/AdminBrandHeader";
 import { persianTranslations } from "@/lib/admin/translations";
+import {
+  NEEDS_ADMIN_ACTION_STATUSES,
+  storedValuesFor,
+} from "@/lib/orders/status";
 
 export default async function AdminPage({
   params,
@@ -51,7 +55,7 @@ export default async function AdminPage({
     ] = await Promise.all([
       prisma.order.count({
         where: {
-          status: { in: ["MATCHING", "HAS_APPLICANTS"] },
+          status: { in: storedValuesFor(...NEEDS_ADMIN_ACTION_STATUSES) },
           OR: [
             { createdAt: { lt: twentyFourHoursAgo } },
             { selectedSpecialistId: null },
@@ -88,7 +92,7 @@ export default async function AdminPage({
       }),
       prisma.order.findMany({
         where: {
-          status: { in: ["MATCHING", "HAS_APPLICANTS"] },
+          status: { in: storedValuesFor(...NEEDS_ADMIN_ACTION_STATUSES) },
         },
         orderBy: {
           createdAt: "desc",

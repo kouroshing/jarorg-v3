@@ -34,6 +34,11 @@ import {
 import OrderApplicantsList from "@/components/order/OrderApplicantsList";
 import CancelOrderButton from "@/components/order/CancelOrderButton";
 import OrderWaitingHero from "@/components/order/OrderWaitingHero";
+import {
+  isAdminTriage,
+  isOnMarket,
+  orderStatusPresentation,
+} from "@/lib/orders/status";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +96,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
   const isOwnerOrAdmin = !!(isOwner || isAdmin);
 
   let applicants: ApplicantSpecialistView[] = [];
-  const isPendingFlow = ["PENDING_REVIEW", "CONTACTED", "IN_PROGRESS"].includes(order.status);
+  const isPendingFlow = isAdminTriage(order.status);
 
   if (isOwnerOrAdmin && !isPendingFlow) {
     const appResult = await getOrderApplicantsForClientAction(order.id);
@@ -100,75 +105,9 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
     }
   }
 
-  // Status mapping
-  const statusConfig: Record<string, { label: string; badgeBg: string; textColor: string }> = {
-    PENDING_REVIEW: {
-      label: "در حال بررسی توسط تیم جار",
-      badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
-      textColor: "text-[#CC785C]",
-    },
-    CONTACTED: {
-      label: "تماس گرفته شد / در حال پیگیری",
-      badgeBg: "bg-sky-100 text-sky-950 border-sky-300",
-      textColor: "text-sky-900",
-    },
-    IN_PROGRESS: {
-      label: "در حال انجام پروژه",
-      badgeBg: "bg-emerald-100 text-emerald-950 border-emerald-300",
-      textColor: "text-emerald-900",
-    },
-    PENDING_DEPOSIT: {
-      label: "در حال بررسی و هماهنگی",
-      badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
-      textColor: "text-[#CC785C]",
-    },
-    DEPOSIT_PAID: {
-      label: "در حال بررسی و هماهنگی",
-      badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
-      textColor: "text-[#CC785C]",
-    },
-    MATCHING: {
-      label: "در حال بررسی و هماهنگی",
-      badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
-      textColor: "text-[#CC785C]",
-    },
-    HAS_APPLICANTS: {
-      label: "دارای متقاضی متخصص - در انتظار انتخاب شما",
-      badgeBg: "bg-indigo-100 text-indigo-900 border-indigo-300",
-      textColor: "text-indigo-800",
-    },
-    AWAITING_SPECIALIST_CONFIRMATION: {
-      label: "در انتظار تأیید متخصص منتخب",
-      badgeBg: "bg-purple-100 text-purple-900 border-purple-300",
-      textColor: "text-purple-800",
-    },
-    CONFIRMED: {
-      label: "پروژه قطعی شده",
-      badgeBg: "bg-emerald-100 text-emerald-900 border-emerald-300",
-      textColor: "text-emerald-800",
-    },
-    MATCHED: {
-      label: "پروژه قطعی شده",
-      badgeBg: "bg-emerald-100 text-emerald-900 border-emerald-300",
-      textColor: "text-emerald-800",
-    },
-    COMPLETED: {
-      label: "تکمیل شده و تحویل داده شد",
-      badgeBg: "bg-slate-100 text-slate-900 border-slate-300",
-      textColor: "text-slate-800",
-    },
-    CANCELLED: {
-      label: "لغو شده",
-      badgeBg: "bg-rose-100 text-rose-900 border-rose-300",
-      textColor: "text-rose-800",
-    },
-  };
-
-  const currentStatus = statusConfig[order.status] || {
-    label: "ثبت شده",
-    badgeBg: "bg-[#FAF9F5] text-[#141413] border-[#E5E0D8]",
-    textColor: "text-[#141413]",
-  };
+  // Labels and badge colours live in lib/orders/status.ts so the admin
+  // dropdown and this page cannot drift apart again.
+  const currentStatus = orderStatusPresentation(order.status);
 
   // Location string label
   let locationLabel = "در محل کارفرما";
@@ -217,7 +156,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
         {/* Top Hero Banner - 72h Waiting Screen vs Radar vs Generic */}
         {isPendingFlow ? (
           <OrderWaitingHero order={order} />
-        ) : ["MATCHING", "HAS_APPLICANTS", "PENDING_DEPOSIT", "DEPOSIT_PAID"].includes(order.status) ? (
+        ) : isOnMarket(order.status) ? (
           <div className="rounded-[32px] border border-[#E5E0D8] bg-white p-6 sm:p-8 shadow-xs relative overflow-hidden">
             <div className="relative z-10 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">

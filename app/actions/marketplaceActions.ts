@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
+import {
+  type OrderStatus,
+  OPEN_TO_APPLICANTS_STATUSES,
+  isClientCancellable,
+  isOpenToApplicants,
+  storedValuesFor,
+} from "@/lib/orders/status";
 
 // -------------------------------------------------------------
 // Validation Schemas
@@ -125,7 +132,7 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
       where: {
         OR: [
           {
-            status: { in: ["DEPOSIT_PAID", "HAS_APPLICANTS", "MATCHING"] },
+            status: { in: storedValuesFor(...OPEN_TO_APPLICANTS_STATUSES) },
             NOT: {
               OR: [
                 { userId: session.userId },
@@ -264,11 +271,7 @@ export async function submitProjectInterestAction(
       return { success: false, error: "سفارش موردنظر یافت نشد." };
     }
 
-    if (
-      order.status !== "DEPOSIT_PAID" &&
-      order.status !== "HAS_APPLICANTS" &&
-      order.status !== "MATCHING"
-    ) {
+    if (!isOpenToApplicants(order.status)) {
       return {
         success: false,
         error: "این پروژه در حال حاضر امکان پذیرش متقاضی جدید ندارد.",
@@ -325,7 +328,7 @@ export async function submitProjectInterestAction(
       if (order.status === "DEPOSIT_PAID" || order.status === "MATCHING") {
         await tx.order.update({
           where: { id: orderId },
-          data: { status: "HAS_APPLICANTS" },
+          data: { status: "HAS_APPLICANTS" satisfies OrderStatus },
         });
       }
 
@@ -436,7 +439,7 @@ export async function withdrawProjectInterestAction(
       if (remainingActiveCount === 0 && interest.order.status === "HAS_APPLICANTS") {
         await tx.order.update({
           where: { id: interest.orderId },
-          data: { status: "MATCHING" },
+          data: { status: "MATCHING" satisfies OrderStatus },
         });
       }
     });
@@ -660,7 +663,7 @@ export async function selectSpecialistForOrderAction(
       await tx.order.update({
         where: { id: validOrderId },
         data: {
-          status: "AWAITING_SPECIALIST_CONFIRMATION",
+          status: "AWAITING_SPECIALIST_CONFIRMATION" satisfies OrderStatus,
           selectedSpecialistId: interest.specialistId,
         },
       });
@@ -764,7 +767,7 @@ export async function confirmSpecialistSelectionAction(
       // Finalize order status to CONFIRMED
       await tx.order.update({
         where: { id: validOrderId },
-        data: { status: "CONFIRMED" },
+        data: { status: "CONFIRMED" satisfies OrderStatus },
       });
 
       return {
@@ -970,8 +973,7 @@ export async function cancelOrderByClientAction(
         );
       }
 
-      const ALLOWED_CANCEL_STATUSES = ["PENDING_DEPOSIT", "DEPOSIT_PAID", "MATCHING", "HAS_APPLICANTS"];
-      if (!ALLOWED_CANCEL_STATUSES.includes(order.status)) {
+      if (!isClientCancellable(order.status)) {
         throw new Error("وضعیت فعلی سفارش امکان لغو مستقیم توسط کارفرما را ندارد.");
       }
 
