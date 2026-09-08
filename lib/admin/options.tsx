@@ -505,13 +505,29 @@ export const options: NextAdminOptions = {
         price3Months: "قیمت ۳ ماهه (تومان)",
         price12Months: "قیمت ۱۲ ماهه (تومان)",
         maxStorage: "حداکثر فضای ابری (بایت)",
+        dailyApplicationLimit: "سقف درخواست روزانه پروژه",
         features: "لیست قابلیت‌ها",
       },
       list: {
-        display: ["key", "nameFa", "price3Months", "price12Months", "features", "maxStorage"],
+        display: [
+          "key",
+          "nameFa",
+          "dailyApplicationLimit",
+          "price3Months",
+          "price12Months",
+          "maxStorage",
+        ],
         fields: {
           features: {
             formatter: (val) => RenderBadges(val, "bg-teal-50 text-teal-800 border-teal-200"),
+          },
+        },
+      },
+      edit: {
+        fields: {
+          dailyApplicationLimit: {
+            helperText:
+              "چند پروژه در روز، متخصصِ این پلن می‌تواند درخواست بدهد. این تنها مزیتی است که مستقیم به درآمد متخصص وصل است. صفر یعنی نامحدود.",
           },
         },
       },
@@ -704,6 +720,10 @@ export const options: NextAdminOptions = {
         specialistCommission: "درصد کمیسیون جار از دستمزد متخصص",
         travelFreeRadiusKm: "شعاع رایگان ایاب‌وذهاب (کیلومتر)",
         travelRatePerKm: "نرخ ایاب‌وذهاب به ازای هر کیلومتر (تومان)",
+        freeDailyApplicationLimit: "سقف درخواست روزانه — پلن رایگان",
+        noApplicantTimeoutHours: "مهلت بی‌درخواست ماندن سفارش (ساعت)",
+        selectionReminderHours: "یادآوری به کارفرما پس از (ساعت)",
+        selectionTimeoutDays: "بستن سفارش بی‌پاسخ پس از (روز)",
         showIosPrompt: "نمایش پرامپت نصب در iOS",
       },
       list: {
@@ -712,7 +732,8 @@ export const options: NextAdminOptions = {
           "specialistCommission",
           "travelRatePerKm",
           "travelFreeRadiusKm",
-          "galleryCommission",
+          "freeDailyApplicationLimit",
+          "selectionTimeoutDays",
         ],
       },
       edit: {
@@ -727,6 +748,17 @@ export const options: NextAdminOptions = {
           },
           travelFreeRadiusKm: {
             helperText: "تا این فاصله هیچ هزینه ایاب‌وذهابی از مشتری گرفته نمی‌شود.",
+          },
+          freeDailyApplicationLimit: {
+            helperText:
+              "متخصص بدون پلن فعال، روزانه چند پروژه می‌تواند درخواست بدهد. سقف پلن‌های پولی در بخش «پلن‌ها» تنظیم می‌شود. صفر یعنی نامحدود.",
+          },
+          noApplicantTimeoutHours: {
+            helperText: "پس از این مدت، سفارشی که هیچ متخصصی درخواست نداده به تیم جار گزارش می‌شود.",
+          },
+          selectionTimeoutDays: {
+            helperText:
+              "اگر کارفرما در این مدت هیچ متخصصی را انتخاب نکند، سفارش بسته و متخصص‌ها آزاد می‌شوند.",
           },
         },
       },

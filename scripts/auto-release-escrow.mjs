@@ -41,6 +41,9 @@ async function main() {
       paidAt: { not: null },
       status: "CONFIRMED",
       deliveredAt: { lte: cutoff },
+      // A client who raised a dispute is not a client who went quiet; those
+      // orders wait for an admin decision instead of paying out on schedule.
+      disputedAt: null,
     },
     select: {
       id: true,
@@ -92,9 +95,12 @@ async function main() {
       await prisma.$transaction(async (tx) => {
         const fresh = await tx.order.findUnique({
           where: { id: order.id },
-          select: { settledAt: true },
+          select: { settledAt: true, disputedAt: true },
         });
         if (fresh?.settledAt) throw new Error("ALREADY_SETTLED");
+        // Re-checked inside the transaction: a dispute raised between the
+        // query above and this write must still stop the payout.
+        if (fresh?.disputedAt) throw new Error("DISPUTED");
 
         const user = await tx.user.update({
           where: { id: order.selectedSpecialistId },
@@ -137,7 +143,9 @@ async function main() {
       released++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.log(`  ! ${order.id.slice(0, 8)} ${msg === "ALREADY_SETTLED" ? "already settled" : msg}`);
+      const label =
+        msg === "ALREADY_SETTLED" ? "already settled" : msg === "DISPUTED" ? "disputed — held" : msg;
+      console.log(`  ! ${order.id.slice(0, 8)} ${label}`);
       failed++;
     }
   }
@@ -153,7 +161,12 @@ async function reportWaiting() {
   const undelivered = await prisma.order.count({
     where: { settledAt: null, paidAt: { not: null }, status: "CONFIRMED", deliveredAt: null },
   });
-  console.log(`\nin grace period: ${waiting}   awaiting delivery: ${undelivered}`);
+  const disputed = await prisma.order.count({
+    where: { settledAt: null, disputedAt: { not: null }, disputeResolvedAt: null },
+  });
+  console.log(
+    `\nin grace period: ${waiting}   awaiting delivery: ${undelivered}   held by dispute: ${disputed}`
+  );
 }
 
 main()

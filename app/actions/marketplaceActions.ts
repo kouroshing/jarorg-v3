@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
 import { getMarketplaceSettings } from "@/lib/orders/settings";
+import { allowanceExhaustedMessage, getApplicationAllowance } from "@/lib/orders/limits";
 import { proposalTotal, quoteTravel } from "@/lib/orders/travel";
 import {
   type OrderStatus,
@@ -161,6 +162,7 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
   error?: string;
   redirectTo?: string;
   orders?: AvailableOrderSpecialistView[];
+  allowance?: { limit: number; used: number; remaining: number; planName: string; canApply: boolean };
 }> {
   try {
     const session = await getSession();
@@ -200,6 +202,12 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
             },
           },
         ],
+        // A project the specialist dismissed stays out of their feed.
+        NOT: {
+          interests: {
+            some: { specialistId: session.userId, status: "NOT_INTERESTED" },
+          },
+        },
       },
       include: {
         interests: {
@@ -304,7 +312,20 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
       };
     });
 
-    return { success: true, orders: mapped };
+    const allowance = await getApplicationAllowance(session.userId);
+
+    return {
+      success: true,
+      orders: mapped,
+      allowance: {
+        limit: allowance.limit,
+        used: allowance.used,
+        // Infinity does not survive serialisation to the client component.
+        remaining: Number.isFinite(allowance.remaining) ? allowance.remaining : -1,
+        planName: allowance.planName,
+        canApply: allowance.canApply,
+      },
+    };
   } catch (error: any) {
     console.error("Error in getAvailableOrdersForSpecialistAction:", error);
     return { success: false, error: "خطا در دریافت لیست پروژه‌های فعال." };
@@ -385,6 +406,14 @@ export async function submitProjectInterestAction(
       if (existing.status === "PENDING" || existing.status === "SELECTED" || existing.status === "ACCEPTED") {
         return { success: false, error: "شما قبلاً برای این پروژه اعلام آمادگی ثبت کرده‌اید." };
       }
+    }
+
+    // Daily cap. Checked here rather than in the UI alone, because the action is
+    // callable directly and the allowance is what protects clients' shortlists
+    // from being blanketed by a few specialists.
+    const allowance = await getApplicationAllowance(session.userId);
+    if (!allowance.canApply) {
+      return { success: false, error: allowanceExhaustedMessage(allowance) };
     }
 
     // Quote travel from the specialist's registered base to the shoot. Computed
@@ -1193,5 +1222,112 @@ export async function cancelOrderByClientAction(
       success: false,
       error: error?.message || "خطا در لغو سفارش.",
     };
+  }
+}
+
+// -------------------------------------------------------------
+// 9. Dismiss an order ("not for me")
+// -------------------------------------------------------------
+/**
+ * Takes a project off this specialist's board without applying to it.
+ *
+ * Before this there was no way to say no. WITHDRAWN means "I am taking back an
+ * application I already made" and DECLINED means "I was chosen and cannot do
+ * it" — neither is "this job is not for me". So a specialist's feed filled with
+ * work they had already decided against, every day, forever.
+ *
+ * Stored as a ProjectInterest row so the unique(orderId, specialistId)
+ * constraint does the deduplication, and so a dismissal can be undone by
+ * applying later. It does not consume the daily allowance: saying no should
+ * never be rationed, only saying yes.
+ */
+export async function dismissOrderAction(
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedOrderId = orderIdSchema.safeParse(orderId);
+    if (!parsedOrderId.success) {
+      return { success: false, error: parsedOrderId.error.issues[0].message };
+    }
+
+    const authCheck = await getAuthorizedSpecialist(session.userId);
+    if (!authCheck.isSpecialist) {
+      return { success: false, error: authCheck.error };
+    }
+
+    const existing = await prisma.projectInterest.findUnique({
+      where: {
+        orderId_specialistId: { orderId: parsedOrderId.data, specialistId: session.userId },
+      },
+      select: { id: true, status: true },
+    });
+
+    // An active proposal has to be withdrawn deliberately, not dismissed by
+    // accident — withdrawing tells the client, dismissing does not.
+    if (existing && ["PENDING", "SELECTED", "ACCEPTED"].includes(existing.status)) {
+      return {
+        success: false,
+        error: "شما برای این پروژه پیشنهاد فعال دارید. ابتدا آن را پس بگیرید.",
+      };
+    }
+
+    if (existing) {
+      await prisma.projectInterest.update({
+        where: { id: existing.id },
+        data: { status: "NOT_INTERESTED", updatedAt: new Date() },
+      });
+    } else {
+      await prisma.projectInterest.create({
+        data: {
+          orderId: parsedOrderId.data,
+          specialistId: session.userId,
+          status: "NOT_INTERESTED",
+        },
+      });
+    }
+
+    revalidatePath("/specialist/projects");
+    return { success: true };
+  } catch (error) {
+    console.error("Error in dismissOrderAction:", error);
+    return { success: false, error: "خطا در حذف پروژه از لیست شما." };
+  }
+}
+
+/**
+ * Undoes a dismissal, in case it was a misclick.
+ */
+export async function undismissOrderAction(
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    const parsedOrderId = orderIdSchema.safeParse(orderId);
+    if (!parsedOrderId.success) {
+      return { success: false, error: parsedOrderId.error.issues[0].message };
+    }
+
+    await prisma.projectInterest.deleteMany({
+      where: {
+        orderId: parsedOrderId.data,
+        specialistId: session.userId,
+        status: "NOT_INTERESTED",
+      },
+    });
+
+    revalidatePath("/specialist/projects");
+    return { success: true };
+  } catch (error) {
+    console.error("Error in undismissOrderAction:", error);
+    return { success: false, error: "خطا در بازگرداندن پروژه." };
   }
 }

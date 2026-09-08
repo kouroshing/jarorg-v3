@@ -181,6 +181,21 @@ model Order {
   paidAt           DateTime? @map("paid_at")
   paymentAuthority String?   @unique @map("payment_authority")
   paymentRefId     String?   @map("payment_ref_id")
+  // A client who is unhappy freezes the payout. Without this the auto-release
+  // pays out on schedule no matter what the client said, which turns any
+  // complaint into a complaint with no consequence.
+  disputedAt        DateTime? @map("disputed_at")
+  disputeReason     String?   @map("dispute_reason")
+  disputeResolvedAt DateTime? @map("dispute_resolved_at")
+  /// RELEASED (paid to the specialist) or REFUNDED (returned to the client).
+  disputeResolution String?   @map("dispute_resolution")
+
+  /// Last nudge sent to a client sitting on proposals without choosing one.
+  clientRemindedAt  DateTime? @map("client_reminded_at")
+
+  /// Set when an order has sat on the board with nobody applying.
+  noApplicantsAt    DateTime? @map("no_applicants_at")
+
   /// Set when the specialist reports the work delivered. The client then has a
   /// window to confirm or dispute before Jar releases the money.
   deliveredAt      DateTime? @map("delivered_at")
@@ -294,6 +309,9 @@ model Plan {
   price12Months Int      @map("price_12_months")
   features      String
   maxStorage    Int      @default(0) @map("max_storage")
+  /// Proposals a specialist on this plan may submit per day. The strongest
+  /// reason to upgrade a marketplace plan is more work, not a bigger badge.
+  dailyApplicationLimit Int @default(3) @map("daily_application_limit")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -323,6 +341,15 @@ model PwaSettings {
   travelFreeRadiusKm   Int      @default(8) @map("travel_free_radius_km")
   /// Toman charged per kilometre beyond the free radius.
   travelRatePerKm      Int      @default(0) @map("travel_rate_per_km")
+
+  /// Daily proposal allowance for a specialist with no active paid plan.
+  freeDailyApplicationLimit Int @default(3) @map("free_daily_application_limit")
+  /// Hours an order may sit with nobody applying before it is escalated.
+  noApplicantTimeoutHours   Int @default(48) @map("no_applicant_timeout_hours")
+  /// Hours a client may sit on proposals before being reminded.
+  selectionReminderHours    Int @default(72) @map("selection_reminder_hours")
+  /// Days after which an unanswered order is closed and the applicants freed.
+  selectionTimeoutDays      Int @default(7) @map("selection_timeout_days")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 

@@ -47,6 +47,8 @@ export async function settleOrder(
           paidAt: true,
           settledAt: true,
           settledAmount: true,
+          disputedAt: true,
+          disputeResolvedAt: true,
           selectedSpecialistId: true,
           categoryTitle: true,
           agreedBasePrice: true,
@@ -65,6 +67,15 @@ export async function settleOrder(
         return {
           kind: "error" as const,
           error: "این سفارش هنوز پرداخت نشده است؛ مبلغی برای تسویه وجود ندارد.",
+        };
+      }
+
+      // An open dispute freezes the payout. resolveDisputeAction closes the
+      // dispute before calling back in, so an admin decision still gets through.
+      if (order.disputedAt && !order.disputeResolvedAt && reason !== "ADMIN_RELEASED") {
+        return {
+          kind: "error" as const,
+          error: "کارفرما برای این پروژه اعتراض ثبت کرده است؛ تسویه تا بررسی متوقف است.",
         };
       }
 
@@ -161,6 +172,8 @@ export async function findOrdersDueForAutoRelease(now = new Date()) {
       paidAt: { not: null },
       deliveredAt: { lte: cutoff },
       status: "CONFIRMED",
+      // A client who complained is not a client who went quiet.
+      disputedAt: null,
     },
     select: {
       id: true,

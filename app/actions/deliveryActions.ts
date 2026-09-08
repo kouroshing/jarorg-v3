@@ -216,3 +216,172 @@ export async function getSettlementPreviewAction(orderId: string): Promise<
     payout,
   };
 }
+
+/**
+ * The client says the work is not acceptable, which freezes the payout.
+ *
+ * Without this, auto-release pays out on schedule regardless of what the client
+ * said — a complaint with no consequence. A dispute takes the order out of the
+ * auto-release query entirely; only an admin can move it after that.
+ */
+export async function raiseDisputeAction(
+  orderId: string,
+  reason: string
+): Promise<DeliveryResult> {
+  const session = await getSession();
+  if (!session?.userId) {
+    return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+  }
+
+  const parsed = orderIdSchema.safeParse(orderId);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  const trimmed = reason.trim();
+  if (trimmed.length < 15) {
+    return {
+      success: false,
+      error: "لطفاً حداقل در ۱۵ کاراکتر توضیح دهید مشکل چیست تا بتوانیم پیگیری کنیم.",
+    };
+  }
+  if (trimmed.length > 1500) {
+    return { success: false, error: "توضیح نمی‌تواند بیشتر از ۱۵۰۰ کاراکتر باشد." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: parsed.data },
+    select: {
+      id: true,
+      userId: true,
+      contactPhone: true,
+      paidAt: true,
+      settledAt: true,
+      disputedAt: true,
+      categoryTitle: true,
+      selectedSpecialistId: true,
+    },
+  });
+
+  if (!order) return { success: false, error: "سفارش یافت نشد." };
+
+  const isOwner =
+    (order.userId && order.userId === session.userId) ||
+    (order.contactPhone && order.contactPhone === session.phone);
+
+  if (!isOwner) {
+    return { success: false, error: "فقط کارفرمای این سفارش می‌تواند اعتراض ثبت کند." };
+  }
+
+  if (!order.paidAt) {
+    return { success: false, error: "این سفارش پرداخت نشده است." };
+  }
+
+  // Once the money has gone out, this is a refund conversation with support,
+  // not something the client can reverse themselves.
+  if (order.settledAt) {
+    return {
+      success: false,
+      error: "این پروژه تسویه شده است. برای پیگیری با پشتیبانی جار تماس بگیرید.",
+    };
+  }
+
+  if (order.disputedAt) {
+    return { success: false, error: "اعتراض شما قبلاً ثبت شده و در حال بررسی است." };
+  }
+
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { disputedAt: new Date(), disputeReason: trimmed },
+  });
+
+  if (order.selectedSpecialistId) {
+    await createNotification({
+      userId: order.selectedSpecialistId,
+      title: "اعتراض کارفرما ثبت شد",
+      message: `کارفرمای پروژه «${
+        order.categoryTitle || "عکاسی"
+      }» اعتراضی ثبت کرد. تسویه تا بررسی توسط جار متوقف شده است.`,
+      type: "WARNING",
+      link: "/specialist/projects",
+    });
+  }
+
+  revalidatePath(`/order/${order.id}`);
+  revalidatePath("/specialist/projects");
+
+  return {
+    success: true,
+    message:
+      "اعتراض شما ثبت شد و تسویه متوقف شد. تیم جار بررسی می‌کند و با شما تماس می‌گیرد.",
+  };
+}
+
+/**
+ * Admin closes a dispute, either by paying the specialist or by cancelling the
+ * order for refund.
+ *
+ * Refunds are not automated: Zarinpal settlements are reversed by hand, so this
+ * records the decision and leaves the transfer to whoever does the accounting.
+ */
+export async function resolveDisputeAction(
+  orderId: string,
+  resolution: "RELEASED" | "REFUNDED",
+  note?: string
+): Promise<DeliveryResult> {
+  const session = await getSession();
+  if (session?.role !== "admin") {
+    return { success: false, error: "دسترسی ادمین الزامی است." };
+  }
+
+  const parsed = orderIdSchema.safeParse(orderId);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: parsed.data },
+    select: { id: true, disputedAt: true, disputeResolvedAt: true, userId: true },
+  });
+
+  if (!order) return { success: false, error: "سفارش یافت نشد." };
+  if (!order.disputedAt) return { success: false, error: "اعتراضی برای این سفارش ثبت نشده است." };
+  if (order.disputeResolvedAt) return { success: false, error: "این اعتراض قبلاً بسته شده است." };
+
+  if (resolution === "RELEASED") {
+    const result = await settleOrder(order.id, "ADMIN_RELEASED");
+    if (!result.ok) return { success: false, error: result.error };
+  }
+
+  await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      disputeResolvedAt: new Date(),
+      disputeResolution: resolution,
+      ...(resolution === "REFUNDED"
+        ? { status: "CANCELLED", adminCancelNote: note?.trim() || "لغو پس از بررسی اعتراض کارفرما" }
+        : {}),
+    },
+  });
+
+  if (order.userId) {
+    await createNotification({
+      userId: order.userId,
+      title: "نتیجه بررسی اعتراض",
+      message:
+        resolution === "RELEASED"
+          ? "پس از بررسی، پروژه تکمیل تلقی شد و مبلغ برای متخصص آزاد شد."
+          : "اعتراض شما پذیرفته شد. سفارش لغو و مبلغ به شما بازگردانده می‌شود؛ همکاران ما تماس می‌گیرند.",
+      type: resolution === "RELEASED" ? "INFO" : "SUCCESS",
+      link: `/order/${order.id}`,
+    });
+  }
+
+  revalidatePath(`/order/${order.id}`);
+  revalidatePath("/dashboard/wallet");
+
+  return {
+    success: true,
+    message: resolution === "RELEASED" ? "مبلغ برای متخصص آزاد شد." : "سفارش لغو شد؛ بازگشت وجه دستی است.",
+  };
+}
