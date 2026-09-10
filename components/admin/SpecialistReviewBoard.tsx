@@ -22,8 +22,10 @@ import {
   approveSpecialistAction,
   rejectPortfolioAction,
   rejectSpecialistAction,
+  setSpecialistKycStatusAction,
 } from "@/app/actions/adminActionHandlers";
 import type { SpecialistReviewCard } from "@/lib/specialists/review";
+import Image from "next/image";
 
 const STATUS_LABEL: Record<string, { text: string; className: string }> = {
   PENDING_REVIEW: {
@@ -239,11 +241,21 @@ export default function SpecialistReviewBoard({
             const status = STATUS_LABEL[card.status] || STATUS_LABEL.INCOMPLETE;
             const isBusy = busy === card.profileId || isPending;
             const missing = [
+              !card.eligibility.hasDisplayName && "نام",
+              !card.eligibility.hasAvatar && "عکس پروفایل",
+              !card.eligibility.hasCategories && "دسته‌بندی",
               card.eligibility.submittableCategories.length === 0 && "۱۰ نمونه‌کار در یک شاخه",
               !card.eligibility.hasCity && "شهر",
               !card.eligibility.hasBaseLocation && "مبدأ روی نقشه",
               !card.eligibility.hasAgreedToTerms && "تعهدنامه",
             ].filter(Boolean) as string[];
+
+            const activationBlocked = [
+              card.eligibility.submittableCategories.length === 0,
+              !card.eligibility.hasCity,
+              !card.eligibility.hasBaseLocation,
+              !card.eligibility.hasAgreedToTerms,
+            ].some(Boolean);
 
             return (
               <div
@@ -257,8 +269,14 @@ export default function SpecialistReviewBoard({
                     onClick={() => setExpanded(isOpen ? null : card.profileId)}
                     className="flex-1 min-w-0 flex items-start gap-3 text-right cursor-pointer"
                   >
-                    <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
-                      <UserCheck className="w-5 h-5" />
+                    <div className="relative h-12 w-12 rounded-xl overflow-hidden border border-slate-200 bg-indigo-50 shrink-0">
+                      {card.avatarUrl ? (
+                        <Image src={card.avatarUrl} alt="" fill className="object-cover" />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-indigo-600">
+                          <UserCheck className="w-5 h-5" />
+                        </div>
+                      )}
                     </div>
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -268,6 +286,24 @@ export default function SpecialistReviewBoard({
                         >
                           {status.text}
                         </span>
+                        {card.kycStatus && card.kycStatus !== "NONE" && (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                              card.kycStatus === "VERIFIED"
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                : card.kycStatus === "PENDING"
+                                  ? "bg-sky-50 text-sky-800 border-sky-200"
+                                  : "bg-rose-50 text-rose-800 border-rose-200"
+                            }`}
+                          >
+                            KYC:{" "}
+                            {card.kycStatus === "VERIFIED"
+                              ? "تایید"
+                              : card.kycStatus === "PENDING"
+                                ? "در انتظار"
+                                : "رد"}
+                          </span>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span className="inline-flex items-center gap-1">
@@ -313,9 +349,9 @@ export default function SpecialistReviewBoard({
                       <button
                         type="button"
                         onClick={() => handleApprove(card, true)}
-                        disabled={isBusy || missing.length > 0}
+                        disabled={isBusy || activationBlocked}
                         title={
-                          missing.length > 0
+                          activationBlocked
                             ? `پرونده ناقص است: ${missing.join("، ")}`
                             : "تمام آثار در انتظار را تایید و متخصص را فعال کن"
                         }
@@ -343,6 +379,55 @@ export default function SpecialistReviewBoard({
                       </button>
                     )}
 
+                    {card.kycStatus === "PENDING" && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => {
+                            setBusy(card.profileId);
+                            setSpecialistKycStatusAction({
+                              specialistId: card.profileId,
+                              status: "VERIFIED",
+                            })
+                              .then((res) => {
+                                if (res.success) announce("success", res.message || "KYC تایید شد");
+                                else announce("error", res.error);
+                                refresh();
+                              })
+                              .finally(() => setBusy(null));
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          تایید KYC
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => {
+                            const reason = window.prompt("علت رد احراز هویت؟") || "";
+                            if (!reason.trim()) return;
+                            setBusy(card.profileId);
+                            setSpecialistKycStatusAction({
+                              specialistId: card.profileId,
+                              status: "FAILED",
+                              reason,
+                            })
+                              .then((res) => {
+                                if (res.success) announce("success", res.message || "KYC رد شد");
+                                else announce("error", res.error);
+                                refresh();
+                              })
+                              .finally(() => setBusy(null));
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 disabled:opacity-40"
+                        >
+                          رد KYC
+                        </button>
+                      </>
+                    )}
+
                     {card.status !== "INCOMPLETE" && (
                       <button
                         type="button"
@@ -359,6 +444,13 @@ export default function SpecialistReviewBoard({
                     )}
                   </div>
                 </div>
+
+                {(card.kycNationalIdMask || card.kycShabaMask) && (
+                  <div className="mx-4 sm:mx-5 mb-3 p-2.5 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-900 font-mono">
+                    KYC: {[card.kycNationalIdMask, card.kycShabaMask].filter(Boolean).join(" · ")}
+                    {card.kycSubmittedAt ? ` · ${formatDate(card.kycSubmittedAt)}` : ""}
+                  </div>
+                )}
 
                 {missing.length > 0 && (
                   <div className="mx-4 sm:mx-5 mb-4 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">

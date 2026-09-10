@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { Phone, ArrowLeft, Loader2, User, ChevronRight, ShieldCheck } from "lucide-react";
+import { Phone, ArrowLeft, Loader2, User, ChevronRight } from "lucide-react";
 import { sendOtpCode, verifyOtpCode } from "@/app/actions/authActions";
 import { isValidIranMobileLocal, sanitizeIranMobileInput } from "@/lib/auth/phone";
 import { isValidOtpCode, OTP_TTL_MS } from "@/lib/auth/otp";
 import { OtpInput } from "@/components/login/OtpInput";
-import { NdaModal } from "@/components/specialist/NdaModal";
+import { SPECIALIST_TERMS_PATH } from "@/components/legal/SpecialistMembershipTerms";
+import Link from "next/link";
 
 const inputClasses =
   "w-full rounded-2xl border border-jar-border bg-jar-surface px-4 py-3.5 text-sm text-jar-primary placeholder:text-jar-muted/60 outline-none transition-all duration-200 focus:border-jar-logo focus:ring-4 focus:ring-jar-logo/10 shadow-xs";
@@ -27,7 +28,6 @@ export default function JoinForm() {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [showNdaModal, setShowNdaModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendIn, setResendIn] = useState(0);
   const [isPending, startTransition] = useTransition();
@@ -149,7 +149,7 @@ export default function JoinForm() {
             </div>
           </div>
 
-          {/* NDA Checkbox */}
+          {/* Acknowledgement — full NDA is accepted later on /specialist/onboarding/terms */}
           <div className="flex items-start gap-2.5 pt-2 text-right">
             <input
               id="join-nda-checkbox"
@@ -165,18 +165,17 @@ export default function JoinForm() {
               htmlFor="join-nda-checkbox"
               className="text-xs font-bold text-jar-muted leading-relaxed cursor-pointer select-none"
             >
-              کلیه قوانین کاری و{" "}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setShowNdaModal(true);
-                }}
-                className="text-jar-logo underline hover:text-jar-primary font-bold cursor-pointer inline"
+              از{" "}
+              <Link
+                href={SPECIALIST_TERMS_PATH}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-jar-logo underline hover:text-jar-primary font-bold"
+                onClick={(e) => e.stopPropagation()}
               >
-                تعهدنامه حفظ محرمانگی و عدم انتشار تصاویر خصوصی کارفرمایان
-              </button>{" "}
-              را می‌پذیرم.
+                تعهدنامه حسن انجام کار، محرمانگی و شرایط عضویت متخصصین جار
+              </Link>{" "}
+              آگاه هستم و می‌دانم پذیرش کامل آن در مراحل بعدی ثبت‌نام الزامی است.
             </label>
           </div>
 
@@ -264,16 +263,6 @@ export default function JoinForm() {
           </div>
         </form>
       )}
-
-      {/* NDA Legal Modal */}
-      <NdaModal
-        isOpen={showNdaModal}
-        onClose={() => setShowNdaModal(false)}
-        onAccept={() => {
-          setAgreedToTerms(true);
-          setError(null);
-        }}
-      />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { isAdminSession } from "@/lib/auth/admin";
 import { isSafeInternalPath } from "@/lib/http/safe-path";
 
 // Paths that require a signed-in user.
-const PROTECTED_PREFIXES = ["/profile", "/admin", "/order", "/dashboard"];
+const PROTECTED_PREFIXES = ["/profile", "/admin", "/order", "/dashboard", "/specialist"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

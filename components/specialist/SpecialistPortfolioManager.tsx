@@ -66,7 +66,7 @@ import {
   MAX_IMAGE_RAW_SIZE_BYTES,
   MAX_VIDEO_RAW_SIZE_BYTES,
 } from "@/lib/clientImageCompression";
-import { NdaModal } from "./NdaModal";
+import { MIN_SELECTED_CATEGORIES } from "@/lib/specialists/eligibility";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   Heart,
@@ -104,19 +104,15 @@ function getCategoryIcon(iconName?: string) {
 interface Props {
   initialSelectedCategories: string[];
   initialPortfolioItems: PortfolioItemData[];
-  initialAgreedToTerms?: boolean;
 }
 
 export default function SpecialistPortfolioManager({
   initialSelectedCategories,
   initialPortfolioItems,
-  initialAgreedToTerms,
 }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<CategoryType>("PERSONAL");
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(initialSelectedCategories);
-  const [agreedToTerms, setAgreedToTerms] = useState(Boolean(initialAgreedToTerms));
-  const [showNdaModal, setShowNdaModal] = useState(false);
   const [isSaving, startSaveTransition] = useTransition();
   const [requirementWarning, setRequirementWarning] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -126,10 +122,9 @@ export default function SpecialistPortfolioManager({
     message: string | null;
   } | null>(null);
 
-  // The bar Jar actually holds specialists to: one specialty they can be shown
-  // for. Asking for three full categories up front locked people out of the
-  // panel with fifty approved shots sitting in one of them.
-  const MIN_CATEGORIES = 1;
+  // Must pick at least MIN_SELECTED_CATEGORIES specialties, but only one of
+  // them needs a full 10-item portfolio to submit for review.
+  const MIN_FULFILLED_CATEGORIES = 1;
   const MIN_ITEMS_PER_CATEGORY = 10;
 
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItemData[]>(initialPortfolioItems);
@@ -176,22 +171,32 @@ export default function SpecialistPortfolioManager({
     [selectedSlugs, itemsByCategory]
   );
 
-  const isEveryCategoryFulfilled = fulfilledCategories.length >= MIN_CATEGORIES;
+  const isEveryCategoryFulfilled = fulfilledCategories.length >= MIN_FULFILLED_CATEGORIES;
 
   // Progress percentage calculation
   const overallProgressPercent = useMemo(() => {
     if (selectedSlugs.length === 0) return 0;
     const best = Math.max(
+      0,
       ...selectedSlugs.map((slug) => itemsByCategory[slug]?.length || 0)
     );
     return Math.min(100, Math.round((best / MIN_ITEMS_PER_CATEGORY) * 100));
   }, [selectedSlugs, itemsByCategory]);
 
-  const isReadyToSubmit = isEveryCategoryFulfilled && agreedToTerms;
+  const hasMinSelectedCategories = selectedSlugs.length >= MIN_SELECTED_CATEGORIES;
+  const isReadyToSubmit = hasMinSelectedCategories && isEveryCategoryFulfilled;
 
   // Toggle or uncheck category freely with auto-save
   const handleToggleCategory = (slug: string) => {
     const exists = selectedSlugs.includes(slug);
+
+    if (exists && selectedSlugs.length <= MIN_SELECTED_CATEGORIES) {
+      setRequirementWarning(
+        `حداقل ${MIN_SELECTED_CATEGORIES} شاخه تخصصی باید انتخاب بماند.`
+      );
+      setTimeout(() => setRequirementWarning(null), 5000);
+      return;
+    }
 
     const updated = exists
       ? selectedSlugs.filter((s) => s !== slug)
@@ -209,31 +214,32 @@ export default function SpecialistPortfolioManager({
 
     // Auto-save to server
     startSaveTransition(async () => {
-      await updateSpecialistCategories(updated);
+      const res = await updateSpecialistCategories(updated);
+      if (!res.success) {
+        setSelectedSlugs(selectedSlugs);
+        setRequirementWarning(res.error || "خطا در ذخیره دسته‌بندی‌ها");
+        setTimeout(() => setRequirementWarning(null), 5000);
+      }
     });
   };
 
   // Final confirmation and publish handler
   const handleFinalPublish = async () => {
-    if (!isEveryCategoryFulfilled) {
-      if (selectedSlugs.length === 0) {
-        setRequirementWarning("ابتدا حداقل یک شاخه تخصصی را انتخاب کنید.");
-      } else {
-        const details = incompleteCategories
-          .map((c) => `«${c.title}» (${c.count}/۱۰ فایل)`)
-          .join("، ");
-
-        setRequirementWarning(
-          `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
-        );
-      }
+    if (!hasMinSelectedCategories) {
+      setRequirementWarning(
+        `ابتدا حداقل ${MIN_SELECTED_CATEGORIES} شاخه تخصصی را انتخاب کنید.`
+      );
       setTimeout(() => setRequirementWarning(null), 7000);
       return;
     }
 
-    if (!agreedToTerms) {
+    if (!isEveryCategoryFulfilled) {
+      const details = incompleteCategories
+        .map((c) => `«${c.title}» (${c.count}/۱۰ فایل)`)
+        .join("، ");
+
       setRequirementWarning(
-        "برای ارسال پرونده، پذیرش تعهدنامه حفظ محرمانگی و عدم انتشار تصاویر خصوصی کارفرمایان الزامی است."
+        `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
       );
       setTimeout(() => setRequirementWarning(null), 7000);
       return;
@@ -243,15 +249,18 @@ export default function SpecialistPortfolioManager({
     setRequirementWarning(null);
 
     try {
-      const res = await publishSpecialistProfile(agreedToTerms);
+      const res = await publishSpecialistProfile();
       if (res.success) {
         setSubmitOutcome({
           redirect: res.redirect ?? null,
           message: res.message ?? null,
         });
         setShowSuccessModal(true);
+      } else if (res.redirect) {
+        router.push(res.redirect);
+        router.refresh();
       } else {
-        setRequirementWarning(res.error || "خطا در ارسال پرونده برای بررسی.");
+        setRequirementWarning(res.error || "خطا در ادامه ثبت‌نام.");
         setTimeout(() => setRequirementWarning(null), 7000);
       }
     } catch (err: any) {
@@ -447,11 +456,9 @@ export default function SpecialistPortfolioManager({
             onClick={handleFinalPublish}
             disabled={isPublishing}
             title={
-              !isEveryCategoryFulfilled
-                ? "برای ارسال پرونده، حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار لازم است."
-                : !agreedToTerms
-                ? "برای ارسال پرونده، تیک پذیرش تعهدنامه حفظ محرمانگی اطلاعات را فعال کنید."
-                : "ارسال پرونده برای بررسی کارشناسان جار"
+              !isReadyToSubmit
+                ? "برای ادامه، حداقل ۳ شاخه و ۱۰ نمونه‌کار در یک شاخه لازم است."
+                : "ادامه به گام‌های محل فعالیت و تعهدنامه"
             }
             className={`w-full sm:w-auto inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 text-xs font-medium transition-colors cursor-pointer ${
               isReadyToSubmit
@@ -462,75 +469,21 @@ export default function SpecialistPortfolioManager({
             {isPublishing ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>در حال ارسال...</span>
+                <span>در حال ادامه...</span>
               </>
             ) : isReadyToSubmit ? (
               <>
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>ارسال پرونده برای بررسی</span>
-              </>
-            ) : !isEveryCategoryFulfilled ? (
-              <>
-                <Lock className="h-3 w-3" />
-                <span>ارسال پرونده (الزامات ناقص)</span>
+                <span>ادامه ثبت‌نام</span>
               </>
             ) : (
               <>
                 <Lock className="h-3 w-3" />
-                <span>تایید تعهدنامه الزامی است</span>
+                <span>ادامه (الزامات ناقص)</span>
               </>
             )}
           </button>
 
-        </div>
-      </div>
-
-      {/* 2. NDA & Confidentiality Terms Card */}
-      <div className="rounded-3xl border border-jar-border bg-jar-surface p-4 sm:p-5 backdrop-blur-xl shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <input
-              id="specialist-nda-checkbox"
-              type="checkbox"
-              checked={agreedToTerms}
-              onChange={(e) => {
-                setAgreedToTerms(e.target.checked);
-                setRequirementWarning(null);
-              }}
-              className="mt-0.5 sm:mt-1 h-4 w-4 shrink-0 rounded border-jar-border text-jar-primary focus:ring-jar-primary cursor-pointer"
-            />
-            <div className="space-y-0.5">
-              <label
-                htmlFor="specialist-nda-checkbox"
-                className="text-xs sm:text-sm font-bold text-jar-primary cursor-pointer select-none leading-relaxed"
-              >
-                کلیه قوانین کاری و تعهدنامه حفظ محرمانگی اطلاعات و عدم انتشار تصاویر خصوصی کارفرمایان را می‌پذیرم.
-              </label>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowNdaModal(true)}
-                  className="inline-flex items-center gap-1 text-[11px] font-bold text-jar-logo hover:underline cursor-pointer"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 text-jar-logo" />
-                  <span>مشاهده متن کامل تعهدنامه عدم انتشار فایل‌های خصوصی و حفظ حریم شخصی (NDA)</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="self-end sm:self-center shrink-0">
-            {agreedToTerms ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[11px] font-bold text-emerald-700">
-                <Check className="h-3 w-3 stroke-[3]" />
-                <span>تعهدنامه پذیرفته شد</span>
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-jar-canvas border border-jar-border px-3 py-1 text-[11px] font-bold text-jar-logo">
-                <span>تایید تعهدنامه الزامی است</span>
-              </span>
-            )}
-          </div>
         </div>
       </div>
 
@@ -563,7 +516,7 @@ export default function SpecialistPortfolioManager({
               </span>
             </div>
             <p className="text-xs text-jar-muted mt-0.5 font-medium">
-              برای افزودن یا لغو هر شاخه، روی تگ آن کلیک کنید (برای ارسال پرونده، یک شاخه با ۱۰ نمونه‌کار کافی است).
+              برای افزودن یا لغو هر شاخه، روی تگ آن کلیک کنید (حداقل ۳ شاخه؛ برای ارسال، ۱۰ نمونه‌کار در یک شاخه کافی است).
             </p>
           </div>
 
@@ -655,7 +608,7 @@ export default function SpecialistPortfolioManager({
               هنوز تخصص فعالی انتخاب نشده است
             </h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              برای فعال‌شدن استودیوی آپلود، حداقل یک تخصص را از بخش تگ‌های بالا انتخاب کنید.
+              برای فعال‌شدن استودیوی آپلود، حداقل یک تخصص را از بخش تگ‌های بالا انتخاب کنید؛ برای ارسال پرونده حداقل ۳ شاخه لازم است.
             </p>
           </div>
         ) : (
@@ -1024,16 +977,6 @@ export default function SpecialistPortfolioManager({
           </div>
         </div>
       )}
-
-      {/* 6. NDA Legal Modal */}
-      <NdaModal
-        isOpen={showNdaModal}
-        onClose={() => setShowNdaModal(false)}
-        onAccept={() => {
-          setAgreedToTerms(true);
-          setRequirementWarning(null);
-        }}
-      />
 
     </div>
   );

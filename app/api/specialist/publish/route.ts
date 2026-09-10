@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * Two places deciding who is allowed to take work is one place too many.
  */
 export async function POST() {
-  const result = await publishSpecialistProfile(true);
+  const result = await publishSpecialistProfile();
 
   if (!result.success) {
     return NextResponse.json(result, { status: 400 });

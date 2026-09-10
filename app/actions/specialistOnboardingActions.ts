@@ -6,12 +6,66 @@ import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import {
   evaluateEligibility,
-  resolveOnboardingStatus,
   specialistLandingPath,
   SPECIALIST_REVIEW_PATH,
 } from "@/lib/specialists/eligibility";
-import { notifyAdminsOfSpecialistSubmission } from "@/lib/specialists/review";
+import { notifyAdminsOfSpecialistSubmission, missingRequirementLabels } from "@/lib/specialists/review";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
+import { normalizeJalaliBirthDate, verifySpecialistKycWithZohal } from "@/lib/kyc/zohal";
+
+const profileBasicsSchema = z.object({
+  displayName: z.string().trim().min(2, "نام الزامی است."),
+  avatarUrl: z.string().trim().min(1, "عکس پروفایل الزامی است."),
+});
+
+export async function saveSpecialistProfileBasicsAction(input: {
+  displayName: string;
+  avatarUrl: string;
+}): Promise<{ success: boolean; error?: string; redirect?: string }> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد شوید." };
+    }
+
+    const parsed = profileBasicsSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message || "نامعتبر" };
+    }
+
+    if (/[0-9۰-۹٠-٩]/.test(parsed.data.displayName)) {
+      return { success: false, error: "نام نباید شامل عدد باشد." };
+    }
+
+    await prisma.user.update({
+      where: { id: session.userId },
+      data: {
+        displayName: parsed.data.displayName,
+        role: "SPECIALIST",
+      },
+    });
+
+    await prisma.specialistProfile.upsert({
+      where: { userId: session.userId },
+      create: {
+        userId: session.userId,
+        avatarUrl: parsed.data.avatarUrl,
+        status: "INCOMPLETE",
+      },
+      update: {
+        avatarUrl: parsed.data.avatarUrl,
+      },
+    });
+
+    revalidatePath("/specialist/onboarding");
+    revalidatePath("/admin/review");
+
+    return { success: true, redirect: "/specialist/onboarding/categories" };
+  } catch (err) {
+    console.error("saveSpecialistProfileBasicsAction:", err);
+    return { success: false, error: "خطا در ذخیره اطلاعات پایه." };
+  }
+}
 
 const detailsSchema = z.object({
   city: z.string().trim().min(2, "نام شهر الزامی است."),
@@ -21,9 +75,6 @@ const detailsSchema = z.object({
   workArea: z.string().trim().max(300).optional().nullable(),
   bio: z.string().trim().max(1000).optional().nullable(),
   equipmentSummary: z.string().trim().max(500).optional().nullable(),
-  agreedToTerms: z.boolean().refine((val) => val === true, {
-    message: "پذیرش تعهدنامه و قوانین همکاری الزامی است.",
-  }),
   returnTo: z.string().optional(),
 });
 
@@ -45,10 +96,17 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       return { success: false, error: parsed.error.issues[0]?.message || "اطلاعات نامعتبر است." };
     }
 
-    const { city, workArea, bio, equipmentSummary, agreedToTerms, baseLat, baseLng, baseAddress, returnTo } =
-      parsed.data;
+    const {
+      city,
+      workArea,
+      bio,
+      equipmentSummary,
+      baseLat,
+      baseLng,
+      baseAddress,
+      returnTo,
+    } = parsed.data;
 
-    // Fetch user and profile with portfolio items
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
       include: {
@@ -66,27 +124,27 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       return { success: false, error: "کاربر یافت نشد." };
     }
 
+    const agreedToTerms = user.specialistProfile?.agreedToTerms === true;
+
     const eligibility = evaluateEligibility({
       city,
       baseLat,
       baseLng,
       agreedToTerms,
+      avatarUrl: user.specialistProfile?.avatarUrl,
+      displayName: user.displayName,
       portfolioItems: user.specialistProfile?.portfolioItems || [],
       selectedCategories: user.specialistProfile?.selectedCategories,
     });
 
     const currentStatus = user.specialistProfile?.status;
-    const nextStatus = resolveOnboardingStatus(currentStatus, eligibility);
 
-    // Submitting the file is a one-way door into the review queue; re-saving
-    // the same details later must not reset the clock on the admin's desk.
-    const entersReviewQueue =
-      nextStatus === "PENDING_REVIEW" && currentStatus !== "PENDING_REVIEW";
-    const reviewTimestamps = entersReviewQueue
-      ? { submittedForReviewAt: new Date(), reviewedAt: null, reviewNote: null }
-      : {};
+    // Location save alone must not enter the review queue — NDA is a separate step.
+    const statusToWrite =
+      currentStatus === "ACTIVE" || currentStatus === "SUSPENDED" || currentStatus === "PENDING_REVIEW"
+        ? currentStatus
+        : "INCOMPLETE";
 
-    // Upsert specialist profile
     await prisma.specialistProfile.upsert({
       where: { userId: session.userId },
       create: {
@@ -98,10 +156,8 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         baseLat,
         baseLng,
         baseAddress: baseAddress || null,
-        agreedToTerms: true,
-        termsAgreedAt: new Date(),
-        status: nextStatus,
-        ...reviewTimestamps,
+        agreedToTerms: false,
+        status: statusToWrite,
       },
       update: {
         city,
@@ -111,14 +167,10 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         baseLat,
         baseLng,
         baseAddress: baseAddress || null,
-        agreedToTerms: true,
-        termsAgreedAt: new Date(),
-        status: nextStatus,
-        ...reviewTimestamps,
+        ...(statusToWrite === "INCOMPLETE" ? { status: "INCOMPLETE" as const } : {}),
       },
     });
 
-    // Also update User record for display and city filtering
     await prisma.user.update({
       where: { id: session.userId },
       data: {
@@ -128,42 +180,333 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       },
     });
 
-    if (entersReviewQueue) {
-      await notifyAdminsOfSpecialistSubmission({
-        specialistUserId: session.userId,
-        displayName: user.displayName || phoneToLocalDisplay(user.phone),
-        city,
-      });
-    }
-
     revalidatePath("/specialist/onboarding");
-    revalidatePath(SPECIALIST_REVIEW_PATH);
-    revalidatePath("/specialist/projects");
-    revalidatePath("/specialist/portfolio");
-    revalidatePath("/profile");
-    revalidatePath("/admin/review");
-
+    revalidatePath("/specialist/onboarding/details");
+    revalidatePath("/specialist/onboarding/terms");
     revalidatePath("/specialist/profile");
 
-    let fallback = "/specialist/onboarding/portfolio";
-    if (nextStatus === "ACTIVE") fallback = "/specialist/projects";
-    else if (nextStatus === "PENDING_REVIEW") fallback = SPECIALIST_REVIEW_PATH;
-
-    // An approved specialist editing their profile goes back where they came
-    // from; anyone still in the queue is sent to the queue, not to the board.
-    const canReturn = nextStatus === "ACTIVE";
+    const canReturn = currentStatus === "ACTIVE";
     const targetRedirect =
       canReturn && returnTo && returnTo.startsWith("/specialist") && !returnTo.startsWith("//")
         ? returnTo
-        : fallback;
+        : eligibility.nextStep;
 
     return {
       success: true,
       redirect: targetRedirect,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error in saveSpecialistDetailsAction:", err);
     return { success: false, error: "خطا در ثبت اطلاعات متخصص." };
+  }
+}
+
+/**
+ * Final onboarding gate: accept specialist membership terms / NDA and enqueue for admin review.
+ */
+export async function acceptSpecialistTermsAction(): Promise<{
+  success: boolean;
+  error?: string;
+  redirect?: string;
+}> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً وارد شوید." };
+    }
+
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    const ip =
+      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      h.get("x-real-ip") ||
+      null;
+    const ua = h.get("user-agent")?.slice(0, 240) || null;
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      include: {
+        specialistProfile: {
+          include: {
+            portfolioItems: {
+              select: { id: true, categorySlug: true, reviewStatus: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user?.specialistProfile) {
+      return { success: false, error: "پروفایل متخصص یافت نشد." };
+    }
+
+    const profile = user.specialistProfile;
+    const eligibility = evaluateEligibility({
+      city: profile.city,
+      baseLat: profile.baseLat,
+      baseLng: profile.baseLng,
+      agreedToTerms: true,
+      avatarUrl: profile.avatarUrl,
+      displayName: user.displayName,
+      portfolioItems: profile.portfolioItems,
+      selectedCategories: profile.selectedCategories,
+    });
+
+    if (!eligibility.isSubmittable) {
+      const missing = missingRequirementLabels(eligibility);
+      return {
+        success: false,
+        error: missing.length
+          ? `پرونده هنوز کامل نیست: ${missing.join("، ")}.`
+          : "پرونده برای ارسال کامل نیست.",
+        redirect: eligibility.nextStep,
+      };
+    }
+
+    const currentStatus = profile.status;
+    const entersReviewQueue =
+      currentStatus !== "PENDING_REVIEW" &&
+      currentStatus !== "ACTIVE" &&
+      currentStatus !== "SUSPENDED";
+
+    await prisma.specialistProfile.update({
+      where: { id: profile.id },
+      data: {
+        agreedToTerms: true,
+        termsAgreedAt: new Date(),
+        reviewNote: null,
+        ...(currentStatus === "ACTIVE" || currentStatus === "SUSPENDED"
+          ? {}
+          : {
+              status: "PENDING_REVIEW",
+              ...(entersReviewQueue
+                ? { submittedForReviewAt: new Date(), reviewedAt: null }
+                : {}),
+            }),
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: "SPECIALIST_TERMS_ACCEPTED",
+        targetModel: "SpecialistProfile",
+        targetId: profile.id,
+        note: [
+          "پذیرش تعهدنامه حسن انجام کار / NDA",
+          ip ? `IP:${ip}` : null,
+          ua ? `UA:${ua}` : null,
+        ]
+          .filter(Boolean)
+          .join(" | "),
+      },
+    });
+
+    if (entersReviewQueue) {
+      await notifyAdminsOfSpecialistSubmission({
+        specialistUserId: session.userId,
+        displayName: user.displayName || phoneToLocalDisplay(user.phone),
+        city: profile.city || "",
+      });
+    }
+
+    revalidatePath("/specialist/onboarding");
+    revalidatePath("/specialist/onboarding/terms");
+    revalidatePath(SPECIALIST_REVIEW_PATH);
+    revalidatePath("/admin/review");
+
+    return {
+      success: true,
+      redirect:
+        currentStatus === "ACTIVE"
+          ? "/specialist/projects"
+          : SPECIALIST_REVIEW_PATH,
+    };
+  } catch (err) {
+    console.error("acceptSpecialistTermsAction:", err);
+    return { success: false, error: "خطا در ثبت پذیرش تعهدنامه." };
+  }
+}
+
+const kycSubmitSchema = z.object({
+  nationalId: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{10}$/, "کد ملی باید ۱۰ رقم باشد."),
+  birthDate: z
+    .string()
+    .trim()
+    .min(8, "تاریخ تولد الزامی است.")
+    .refine((v) => normalizeJalaliBirthDate(v) !== null, {
+      message: "فرمت تاریخ تولد نامعتبر است (مثال: ۱۳۷۰/۵/۱۷).",
+    }),
+  shaba: z
+    .string()
+    .trim()
+    .transform((v) => v.replace(/\s/g, "").toUpperCase())
+    .refine((v) => /^IR[0-9]{24}$/.test(v) || /^[0-9]{24}$/.test(v), {
+      message: "شماره شبا نامعتبر است (IR + ۲۴ رقم).",
+    }),
+});
+
+function toEnglishDigits(value: string) {
+  return value.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+}
+
+function maskNationalId(id: string) {
+  const n = toEnglishDigits(id);
+  return `${n.slice(0, 3)}****${n.slice(-2)}`;
+}
+
+function maskShaba(shaba: string) {
+  const s = toEnglishDigits(shaba).replace(/\s/g, "").toUpperCase();
+  const withIr = s.startsWith("IR") ? s : `IR${s}`;
+  return `${withIr.slice(0, 4)}****${withIr.slice(-4)}`;
+}
+
+/**
+ * Collects KYC fields and verifies via Zohal (Shahkar + IBAN/national match).
+ * On API outage, leaves PENDING for admin review in /admin/review.
+ */
+export async function submitSpecialistKycAction(input: {
+  nationalId: string;
+  birthDate: string;
+  shaba: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً وارد شوید." };
+    }
+
+    const parsed = kycSubmitSchema.safeParse({
+      nationalId: toEnglishDigits(input.nationalId),
+      birthDate: input.birthDate,
+      shaba: toEnglishDigits(input.shaba),
+    });
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message || "اطلاعات نامعتبر" };
+    }
+
+    const profile = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: {
+        id: true,
+        status: true,
+        user: { select: { phone: true } },
+      },
+    });
+
+    if (!profile || profile.status !== "ACTIVE") {
+      return {
+        success: false,
+        error: "احراز هویت بانکی بعد از تایید کیفی پرونده فعال می‌شود.",
+      };
+    }
+
+    if (!profile.user?.phone) {
+      return { success: false, error: "شماره موبایل حساب یافت نشد." };
+    }
+
+    let shaba = parsed.data.shaba.toUpperCase();
+    if (!shaba.startsWith("IR")) shaba = `IR${shaba}`;
+
+    const verification = await verifySpecialistKycWithZohal({
+      phone: profile.user.phone,
+      nationalId: parsed.data.nationalId,
+      birthDate: parsed.data.birthDate,
+      shaba,
+    });
+
+    const now = new Date();
+    const baseData = {
+      kycNationalIdMask: maskNationalId(parsed.data.nationalId),
+      kycShabaMask: maskShaba(shaba),
+      kycSubmittedAt: now,
+    };
+
+    if (verification.status === "VERIFIED") {
+      await prisma.specialistProfile.update({
+        where: { id: profile.id },
+        data: {
+          ...baseData,
+          kycStatus: "VERIFIED",
+          kycVerifiedAt: now,
+          kycFailureReason: null,
+          kycBankName: verification.bankName || null,
+        },
+      });
+    } else if (verification.status === "FAILED") {
+      await prisma.specialistProfile.update({
+        where: { id: profile.id },
+        data: {
+          ...baseData,
+          kycStatus: "FAILED",
+          kycVerifiedAt: null,
+          kycFailureReason: verification.reason,
+          kycBankName: null,
+        },
+      });
+    } else {
+      await prisma.specialistProfile.update({
+        where: { id: profile.id },
+        data: {
+          ...baseData,
+          kycStatus: "PENDING",
+          kycVerifiedAt: null,
+          kycFailureReason: verification.reason,
+          kycBankName: null,
+        },
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: "SPECIALIST_KYC_SUBMITTED",
+        targetModel: "SpecialistProfile",
+        targetId: profile.id,
+        note: `زحل: ${verification.status}${
+          verification.status !== "VERIFIED" ? ` — ${verification.reason}` : ""
+        }`,
+      },
+    });
+
+    if (verification.status === "PENDING") {
+      await prisma.notification.create({
+        data: {
+          userId: session.userId,
+          title: "احراز هویت در صف بررسی",
+          message:
+            "استعلام خودکار زحل کامل نشد؛ تیم جار نتیجه را در پنل ادمین نهایی می‌کند.",
+          type: "INFO",
+          link: "/specialist/onboarding/identity",
+        },
+      }).catch(() => undefined);
+    } else if (verification.status === "VERIFIED") {
+      await prisma.notification.create({
+        data: {
+          userId: session.userId,
+          title: "احراز هویت تایید شد",
+          message: "شاهکار و تطبیق شبا با موفقیت تایید شد.",
+          type: "SUCCESS",
+          link: "/specialist/projects",
+        },
+      }).catch(() => undefined);
+    }
+
+    revalidatePath("/specialist/onboarding/identity");
+    revalidatePath("/admin/review");
+    revalidatePath("/dashboard/wallet");
+
+    if (verification.status === "FAILED") {
+      return { success: false, error: verification.reason };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("submitSpecialistKycAction:", err);
+    return { success: false, error: "خطا در ثبت احراز هویت." };
   }
 }
 
@@ -176,6 +519,9 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   rejectedPortfolioCount?: number;
   hasCity?: boolean;
   hasNda?: boolean;
+  hasAvatar?: boolean;
+  hasCategories?: boolean;
+  hasDisplayName?: boolean;
   hasEligiblePortfolio?: boolean;
   maxPortfolioInCategory?: number;
   totalPortfolioItems?: number;
@@ -187,7 +533,16 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   baseLat?: number | null;
   baseLng?: number | null;
   baseAddress?: string | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+  phoneDisplay?: string;
+  selectedCategories?: string[];
+  kycStatus?: string;
+  kycNationalIdMask?: string | null;
+  kycShabaMask?: string | null;
+  kycFailureReason?: string | null;
   nextStep?: string;
+  currentStepId?: string;
 }> {
   const session = await getSession();
   if (!session || !session.userId) {
@@ -207,36 +562,41 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     },
   });
 
-  if (!user || !user.specialistProfile) {
+  if (!user) {
+    return { isLoggedIn: false, nextStep: "/join" };
+  }
+
+  if (!user.specialistProfile) {
     return {
       isLoggedIn: true,
       status: "INCOMPLETE",
       hasCity: false,
       hasNda: false,
+      hasAvatar: false,
+      hasCategories: false,
+      hasDisplayName: Boolean(user.displayName && user.displayName.length >= 2),
       hasEligiblePortfolio: false,
-      nextStep: "/specialist/onboarding/portfolio",
+      displayName: user.displayName,
+      phoneDisplay: phoneToLocalDisplay(user.phone),
+      nextStep: "/specialist/onboarding/profile",
+      currentStepId: "profile",
     };
   }
 
   const profile = user.specialistProfile;
   const items = profile.portfolioItems || [];
 
-  // Read only. This function used to activate the specialist as a side effect,
-  // so whether someone could take work depended on their having loaded the
-  // right page. Activation now happens where the specialist actually submits
-  // their details, or when an admin approves their portfolio.
   const eligibility = evaluateEligibility({
     city: profile.city,
     baseLat: profile.baseLat,
     baseLng: profile.baseLng,
     agreedToTerms: profile.agreedToTerms,
+    avatarUrl: profile.avatarUrl,
+    displayName: user.displayName,
     portfolioItems: items,
     selectedCategories: profile.selectedCategories,
   });
 
-  // Progress through onboarding is measured in work the specialist has handed
-  // over, not in work an admin has signed off — nothing is approved yet at this
-  // point, and counting approvals here stranded people on step one.
   const countByCategory: Record<string, number> = {};
   for (const item of items) {
     if (item.reviewStatus === "REJECTED") continue;
@@ -244,10 +604,21 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   }
   const categoryCounts = Object.values(countByCategory);
   const maxPortfolioInCategory = categoryCounts.length > 0 ? Math.max(...categoryCounts) : 0;
-  const hasEligiblePortfolio = eligibility.submittableCategories.length > 0;
-  const hasCity = eligibility.hasCity;
-  const hasNda = eligibility.hasAgreedToTerms;
-  const nextStep = specialistLandingPath(profile.status, eligibility);
+  const nextStep = specialistLandingPath(
+    profile.status,
+    eligibility,
+    profile.kycStatus,
+    profile.reviewNote
+  );
+
+  let selectedCategories: string[] = [];
+  try {
+    selectedCategories = profile.selectedCategories
+      ? JSON.parse(profile.selectedCategories)
+      : [];
+  } catch {
+    selectedCategories = [];
+  }
 
   return {
     isLoggedIn: true,
@@ -256,9 +627,12 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     submittedForReviewAt: profile.submittedForReviewAt?.toISOString() ?? null,
     approvedPortfolioCount: items.filter((i) => i.reviewStatus === "APPROVED").length,
     rejectedPortfolioCount: items.filter((i) => i.reviewStatus === "REJECTED").length,
-    hasCity,
-    hasNda,
-    hasEligiblePortfolio,
+    hasCity: eligibility.hasCity,
+    hasNda: eligibility.hasAgreedToTerms,
+    hasAvatar: eligibility.hasAvatar,
+    hasCategories: eligibility.hasCategories,
+    hasDisplayName: eligibility.hasDisplayName,
+    hasEligiblePortfolio: eligibility.submittableCategories.length > 0,
     maxPortfolioInCategory,
     totalPortfolioItems: items.length,
     city: profile.city,
@@ -269,6 +643,15 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     baseLat: profile.baseLat,
     baseLng: profile.baseLng,
     baseAddress: profile.baseAddress,
+    avatarUrl: profile.avatarUrl,
+    displayName: user.displayName,
+    phoneDisplay: phoneToLocalDisplay(user.phone),
+    selectedCategories,
+    kycStatus: profile.kycStatus,
+    kycNationalIdMask: profile.kycNationalIdMask,
+    kycShabaMask: profile.kycShabaMask,
+    kycFailureReason: profile.kycFailureReason,
     nextStep,
+    currentStepId: eligibility.currentStepId,
   };
 }

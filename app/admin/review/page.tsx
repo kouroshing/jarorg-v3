@@ -27,7 +27,9 @@ export default async function AdminSpecialistReviewPage({
       ? ["PENDING_REVIEW", "INCOMPLETE", "ACTIVE", "SUSPENDED"]
       : ["PENDING_REVIEW"];
 
-  const cards = await getSpecialistReviewCards(statuses);
+  const cards = await getSpecialistReviewCards(statuses, {
+    includeKycPending: filter === "pending",
+  });
 
   return <SpecialistReviewBoard cards={cards} filter={filter} />;
 }

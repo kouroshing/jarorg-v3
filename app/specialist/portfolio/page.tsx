@@ -19,7 +19,6 @@ export default async function SpecialistPortfolioPage() {
       <SpecialistPortfolioManager
         initialSelectedCategories={result.selectedCategories || []}
         initialPortfolioItems={result.portfolioItems || []}
-        initialAgreedToTerms={result.agreedToTerms || false}
       />
     </SpecialistAppShell>
   );

@@ -528,6 +528,8 @@ model SpecialistProfile {
   bio                String?
   equipmentSummary   String? @map("equipment_summary")
   selectedCategories String? @map("selected_categories") // JSON string of selected category slugs
+  /// Public face shown to clients on applicant cards.
+  avatarUrl          String? @map("avatar_url")
 
   /// Where the specialist travels from. Set on the map during onboarding and
   /// used to compute the travel fee on every proposal they make.
@@ -546,6 +548,16 @@ model SpecialistProfile {
   reviewedBy           String?   @map("reviewed_by")
   /// Why the file was sent back, shown to the specialist on the waiting page.
   reviewNote           String?   @map("review_note")
+
+  /// Identity / banking verification (Zehal). NONE until specialist submits;
+  /// VERIFIED unlocks withdrawals. Raw national ID / full شبا are never stored.
+  kycStatus         String    @default("NONE") @map("kyc_status") // NONE, PENDING, VERIFIED, FAILED
+  kycNationalIdMask String?   @map("kyc_national_id_mask") // e.g. ۰۰۱۲****۸۹
+  kycShabaMask      String?   @map("kyc_shaba_mask") // e.g. IR****1234
+  kycBankName       String?   @map("kyc_bank_name")
+  kycVerifiedAt     DateTime? @map("kyc_verified_at")
+  kycFailureReason  String?   @map("kyc_failure_reason")
+  kycSubmittedAt    DateTime? @map("kyc_submitted_at")
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   portfolioItems PortfolioItem[]

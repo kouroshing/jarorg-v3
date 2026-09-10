@@ -6,8 +6,14 @@ import { revalidatePath } from "next/cache";
 import { promises as fs } from "fs";
 import path from "path";
 import { ALL_CATEGORIES, CATEGORIES_BY_SLUG, CategoryType, MediaType } from "@/lib/categories";
-import { evaluateEligibility, SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
+import {
+  evaluateEligibility,
+  MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
+  MIN_SELECTED_CATEGORIES,
+  SPECIALIST_REVIEW_PATH,
+} from "@/lib/specialists/eligibility";
 import { notifyAdminsOfSpecialistSubmission } from "@/lib/specialists/review";
+import { phoneToLocalDisplay } from "@/lib/auth/phone";
 
 export interface PortfolioItemData {
   id: string;
@@ -52,16 +58,11 @@ export async function getSpecialistCategoriesAndPortfolio(): Promise<SpecialistC
     });
 
     if (!specialist) {
-      // Auto initialize specialist profile
+      // Auto initialize empty profile — categories are chosen in onboarding step 2.
       specialist = await prisma.specialistProfile.create({
         data: {
           userId: session.userId,
-          selectedCategories: JSON.stringify([
-            "wedding-ceremony",
-            "portrait-avatar",
-            "commercial-arrangement",
-            "modeling",
-          ]),
+          selectedCategories: JSON.stringify([]),
         },
         include: {
           portfolioItems: {
@@ -122,7 +123,14 @@ export async function updateSpecialistCategories(
     // Filter valid slugs against ALL_CATEGORIES
     const validSlugs = categorySlugs.filter((slug) => CATEGORIES_BY_SLUG[slug] !== undefined);
 
-    const specialist = await prisma.specialistProfile.upsert({
+    if (validSlugs.length < MIN_SELECTED_CATEGORIES) {
+      return {
+        success: false,
+        error: `حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی انتخاب کنید.`,
+      };
+    }
+
+    await prisma.specialistProfile.upsert({
       where: { userId: session.userId },
       create: {
         userId: session.userId,
@@ -134,7 +142,10 @@ export async function updateSpecialistCategories(
     });
 
     revalidatePath("/specialist/portfolio");
+    revalidatePath("/specialist/onboarding/categories");
+    revalidatePath("/specialist/onboarding/portfolio");
     revalidatePath("/profile");
+    revalidatePath("/admin/review");
 
     return {
       success: true,
@@ -325,7 +336,7 @@ export async function deletePortfolioItem(
  * without touching `status`, so nobody was ever actually reviewed and nobody
  * was ever actually activated.
  */
-export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise<{
+export async function publishSpecialistProfile(): Promise<{
   success: boolean;
   error?: string;
   message?: string;
@@ -335,13 +346,6 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
     const session = await getSession();
     if (!session || !session.userId) {
       return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
-    }
-
-    if (agreedToTerms === false) {
-      return {
-        success: false,
-        error: "پذیرش تعهدنامه حفظ محرمانگی اطلاعات و حریم خصوصی کارفرمایان الزامی است.",
-      };
     }
 
     const specialist = await prisma.specialistProfile.findUnique({
@@ -360,7 +364,9 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
       city: specialist.city,
       baseLat: specialist.baseLat,
       baseLng: specialist.baseLng,
-      agreedToTerms: true,
+      agreedToTerms: specialist.agreedToTerms,
+      avatarUrl: specialist.avatarUrl,
+      displayName: specialist.user?.displayName,
       portfolioItems: specialist.portfolioItems,
       selectedCategories: specialist.selectedCategories,
     });
@@ -374,12 +380,18 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
         success: false,
         error: details
           ? `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
-          : "برای ارسال پرونده ابتدا یک شاخه تخصصی انتخاب و ۱۰ نمونه‌کار بارگذاری کنید.",
+          : `برای ارسال پرونده ابتدا حداقل ${MIN_SELECTED_CATEGORIES} شاخه انتخاب و در یکی از آن‌ها ۱۰ نمونه‌کار بارگذاری کنید.`,
       };
     }
 
-    // The map base and city are what Jar quotes travel from, so the file is not
-    // reviewable without them — send the specialist to finish that step first.
+    if (!eligibility.hasCategories) {
+      return {
+        success: false,
+        error: `حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی انتخاب کنید.`,
+        redirect: "/specialist/onboarding/categories",
+      };
+    }
+
     if (!eligibility.hasCity || !eligibility.hasBaseLocation) {
       return {
         success: false,
@@ -388,19 +400,42 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
       };
     }
 
+    if (!eligibility.hasAgreedToTerms) {
+      return {
+        success: false,
+        error: "برای ارسال پرونده، تعهدنامه عضویت را در گام بعدی بپذیرید.",
+        redirect: "/specialist/onboarding/terms",
+      };
+    }
+
+    if (!eligibility.hasAvatar || !eligibility.hasDisplayName) {
+      return {
+        success: false,
+        error: "نام نمایشی و عکس پروفایل الزامی است.",
+        redirect: "/specialist/onboarding/profile",
+      };
+    }
+
+    if (!eligibility.isSubmittable) {
+      return {
+        success: false,
+        error: "پرونده هنوز برای ارسال کامل نیست.",
+        redirect: eligibility.nextStep,
+      };
+    }
+
     const entersReviewQueue = specialist.status === "INCOMPLETE";
 
     await prisma.specialistProfile.update({
       where: { id: specialist.id },
       data: {
-        agreedToTerms: true,
-        termsAgreedAt: new Date(),
+        reviewNote: null,
         ...(specialist.status === "ACTIVE" || specialist.status === "SUSPENDED"
           ? {}
           : {
               status: "PENDING_REVIEW",
               ...(entersReviewQueue
-                ? { submittedForReviewAt: new Date(), reviewedAt: null, reviewNote: null }
+                ? { submittedForReviewAt: new Date(), reviewedAt: null }
                 : {}),
             }),
       },
@@ -409,34 +444,26 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
     if (entersReviewQueue) {
       await notifyAdminsOfSpecialistSubmission({
         specialistUserId: session.userId,
-        displayName: specialist.user?.displayName || specialist.user?.phone || "متخصص",
-        city: specialist.city,
+        displayName: specialist.user?.displayName || phoneToLocalDisplay(specialist.user?.phone || ""),
+        city: specialist.city || "",
       });
     }
 
-    revalidatePath("/specialist/portfolio");
-    revalidatePath("/specialist/profile");
+    revalidatePath("/specialist/onboarding");
     revalidatePath(SPECIALIST_REVIEW_PATH);
-    revalidatePath("/profile");
+    revalidatePath("/specialist/portfolio");
     revalidatePath("/admin/review");
-
-    if (specialist.status === "ACTIVE") {
-      return {
-        success: true,
-        message: "تغییرات پرونده شما ذخیره شد.",
-        redirect: "/specialist/projects",
-      };
-    }
 
     return {
       success: true,
-      message:
-        "پرونده شما برای بررسی کارشناسان جار ارسال شد. نتیجه بررسی از طریق اعلان به شما اطلاع داده می‌شود.",
-      redirect: SPECIALIST_REVIEW_PATH,
+      message: entersReviewQueue
+        ? "پرونده شما برای بررسی کارشناسان جار ارسال شد."
+        : "وضعیت پرونده به‌روز شد.",
+      redirect: specialist.status === "ACTIVE" ? "/specialist/projects" : SPECIALIST_REVIEW_PATH,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[publishSpecialistProfile error]", error);
-    return { success: false, error: "خطای سرور در ارسال پرونده برای بررسی." };
+    return { success: false, error: "خطا در ارسال پرونده برای بررسی." };
   }
 }
 

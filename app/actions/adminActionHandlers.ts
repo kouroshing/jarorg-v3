@@ -422,16 +422,39 @@ export async function approveSpecialistAction({
     baseLat: profile.baseLat,
     baseLng: profile.baseLng,
     agreedToTerms: profile.agreedToTerms,
+    avatarUrl: profile.avatarUrl,
+    displayName: profile.user?.displayName,
     portfolioItems: items,
     selectedCategories: profile.selectedCategories,
   });
 
-  if (eligibility.qualifiedCategories.length === 0) {
-    const missing = missingRequirementLabels(eligibility);
+  // Activation needs approved portfolio + location/NDA/avatar — same bar as the board.
+  const activationReady =
+    eligibility.qualifiedCategories.length > 0 &&
+    eligibility.hasCity &&
+    eligibility.hasBaseLocation &&
+    eligibility.hasAgreedToTerms &&
+    eligibility.hasAvatar &&
+    eligibility.hasDisplayName;
+
+  if (!activationReady) {
+    const missing = missingRequirementLabels({
+      ...eligibility,
+      // Surface approved-portfolio gap when uploads exist but none are approved yet.
+      submittableCategories:
+        eligibility.qualifiedCategories.length > 0
+          ? eligibility.submittableCategories
+          : [],
+    });
+    if (eligibility.qualifiedCategories.length === 0) {
+      missing.push(
+        `حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده`
+      );
+    }
     return {
       success: false,
       error: missing.length
-        ? `این پرونده هنوز کامل نیست: ${missing.join("، ")}.`
+        ? `این پرونده هنوز کامل نیست: ${[...new Set(missing)].join("، ")}.`
         : `برای فعال‌سازی، حداقل ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در یک شاخه لازم است.`,
     };
   }
@@ -451,9 +474,9 @@ export async function approveSpecialistAction({
       userId: profile.userId,
       title: "پرونده شما تایید شد",
       message:
-        "پرونده متخصص شما توسط کارشناسان جار تایید شد. از همین حالا می‌توانید پروژه‌های باز را ببینید و اعلام آمادگی کنید.",
+        "پرونده متخصص شما تایید شد. از همین حالا می‌توانید پروژه‌ها را ببینید؛ برای تسویه کیف‌پول، احراز هویت بانکی را تکمیل کنید.",
       type: "SUCCESS",
-      link: "/specialist/projects",
+      link: "/specialist/onboarding/identity",
     },
   });
 
@@ -560,5 +583,84 @@ export async function getSpecialistPortfolioItems(specialistId: string) {
       ...item,
       createdAt: item.createdAt.toISOString(),
     })),
+  };
+}
+
+/** Admin can manually mark KYC verified/failed (override or when Zohal left PENDING). */
+export async function setSpecialistKycStatusAction({
+  specialistId,
+  status,
+  reason,
+}: {
+  specialistId: string;
+  status: "VERIFIED" | "FAILED" | "NONE";
+  reason?: string;
+}): Promise<AdminActionResult> {
+  const session = await getSession();
+  if (!isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز." };
+  }
+
+  const profile = await prisma.specialistProfile.findUnique({
+    where: { id: specialistId },
+    select: { id: true, userId: true, kycStatus: true },
+  });
+  if (!profile) {
+    return { success: false, error: "پروفایل یافت نشد." };
+  }
+
+  await prisma.specialistProfile.update({
+    where: { id: specialistId },
+    data: {
+      kycStatus: status,
+      kycVerifiedAt: status === "VERIFIED" ? new Date() : null,
+      kycFailureReason: status === "FAILED" ? reason?.trim() || "رد احراز هویت" : null,
+    },
+  });
+
+  if (status === "VERIFIED") {
+    await prisma.notification.create({
+      data: {
+        userId: profile.userId,
+        title: "احراز هویت بانکی تایید شد",
+        message: "هویت و شبا شما تایید شد. از این پس تسویه پروژه ممکن است.",
+        type: "SUCCESS",
+        link: "/specialist/projects",
+      },
+    });
+  } else if (status === "FAILED") {
+    await prisma.notification.create({
+      data: {
+        userId: profile.userId,
+        title: "احراز هویت نیاز به اصلاح دارد",
+        message: reason?.trim() || "اطلاعات هویتی/شبا تایید نشد. دوباره ارسال کنید.",
+        type: "WARNING",
+        link: "/specialist/onboarding/identity",
+      },
+    });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: session.phone || session.userId || "admin",
+      action: `SPECIALIST_KYC_${status}`,
+      targetModel: "SpecialistProfile",
+      targetId: specialistId,
+      note: reason?.trim() || null,
+    },
+  });
+
+  revalidatePath("/admin/review");
+  revalidatePath("/specialist/onboarding/identity");
+  revalidatePath("/dashboard/wallet");
+
+  return {
+    success: true,
+    message:
+      status === "VERIFIED"
+        ? "احراز هویت تایید شد."
+        : status === "FAILED"
+          ? "احراز هویت رد شد."
+          : "وضعیت احراز هویت بازنشانی شد.",
   };
 }

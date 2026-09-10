@@ -30,6 +30,8 @@ type WithdrawalRequest = {
 
 export default function PhotographerWalletPage() {
   const [balance, setBalance] = useState<number>(0);
+  const [kycVerified, setKycVerified] = useState(false);
+  const [kycStatus, setKycStatus] = useState<string | null>(null);
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -46,6 +48,8 @@ export default function PhotographerWalletPage() {
       const balanceRes = await getWalletBalance();
       if (balanceRes.success) {
         setBalance(balanceRes.data);
+        setKycVerified(Boolean(balanceRes.kycVerified));
+        setKycStatus(balanceRes.kycStatus ?? null);
       }
 
       const reqRes = await getWithdrawalRequests();
@@ -154,6 +158,22 @@ export default function PhotographerWalletPage() {
                 درخواست تسویه جدید
               </h3>
 
+              {!kycVerified && (
+                <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4 text-[11px] font-bold text-amber-900 space-y-2 leading-relaxed">
+                  <p>
+                    {kycStatus === "PENDING"
+                      ? "احراز هویت بانکی در صف بررسی است. تا تایید نهایی امکان تسویه وجود ندارد."
+                      : "برای تسویه حساب، ابتدا احراز هویت بانکی (کد ملی + شبا) را تکمیل کنید."}
+                  </p>
+                  <Link
+                    href="/specialist/onboarding/identity"
+                    className="inline-flex text-[#006097] underline"
+                  >
+                    رفتن به احراز هویت
+                  </Link>
+                </div>
+              )}
+
               {formError && (
                 <div className="rounded-2xl bg-rose-50 border border-rose-100 p-4 text-[10px] font-bold text-rose-600 flex items-center gap-2">
                   <AlertCircle className="h-4.5 w-4.5 shrink-0" />
@@ -168,7 +188,7 @@ export default function PhotographerWalletPage() {
                 </div>
               )}
 
-              <form onSubmit={handleWithdrawSubmit} className="space-y-4">
+              <form onSubmit={handleWithdrawSubmit} className={`space-y-4 ${!kycVerified ? "opacity-50 pointer-events-none" : ""}`}>
                 <label className="block space-y-2">
                   <span className="text-[10px] font-bold text-slate-500">شماره شبا (با IR شروع شود):</span>
                   <input

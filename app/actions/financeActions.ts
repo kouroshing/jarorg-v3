@@ -8,6 +8,9 @@ export interface FinanceActionResult {
   success: boolean;
   data?: any;
   error?: string;
+  /** Present on wallet balance reads for specialist payout gating. */
+  kycStatus?: string | null;
+  kycVerified?: boolean;
 }
 
 /**
@@ -97,10 +100,20 @@ export async function getWalletBalance(): Promise<FinanceActionResult> {
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      select: { walletBalance: true }
+      select: {
+        walletBalance: true,
+        specialistProfile: { select: { kycStatus: true, status: true } },
+      },
     });
 
-    return { success: true, data: user?.walletBalance || 0 };
+    const kycStatus = user?.specialistProfile?.kycStatus ?? null;
+
+    return {
+      success: true,
+      data: user?.walletBalance || 0,
+      kycStatus,
+      kycVerified: kycStatus === "VERIFIED",
+    };
   } catch (error) {
     console.error("Error in getWalletBalance:", error);
     return { success: false, error: "خطا در دریافت موجودی کیف پول." };
@@ -128,6 +141,26 @@ export async function createWithdrawalRequest(
 
     if (!Number.isInteger(amount) || amount <= 0) {
       return { success: false, error: "مبلغ درخواستی تسویه حساب باید عددی صحیح و بیشتر از صفر باشد." };
+    }
+
+    const specialist = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: { status: true, kycStatus: true },
+    });
+
+    if (!specialist || specialist.status !== "ACTIVE") {
+      return {
+        success: false,
+        error: "تسویه حساب فقط برای متخصصان فعال در دسترس است.",
+      };
+    }
+
+    if (specialist.kycStatus !== "VERIFIED") {
+      return {
+        success: false,
+        error:
+          "برای تسویه حساب ابتدا احراز هویت بانکی (شاهکار + شبا) را تکمیل کنید.",
+      };
     }
 
     const res = await prisma.$transaction(async (tx) => {

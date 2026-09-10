@@ -352,6 +352,7 @@ CREATE TABLE "specialist_profiles" (
     "bio" TEXT,
     "equipment_summary" TEXT,
     "selected_categories" TEXT,
+    "avatar_url" TEXT,
     "base_lat" REAL,
     "base_lng" REAL,
     "base_address" TEXT,
@@ -362,6 +363,13 @@ CREATE TABLE "specialist_profiles" (
     "reviewed_at" DATETIME,
     "reviewed_by" TEXT,
     "review_note" TEXT,
+    "kyc_status" TEXT NOT NULL DEFAULT 'NONE',
+    "kyc_national_id_mask" TEXT,
+    "kyc_shaba_mask" TEXT,
+    "kyc_bank_name" TEXT,
+    "kyc_verified_at" DATETIME,
+    "kyc_failure_reason" TEXT,
+    "kyc_submitted_at" DATETIME,
     CONSTRAINT "specialist_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 

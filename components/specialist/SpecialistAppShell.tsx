@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Briefcase, FolderOpen, MapPin, Wallet, User, ClipboardList } from "lucide-react";
+import { Briefcase, FolderOpen, MapPin, Wallet, User, ClipboardList, ShieldCheck } from "lucide-react";
 import BrandLogo from "@/components/BrandLogo";
 import JarBillowBackground from "@/components/home/JarBillowBackground";
 
@@ -9,6 +9,7 @@ const NAV = [
   { id: "mine", href: "/specialist/mine", label: "پروژه‌های من", short: "من", icon: ClipboardList },
   { id: "portfolio", href: "/specialist/portfolio", label: "نمونه‌کارها", short: "کار", icon: FolderOpen },
   { id: "profile", href: "/specialist/profile", label: "پروفایل کاری", short: "پروفایل", icon: MapPin },
+  { id: "identity", href: "/specialist/onboarding/identity", label: "احراز هویت", short: "KYC", icon: ShieldCheck },
 ] as const;
 
 export default function SpecialistAppShell({
@@ -17,7 +18,7 @@ export default function SpecialistAppShell({
   mineCount,
   children,
 }: {
-  active: "projects" | "mine" | "portfolio" | "profile";
+  active: "projects" | "mine" | "portfolio" | "profile" | "identity";
   phone?: string | null;
   mineCount?: number;
   children: React.ReactNode;

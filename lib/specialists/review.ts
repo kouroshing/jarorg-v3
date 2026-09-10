@@ -5,6 +5,7 @@ import { getAdminPhoneDigits, SUPER_ADMIN_PHONE } from "@/lib/auth/admin";
 import {
   evaluateEligibility,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
+  MIN_SELECTED_CATEGORIES,
   parseSelectedCategories,
   SPECIALIST_REVIEW_PATH,
   type EligibilityResult,
@@ -16,11 +17,16 @@ export type SpecialistReviewCard = {
   userId: string;
   displayName: string;
   phone: string;
+  avatarUrl: string | null;
   city: string | null;
   workArea: string | null;
   bio: string | null;
   equipmentSummary: string | null;
   status: string;
+  kycStatus: string;
+  kycNationalIdMask: string | null;
+  kycShabaMask: string | null;
+  kycSubmittedAt: string | null;
   submittedForReviewAt: string | null;
   reviewedAt: string | null;
   reviewNote: string | null;
@@ -51,10 +57,18 @@ function categoryTitle(slug: string): string {
  * submitted, and whether approving it now would actually let them take work.
  */
 export async function getSpecialistReviewCards(
-  statuses: string[] = ["PENDING_REVIEW"]
+  statuses: string[] = ["PENDING_REVIEW"],
+  options?: { includeKycPending?: boolean }
 ): Promise<SpecialistReviewCard[]> {
   const profiles = await prisma.specialistProfile.findMany({
-    where: { status: { in: statuses } },
+    where: options?.includeKycPending
+      ? {
+          OR: [
+            { status: { in: statuses } },
+            { status: "ACTIVE", kycStatus: "PENDING" },
+          ],
+        }
+      : { status: { in: statuses } },
     include: {
       user: { select: { id: true, phone: true, displayName: true } },
       portfolioItems: { orderBy: { createdAt: "desc" } },
@@ -84,6 +98,8 @@ export async function getSpecialistReviewCards(
       baseLat: profile.baseLat,
       baseLng: profile.baseLng,
       agreedToTerms: profile.agreedToTerms,
+      avatarUrl: profile.avatarUrl,
+      displayName: profile.user?.displayName,
       portfolioItems: items,
       selectedCategories: profile.selectedCategories,
     });
@@ -93,11 +109,16 @@ export async function getSpecialistReviewCards(
       userId: profile.userId,
       displayName: profile.user?.displayName || "متخصص بدون نام",
       phone: profile.user?.phone || "",
+      avatarUrl: profile.avatarUrl,
       city: profile.city,
       workArea: profile.workArea,
       bio: profile.bio,
       equipmentSummary: profile.equipmentSummary,
       status: profile.status,
+      kycStatus: profile.kycStatus,
+      kycNationalIdMask: profile.kycNationalIdMask,
+      kycShabaMask: profile.kycShabaMask,
+      kycSubmittedAt: profile.kycSubmittedAt?.toISOString() ?? null,
       submittedForReviewAt: profile.submittedForReviewAt?.toISOString() ?? null,
       reviewedAt: profile.reviewedAt?.toISOString() ?? null,
       reviewNote: profile.reviewNote,
@@ -119,7 +140,13 @@ export async function getSpecialistReviewCards(
         pending: items.filter((i) => i.reviewStatus === "PENDING").length,
         rejected: items.filter((i) => i.reviewStatus === "REJECTED").length,
       },
-      canActivate: eligibility.qualifiedCategories.length > 0 && eligibility.isSubmittable,
+      canActivate:
+        eligibility.qualifiedCategories.length > 0 &&
+        eligibility.hasCity &&
+        eligibility.hasBaseLocation &&
+        eligibility.hasAgreedToTerms &&
+        eligibility.hasAvatar &&
+        eligibility.hasDisplayName,
       eligibility,
     };
   });
@@ -165,6 +192,11 @@ export async function notifyAdminsOfSpecialistSubmission({
 
 export function missingRequirementLabels(eligibility: EligibilityResult): string[] {
   const missing: string[] = [];
+  if (!eligibility.hasDisplayName) missing.push("نام نمایشی");
+  if (!eligibility.hasAvatar) missing.push("عکس پروفایل");
+  if (!eligibility.hasCategories) {
+    missing.push(`انتخاب حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی`);
+  }
   if (eligibility.submittableCategories.length === 0) {
     missing.push(`حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار`);
   }

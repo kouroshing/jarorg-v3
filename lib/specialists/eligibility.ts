@@ -13,11 +13,23 @@
  */
 
 export const MIN_PORTFOLIO_ITEMS_PER_CATEGORY = 10;
+export const MIN_SELECTED_CATEGORIES = 3;
 
 export type SpecialistStatus = "INCOMPLETE" | "PENDING_REVIEW" | "ACTIVE" | "SUSPENDED";
 
 /** The waiting room a specialist sits in between submitting and being approved. */
 export const SPECIALIST_REVIEW_PATH = "/specialist/onboarding/review";
+
+export const ONBOARDING_STEPS = [
+  { id: "profile", href: "/specialist/onboarding/profile", label: "اطلاعات پایه", short: "پایه" },
+  { id: "categories", href: "/specialist/onboarding/categories", label: "دسته‌بندی‌ها", short: "دسته" },
+  { id: "portfolio", href: "/specialist/onboarding/portfolio", label: "نمونه‌کارها", short: "نمونه" },
+  { id: "details", href: "/specialist/onboarding/details", label: "محل فعالیت", short: "محل" },
+  { id: "terms", href: "/specialist/onboarding/terms", label: "تعهدنامه", short: "تعهد" },
+  { id: "review", href: SPECIALIST_REVIEW_PATH, label: "بررسی ادمین", short: "بررسی" },
+] as const;
+
+export type OnboardingStepId = (typeof ONBOARDING_STEPS)[number]["id"];
 
 export type PortfolioItemLike = {
   categorySlug: string;
@@ -29,6 +41,8 @@ export type EligibilityInput = {
   baseLat?: number | null;
   baseLng?: number | null;
   agreedToTerms?: boolean | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
   portfolioItems: PortfolioItemLike[];
   /** JSON string of category slugs, as stored on SpecialistProfile. */
   selectedCategories?: string | null;
@@ -39,6 +53,9 @@ export type EligibilityResult = {
   isSubmittable: boolean;
   /** The furthest state onboarding alone can reach. Never ACTIVE. */
   status: Extract<SpecialistStatus, "INCOMPLETE" | "PENDING_REVIEW">;
+  hasDisplayName: boolean;
+  hasAvatar: boolean;
+  hasCategories: boolean;
   hasCity: boolean;
   hasBaseLocation: boolean;
   hasAgreedToTerms: boolean;
@@ -49,6 +66,7 @@ export type EligibilityResult = {
   /** Categories with enough APPROVED work — what they can be shown for. */
   qualifiedCategories: string[];
   nextStep: string;
+  currentStepId: OnboardingStepId;
 };
 
 export function parseSelectedCategories(raw: string | null | undefined): string[] {
@@ -84,10 +102,10 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
   const uploaded = countByCategory(input.portfolioItems, isPendingOrApproved);
   const approved = countByCategory(input.portfolioItems, isApproved);
 
-  // What they said they offer; falling back to whatever they have uploaded, so
-  // a specialist who never picked categories explicitly is still assessed.
   const declared = parseSelectedCategories(input.selectedCategories);
-  const categories = declared.length > 0 ? declared : Object.keys(uploaded);
+  const hasCategories = declared.length >= MIN_SELECTED_CATEGORIES;
+  // Only assess categories they explicitly offer — never invent defaults.
+  const categories = hasCategories ? declared : [];
 
   const submittableCategories = categories.filter(
     (slug) => (uploaded[slug] || 0) >= MIN_PORTFOLIO_ITEMS_PER_CATEGORY
@@ -99,6 +117,8 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     .filter((slug) => (uploaded[slug] || 0) < MIN_PORTFOLIO_ITEMS_PER_CATEGORY)
     .map((slug) => ({ slug, count: uploaded[slug] || 0 }));
 
+  const hasDisplayName = Boolean(input.displayName && input.displayName.trim().length >= 2);
+  const hasAvatar = Boolean(input.avatarUrl && input.avatarUrl.trim().length > 0);
   const hasCity = Boolean(input.city && input.city.trim().length > 0);
   const hasBaseLocation =
     Number.isFinite(input.baseLat) &&
@@ -106,21 +126,41 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     !(input.baseLat === 0 && input.baseLng === 0);
   const hasAgreedToTerms = input.agreedToTerms === true;
 
-  // One category worth of work, plus the details Jar needs to quote travel and
-  // to hold them to the terms.
   const isSubmittable =
-    submittableCategories.length > 0 && hasCity && hasBaseLocation && hasAgreedToTerms;
+    hasDisplayName &&
+    hasAvatar &&
+    hasCategories &&
+    submittableCategories.length > 0 &&
+    hasCity &&
+    hasBaseLocation &&
+    hasAgreedToTerms;
 
   let nextStep = SPECIALIST_REVIEW_PATH;
-  if (submittableCategories.length === 0) {
+  let currentStepId: OnboardingStepId = "review";
+
+  if (!hasDisplayName || !hasAvatar) {
+    nextStep = "/specialist/onboarding/profile";
+    currentStepId = "profile";
+  } else if (!hasCategories) {
+    nextStep = "/specialist/onboarding/categories";
+    currentStepId = "categories";
+  } else if (submittableCategories.length === 0) {
     nextStep = "/specialist/onboarding/portfolio";
-  } else if (!hasCity || !hasBaseLocation || !hasAgreedToTerms) {
+    currentStepId = "portfolio";
+  } else if (!hasCity || !hasBaseLocation) {
     nextStep = "/specialist/onboarding/details";
+    currentStepId = "details";
+  } else if (!hasAgreedToTerms) {
+    nextStep = "/specialist/onboarding/terms";
+    currentStepId = "terms";
   }
 
   return {
     isSubmittable,
     status: isSubmittable ? "PENDING_REVIEW" : "INCOMPLETE",
+    hasDisplayName,
+    hasAvatar,
+    hasCategories,
     hasCity,
     hasBaseLocation,
     hasAgreedToTerms,
@@ -128,6 +168,7 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     submittableCategories,
     qualifiedCategories,
     nextStep,
+    currentStepId,
   };
 }
 
@@ -138,10 +179,32 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
  */
 export function specialistLandingPath(
   status: string | null | undefined,
-  eligibility: EligibilityResult
+  eligibility: EligibilityResult,
+  kycStatus?: string | null,
+  reviewNote?: string | null
 ): string {
-  if (status === "ACTIVE") return "/specialist/projects";
+  if (status === "ACTIVE") {
+    // After qualitative approval, incomplete KYC nudges to identity — projects
+    // stay reachable from the shell, but this is the recommended next step.
+    if (kycStatus && kycStatus !== "VERIFIED" && kycStatus !== "PENDING") {
+      return "/specialist/onboarding/identity";
+    }
+    return "/specialist/projects";
+  }
   if (status === "PENDING_REVIEW" || status === "SUSPENDED") return SPECIALIST_REVIEW_PATH;
+
+  // Rejected files stay INCOMPLETE but carry a reviewNote — show that note on
+  // the review page instead of bouncing through a self-redirect loop.
+  if (status === "INCOMPLETE" && reviewNote && reviewNote.trim().length > 0) {
+    return SPECIALIST_REVIEW_PATH;
+  }
+
+  // A complete INCOMPLETE file (eligibility says "review") must not land on the
+  // waiting room — send them to terms so they can explicitly resubmit.
+  if (eligibility.nextStep === SPECIALIST_REVIEW_PATH) {
+    return "/specialist/onboarding/terms";
+  }
+
   return eligibility.nextStep;
 }
 
@@ -160,4 +223,8 @@ export function resolveOnboardingStatus(
     return current;
   }
   return eligibility.status;
+}
+
+export function stepIndex(stepId: OnboardingStepId): number {
+  return ONBOARDING_STEPS.findIndex((s) => s.id === stepId);
 }

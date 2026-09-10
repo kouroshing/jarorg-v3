@@ -5,19 +5,12 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   MapPin,
-  Camera,
-  FileText,
-  ShieldCheck,
   CheckCircle2,
   AlertCircle,
   Loader2,
-  ArrowLeft,
-  Sparkles,
 } from "lucide-react";
 import { saveSpecialistDetailsAction } from "@/app/actions/specialistOnboardingActions";
-import { NdaModal } from "@/components/specialist/NdaModal";
 
-// Leaflet needs the DOM; same dynamic import the order wizard uses.
 const LocationMapPicker = dynamic(() => import("@/components/order/LocationMapPicker"), {
   ssr: false,
   loading: () => (
@@ -32,7 +25,6 @@ interface Props {
   initialWorkArea?: string | null;
   initialBio?: string | null;
   initialEquipment?: string | null;
-  initialAgreedToTerms?: boolean;
   initialBaseLat?: number | null;
   initialBaseLng?: number | null;
   initialBaseAddress?: string | null;
@@ -46,7 +38,6 @@ export default function SpecialistDetailsForm({
   initialWorkArea,
   initialBio,
   initialEquipment,
-  initialAgreedToTerms,
   initialBaseLat,
   initialBaseLng,
   initialBaseAddress,
@@ -59,9 +50,6 @@ export default function SpecialistDetailsForm({
   const [workArea, setWorkArea] = useState(initialWorkArea || "");
   const [bio, setBio] = useState(initialBio || "");
   const [equipmentSummary, setEquipmentSummary] = useState(initialEquipment || "");
-  const [agreedToTerms, setAgreedToTerms] = useState(Boolean(initialAgreedToTerms));
-  // Where this specialist travels from. Every proposal they make quotes travel
-  // from this point, so it is required before they can be activated.
   const [baseCoords, setBaseCoords] = useState<{ lat: number; lng: number } | null>(
     typeof initialBaseLat === "number" && typeof initialBaseLng === "number"
       ? { lat: initialBaseLat, lng: initialBaseLng }
@@ -69,7 +57,6 @@ export default function SpecialistDetailsForm({
   );
   const [baseAddress, setBaseAddress] = useState(initialBaseAddress || "");
   const [baseDistrict, setBaseDistrict] = useState("");
-  const [showNdaModal, setShowNdaModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -89,11 +76,6 @@ export default function SpecialistDetailsForm({
       return;
     }
 
-    if (!isEdit && !agreedToTerms) {
-      setError("پذیرش تعهدنامه حفظ محرمانگی و عدم انتشار فایل‌های مشتریان الزامی است.");
-      return;
-    }
-
     startTransition(async () => {
       const res = await saveSpecialistDetailsAction({
         city: city.trim(),
@@ -103,7 +85,6 @@ export default function SpecialistDetailsForm({
         baseLat: baseCoords.lat,
         baseLng: baseCoords.lng,
         baseAddress: baseAddress.trim() || baseDistrict || undefined,
-        agreedToTerms: true,
         returnTo,
       });
 
@@ -122,7 +103,6 @@ export default function SpecialistDetailsForm({
   return (
     <div className="space-y-6">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Error notification */}
         {error && (
           <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold animate-in fade-in">
             <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
@@ -137,7 +117,6 @@ export default function SpecialistDetailsForm({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* City */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-jar-primary">
                 شهر اصلی محل فعالیت <span className="text-rose-500">*</span>
@@ -185,7 +164,6 @@ export default function SpecialistDetailsForm({
               )}
             </div>
 
-            {/* Work Area */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-jar-primary">
                 مناطق و محدوده پوشش‌دهی
@@ -197,12 +175,8 @@ export default function SpecialistDetailsForm({
                 placeholder="مثال: تمام مناطق تهران، شمیرانات، غرب..."
                 className="w-full h-12 rounded-2xl border border-jar-border bg-jar-canvas px-4 text-xs font-medium text-jar-primary focus:bg-jar-surface focus:border-jar-logo focus:ring-4 focus:ring-jar-logo/10 outline-none transition-all"
               />
-              <span className="text-[10px] text-jar-muted block">
-                محدوده‌هایی که امکان اعزام و حضور برای پروژه را دارید.
-              </span>
             </div>
 
-            {/* Equipment */}
             <div className="sm:col-span-2 space-y-1.5">
               <label className="block text-xs font-bold text-jar-primary">
                 تجهیزات اصلی (دوربین، لنز و نور)
@@ -214,12 +188,8 @@ export default function SpecialistDetailsForm({
                 placeholder="مثال: Sony A7IV، لنز 24-70mm f/2.8 GM، دو شاخه نور Godox AD400..."
                 className="w-full h-12 rounded-2xl border border-jar-border bg-jar-canvas px-4 text-xs font-medium text-jar-primary focus:bg-jar-surface focus:border-jar-logo focus:ring-4 focus:ring-jar-logo/10 outline-none transition-all"
               />
-              <span className="text-[10px] text-jar-muted block">
-                این مشخصات پس از انتخاب به کارفرما نمایش داده می‌شود و اعتماد ایجاد می‌کند.
-              </span>
             </div>
 
-            {/* Bio */}
             <div className="sm:col-span-2 space-y-1.5">
               <label className="block text-xs font-bold text-jar-primary">
                 خلاصه بیوگرافی و سبک کاری (اختیاری)
@@ -242,42 +212,6 @@ export default function SpecialistDetailsForm({
           </div>
         )}
 
-        {/* NDA only during first onboarding */}
-        {!isEdit && (
-        <div className="rounded-3xl border border-jar-border bg-jar-surface p-6 sm:p-8 shadow-xs backdrop-blur-xl space-y-4">
-          <div className="flex items-center gap-2 border-b border-jar-border pb-3">
-            <ShieldCheck className="h-5 w-5 text-emerald-600" />
-            <h2 className="text-base font-bold text-jar-primary">تعهدنامه رسمی و حریم خصوصی کارفرمایان</h2>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-jar-canvas border border-jar-border space-y-2">
-            <div className="flex items-start gap-2.5">
-              <input
-                type="checkbox"
-                id="nda-checkbox"
-                checked={agreedToTerms}
-                onChange={(e) => setAgreedToTerms(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-jar-border text-jar-primary focus:ring-jar-primary cursor-pointer"
-              />
-              <label htmlFor="nda-checkbox" className="text-xs font-bold text-jar-primary leading-relaxed cursor-pointer select-none">
-                اینجانب متعهد می‌شوم فایل‌ها، عکس‌ها و ویدیوهای خام پروژه‌ها را به عنوان امانت حفظ نموده و بدون کسب رضایت کتبی کارفرما، در هیچ پلتفرم یا فضای مجازی منتشر ننمایم.
-              </label>
-            </div>
-
-            <div className="pt-2 flex justify-start">
-              <button
-                type="button"
-                onClick={() => setShowNdaModal(true)}
-                className="text-[11px] font-bold text-jar-logo hover:underline inline-flex items-center gap-1 cursor-pointer"
-              >
-                <span>مشاهده متن کامل تعهدنامه عدم افشا (NDA) پلتفرم جار</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        )}
-
-        {/* Submit Actions */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
           <button
             type="submit"
@@ -293,30 +227,18 @@ export default function SpecialistDetailsForm({
               {isEdit
                 ? "ذخیره پروفایل کاری"
                 : hasEligiblePortfolio
-                  ? "تأیید نهایی و فعال‌سازی حساب کاربری"
-                  : "ذخیره و ورود به مرحله آپلود نمونه‌کارها"}
+                  ? "ذخیره و رفتن به تعهدنامه"
+                  : "ذخیره و ادامه"}
             </span>
           </button>
 
           <span className="text-xs text-jar-muted font-medium">
             {isEdit
               ? "تغییر مبدأ، ایاب‌وذهاب پروژه‌های بعدی را عوض می‌کند."
-              : hasEligiblePortfolio
-                ? "✓ شرط ۱۰ نمونه‌کار شما قبلاً احراز شده است."
-                : "توجه: پس از ثبت مشخصات، بارگذاری ۱۰ نمونه‌کار الزامی است."}
+              : "گام بعدی: مطالعه و پذیرش تعهدنامه عضویت."}
           </span>
         </div>
       </form>
-
-      {/* NDA Modal */}
-      <NdaModal
-        isOpen={showNdaModal}
-        onClose={() => setShowNdaModal(false)}
-        onAccept={() => {
-          setAgreedToTerms(true);
-          setShowNdaModal(false);
-        }}
-      />
     </div>
   );
 }

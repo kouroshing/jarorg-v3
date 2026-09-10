@@ -34,7 +34,6 @@ export default async function SpecialistWorkingProfilePage() {
         initialWorkArea={state.workArea}
         initialBio={state.bio}
         initialEquipment={state.equipmentSummary}
-        initialAgreedToTerms={state.agreedToTerms}
         initialBaseLat={state.baseLat}
         initialBaseLng={state.baseLng}
         initialBaseAddress={state.baseAddress}

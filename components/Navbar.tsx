@@ -427,6 +427,7 @@ const STANDALONE_PREFIXES = [
   "/admin",
   "/specialist",
   "/join",
+  "/legal",
 ];
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
