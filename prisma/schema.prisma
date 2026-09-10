@@ -439,7 +439,6 @@ model GalleryProject {
 
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   photos    GalleryPhoto[]
-  orders    GalleryOrder[]
   purchases GalleryPurchase[]
 
   @@map("gallery_projects")
@@ -455,37 +454,28 @@ model GalleryPhoto {
   createdAt      DateTime @default(now()) @map("created_at")
 
   project    GalleryProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  orderItems GalleryOrderItem[]
 
   @@map("gallery_photos")
 }
 
-model GalleryOrder {
-  id        String   @id @default(uuid())
-  phone     String   @map("phone") // customer's phone number
-  projectId String   @map("project_id")
-  amount    Int
-  status    String   @default("PENDING") // PENDING, SUCCESS, FAILED
-  authority String?  @unique
-  refId     String?  @map("ref_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+/// A gallery purchase is the entitlement/payment record, not a customer order.
+/// It is kept so paid photo access remains server-authorized and idempotent.
+model GalleryPurchase {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  clientPhone       String   @map("client_phone")
+  purchasedPhotoIds String   @map("purchased_photo_ids")
+  amount            Int      @default(0)
+  status            String   @default("PENDING")
+  authority         String   @unique
+  refId             String?  @map("ref_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  project GalleryProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  items   GalleryOrderItem[]
+  project GalleryProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@map("gallery_orders")
-}
-
-model GalleryOrderItem {
-  id      String @id @default(uuid())
-  orderId String @map("order_id")
-  photoId String @map("photo_id")
-
-  order GalleryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  photo GalleryPhoto @relation(fields: [photoId], references: [id], onDelete: Cascade)
-
-  @@map("gallery_order_items")
+  @@index([projectId, clientPhone])
+  @@map("gallery_purchases")
 }
 
 /// Every movement in a wallet. User.walletBalance is the running total; these
@@ -527,18 +517,6 @@ model WithdrawalRequest {
   @@map("withdrawal_requests")
 }
 
-model GalleryPurchase {
-  id                String   @id @default(uuid())
-  projectId         String   @map("project_id")
-  clientPhone       String   @map("client_phone")
-  purchasedPhotoIds String   @map("purchased_photo_ids") // comma-separated photo IDs
-  createdAt         DateTime @default(now()) @map("created_at")
-
-  project GalleryProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@map("gallery_purchases")
-}
-
 model SpecialistProfile {
   id                 String  @id @default(uuid())
   userId             String  @unique @map("user_id")
@@ -558,6 +536,14 @@ model SpecialistProfile {
   agreedToTerms Boolean   @default(false) @map("agreed_to_terms")
   termsAgreedAt DateTime? @map("terms_agreed_at")
   createdAt     DateTime  @default(now()) @map("created_at")
+
+  /// A specialist becomes ACTIVE only when an admin approves them, never as a
+  /// side effect of finishing onboarding. These record that review.
+  submittedForReviewAt DateTime? @map("submitted_for_review_at")
+  reviewedAt           DateTime? @map("reviewed_at")
+  reviewedBy           String?   @map("reviewed_by")
+  /// Why the file was sent back, shown to the specialist on the waiting page.
+  reviewNote           String?   @map("review_note")
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   portfolioItems PortfolioItem[]

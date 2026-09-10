@@ -16,6 +16,7 @@ import {
 import { CATEGORIES_BY_SLUG, ALL_CATEGORIES } from "@/lib/categories";
 import { BUDGET_STOPS, formatPrice } from "@/components/order/BudgetSlider";
 import { createOrderAction } from "@/app/actions/orderActions";
+import OrderSubmitWaiting from "@/components/order/OrderSubmitWaiting";
 
 import StepCategory from "@/components/order/steps/StepCategory";
 import StepLocation, { LocationType } from "@/components/order/steps/StepLocation";
@@ -89,6 +90,7 @@ export default function OrderFormClient({
   const [projectDescription, setProjectDescription] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [waitingAfterSubmit, setWaitingAfterSubmit] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Derived Values
@@ -215,7 +217,10 @@ export default function OrderFormClient({
       });
 
       if (res.success && res.orderId) {
-        router.push(`/order/${res.orderId}`);
+        setWaitingAfterSubmit(true);
+        window.setTimeout(() => {
+          router.push(`/order/${res.orderId}`);
+        }, 2200);
       } else {
         setSubmitError(res.error || "خطا در ثبت نهایی سفارش. لطفاً دوباره تلاش کنید.");
         setIsSubmitting(false);
@@ -407,7 +412,7 @@ export default function OrderFormClient({
           {/* Primary Action Button: Solid Jet-Black #141413 */}
           <button
             type="button"
-            disabled={!isStepValid || isSubmitting}
+            disabled={!isStepValid || isSubmitting || waitingAfterSubmit}
             onClick={handleNext}
             className={`h-11 sm:h-12 px-5 sm:px-8 flex-1 min-w-0 rounded-full font-medium text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-none ${
               !isStepValid
@@ -435,6 +440,8 @@ export default function OrderFormClient({
 
         </div>
       </footer>
+
+      {waitingAfterSubmit && <OrderSubmitWaiting categoryTitle={selectedCategory.title} />}
 
     </div>
   );

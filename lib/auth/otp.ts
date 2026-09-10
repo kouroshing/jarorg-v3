@@ -8,9 +8,11 @@ import {
 export const OTP_LENGTH = 4;
 export const OTP_TTL_MS = 2 * 60 * 1000;
 
-/** Cryptographically weak but sufficient for short-lived SMS OTP. */
+/** Cryptographically random 4-digit OTP. Safe on both server and client. */
 export function generateOtpCode(): string {
-  const n = Math.floor(1000 + Math.random() * 9000);
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  const n = 1000 + (buf[0] % 9000);
   return String(n);
 }
 

@@ -5,6 +5,8 @@ import { generateSpotPlayerLicense } from "@/lib/spotplayer";
 import { signSessionToken } from "@/lib/auth/jwt";
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { sessionRoleFromPhone } from "@/lib/auth/roles";
+import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
+import { courseChargeAmount } from "@/lib/jaramooz/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -93,13 +95,18 @@ export async function GET(request: NextRequest) {
       return res;
     }
 
-    // 5. Connect to production Zarinpal verification API
+    // Verify against the course list price, not a previously stored amount.
+    // A PENDING row written under the old client-controlled `amount` field
+    // must not be able to clear a 9.1M course for a 1,000-toman gateway call.
+    const finalAmount = courseChargeAmount(purchase.course.price);
+
+    const merchant = resolveZarinpalMerchant();
+    if (!merchant.ok || merchant.sandbox) {
+      return safeRedirect(`${origin}/jaramooz?error=payment_configuration`);
+    }
+
     const verifyUrl = "https://api.zarinpal.com/pg/v4/payment/verify.json";
-    const envMerchant = process.env.ZARINPAL_MERCHANT_ID?.trim();
-    const merchantId = (envMerchant && envMerchant !== "sandbox" && envMerchant !== "" && envMerchant !== "undefined")
-      ? envMerchant
-      : "8428f2e7-b867-411d-bf02-526eb2708f93";
-    const finalAmount = purchase.amount || purchase.course.price;
+    const merchantId = merchant.merchantId;
 
     const zarinpalBody = {
       merchant_id: merchantId,

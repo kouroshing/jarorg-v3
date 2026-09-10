@@ -21,8 +21,6 @@ import {
   FileText,
   Share2,
   Headphones,
-  Radio,
-  Users,
 } from "lucide-react";
 import { getOrderById } from "@/app/actions/orderActions";
 import { formatPrice } from "@/components/order/BudgetSlider";
@@ -34,10 +32,12 @@ import {
 import OrderApplicantsList from "@/components/order/OrderApplicantsList";
 import CancelOrderButton from "@/components/order/CancelOrderButton";
 import OrderWaitingHero from "@/components/order/OrderWaitingHero";
+import OrderMatchingStage from "@/components/order/OrderMatchingStage";
 import {
   isAdminTriage,
   isOnMarket,
   orderStatusPresentation,
+  parseOrderStatus,
 } from "@/lib/orders/status";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +85,10 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
   }
 
   const order = result.order;
+  const parsedStatus = parseOrderStatus(order.status);
+  const isAwaitingPayment = parsedStatus === "AWAITING_PAYMENT";
+  const payableAmount =
+    order.agreedTotalPrice && order.agreedTotalPrice > 0 ? order.agreedTotalPrice : null;
 
   // Session and ownership authorization
   const session = await getSession();
@@ -138,18 +142,43 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           </span>
         </div>
 
-        {/* Payment Success or Cancelled Alert */}
+        {/* Payment status alerts */}
         {searchParams?.payment === "success" && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs sm:text-sm font-bold shadow-xs">
             <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
-            <span>پرداخت پیش‌پرداخت با موفقیت انجام شد! کارشناسان جار در حال بررسی و هماهنگی با بهترین متخصصین هستند.</span>
+            <span>پرداخت با موفقیت انجام شد. پروژه قطعی است و هماهنگی با متخصص منتخب شروع می‌شود.</span>
           </div>
         )}
 
         {searchParams?.payment === "cancelled" && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-[#CC785C]/10 border border-[#CC785C]/30 text-[#CC785C] text-xs sm:text-sm font-bold shadow-xs">
             <AlertCircle className="h-5 w-5 text-[#CC785C] shrink-0" />
-            <span>عملیات پرداخت لغو شد. شما می‌توانید هر زمان با کلیک بر روی دکمه پرداخت، بیعانه را واریز نمایید.</span>
+            <span>پرداخت لغو شد. متخصص منتخب محفوظ است؛ هر زمان می‌توانید دوباره پرداخت کنید.</span>
+          </div>
+        )}
+
+        {(searchParams?.payment === "failed" ||
+          searchParams?.payment === "no_amount" ||
+          searchParams?.payment === "not_ready" ||
+          searchParams?.payment === "configuration_error") && (
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm font-bold shadow-xs">
+            <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
+            <span>
+              {searchParams.payment === "no_amount"
+                ? "مبلغ قابل پرداخت برای این سفارش ثبت نشده است. با پشتیبانی تماس بگیرید."
+                : searchParams.payment === "not_ready"
+                  ? "هنوز متخصصی انتخاب نشده یا سفارش آماده پرداخت نیست."
+                  : searchParams.payment === "configuration_error"
+                    ? "درگاه پرداخت در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید."
+                    : "پرداخت ناموفق بود. در صورت کسر وجه، ظرف ۷۲ ساعت بازمی‌گردد؛ می‌توانید دوباره تلاش کنید."}
+            </span>
+          </div>
+        )}
+
+        {searchParams?.payment === "already" && (
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs sm:text-sm font-bold shadow-xs">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+            <span>این سفارش قبلاً پرداخت شده و پروژه قطعی است.</span>
           </div>
         )}
 
@@ -157,104 +186,16 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
         {isPendingFlow ? (
           <OrderWaitingHero order={order} />
         ) : isOnMarket(order.status) ? (
-          <div className="rounded-[32px] border border-[#E5E0D8] bg-white p-6 sm:p-8 shadow-xs relative overflow-hidden">
-            <div className="relative z-10 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-                <div className="flex items-start gap-4">
-                  {/* Pulsing Radar Visual */}
-                  <div className="relative flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center shrink-0 mt-1">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#CC785C]/20 opacity-75" />
-                    <span className="absolute inline-flex h-3/4 w-3/4 animate-pulse rounded-full bg-[#CC785C]/30" />
-                    <div className="relative flex h-11 w-11 sm:h-13 sm:w-13 items-center justify-center rounded-2xl bg-[#CC785C] text-white shadow-xs">
-                      <Radio className="h-5 w-5 sm:h-6 sm:w-6 animate-pulse" />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/40 text-emerald-900 text-xs font-black shadow-2xs">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                        </span>
-                        <span>رادار هوشمند جار فعال است</span>
-                      </div>
-                      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold shadow-xs ${currentStatus.badgeBg}`}>
-                        <span>{currentStatus.label}</span>
-                      </div>
-                    </div>
-
-                    <h1 className="text-xl sm:text-2xl font-black text-[#141413]">
-                      در حال جستجوی متخصصین برای {order.categoryTitle}
-                    </h1>
-                    <p className="text-xs sm:text-sm text-[#66605B] font-medium leading-relaxed max-w-2xl">
-                      سفارش شما با موفقیت ثبت شد و در سیستم اختصاصی عکاسان واجد شرایط محدوده{" "}
-                      <span className="font-bold text-[#141413]">{order.districtOrCity || "شما"}</span> در حال نمایش است.
-                      به محض اعلام آمادگی متخصصین، لیست آن‌ها در این صفحه قابل بررسی و انتخاب خواهد بود.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Status Counter Box */}
-                <div className="shrink-0 bg-[#FAF9F5] border border-[#E5E0D8] p-4 rounded-2xl shadow-xs text-right sm:text-left">
-                  <span className="block text-[11px] font-bold text-[#66605B]">متخصصان اعلام آمادگی‌کرده:</span>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Users className="h-5 w-5 text-[#141413]" />
-                    <span className="text-xl font-black text-[#141413] font-mono">
-                      {applicants.length > 0 ? applicants.length : "در انتظار اولین پیشنهاد"}
-                    </span>
-                    {applicants.length > 0 && <span className="text-xs font-bold text-[#66605B]">نفر</span>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Progress Stepper */}
-              <div className="pt-5 border-t border-[#E5E0D8] grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
-                  <div className="flex items-center gap-1.5 text-emerald-800 font-black text-xs">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>۱. ثبت سفارش</span>
-                  </div>
-                  <span className="text-[10px] text-emerald-700 block font-medium">جزئیات و مشخصات ثبت شد</span>
-                </div>
-
-                <div className="p-3 rounded-2xl bg-[#CC785C]/10 border border-[#CC785C]/30 space-y-1 relative overflow-hidden">
-                  <div className="flex items-center gap-1.5 text-[#CC785C] font-black text-xs">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#CC785C] opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#CC785C]" />
-                    </span>
-                    <span>۲. جستجو و فراخوان</span>
-                  </div>
-                  <span className="text-[10px] text-[#CC785C] block font-bold">نمایش به عکاسان منطقه</span>
-                </div>
-
-                <div className={`p-3 rounded-2xl border space-y-1 ${
-                  applicants.length > 0
-                    ? "bg-indigo-50/80 border-indigo-200 text-indigo-950 shadow-2xs"
-                    : "bg-[#FAF9F5] border-[#E5E0D8] text-[#A8A29A]"
-                }`}>
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Users className={`h-4 w-4 shrink-0 ${applicants.length > 0 ? "text-indigo-600" : "text-slate-400"}`} />
-                    <span className={applicants.length > 0 ? "text-indigo-950 font-black" : "text-slate-500"}>
-                      ۳. بررسی و انتخاب
-                    </span>
-                  </div>
-                  <span className={`text-[10px] block font-medium ${applicants.length > 0 ? "text-indigo-700 font-bold" : "text-slate-400"}`}>
-                    {applicants.length > 0 ? `${applicants.length} متقاضی آماده بررسی` : "به زودی در همین صفحه"}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-2xl bg-white/80 border border-slate-200/80 text-slate-400 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Sparkles className="h-4 w-4 shrink-0 text-slate-400" />
-                    <span className="text-slate-500">۴. تأیید و اجرای آفیش</span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 block font-medium">هماهنگی ساعت و عکاسی</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <OrderMatchingStage
+            orderId={order.id}
+            categoryTitle={order.categoryTitle || "پروژه"}
+            districtOrCity={order.districtOrCity}
+            orderStatus={order.status}
+            initialApplicants={applicants}
+            isOwnerOrAdmin={isOwnerOrAdmin}
+            selectedSpecialistId={order.selectedSpecialistId}
+            agreedTotalPrice={order.agreedTotalPrice}
+          />
         ) : (
           <div className="rounded-[32px] border border-slate-200 bg-white/95 p-6 sm:p-8 shadow-[0_8px_30px_rgba(0,0,0,0.06)] backdrop-blur-xl relative overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -280,8 +221,8 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           {/* Main Info (2 Cols) */}
           <div className="lg:col-span-2 space-y-6">
 
-            {/* Confirmed Project Contact Card (Revealed ONLY after CONFIRMED) */}
-            {order.status === "CONFIRMED" && (
+            {/* Confirmed Project Contact Card (Revealed ONLY after CONFIRMED, owner/admin only) */}
+            {order.status === "CONFIRMED" && isOwnerOrAdmin && (
               <div className="rounded-[28px] border-2 border-emerald-500/80 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/30 p-5 sm:p-7 shadow-[0_8px_30px_rgba(16,185,129,0.12)] space-y-5 relative overflow-hidden">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200/80 pb-4">
                   <div className="flex items-center gap-3">
@@ -437,7 +378,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
                       {locationLabel}
                       {order.districtOrCity ? ` - ${order.districtOrCity}` : ""}
                     </span>
-                    {order.locationAddress && (
+                    {order.locationAddress && isOwnerOrAdmin && (
                       <span className="block text-xs text-[#66605B] mt-1 font-normal">
                         آدرس: {order.locationAddress}
                       </span>
@@ -530,13 +471,14 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             )}
 
             {/* 3. Applicants & Specialist Selection List (Hidden for pending flow) */}
-            {!isPendingFlow && (
+            {!isPendingFlow && !isOnMarket(order.status) && (
               <OrderApplicantsList
                 orderId={order.id}
                 orderStatus={order.status}
                 initialApplicants={applicants}
                 isOwnerOrAdmin={isOwnerOrAdmin}
                 selectedSpecialistId={order.selectedSpecialistId}
+                agreedTotalPrice={order.agreedTotalPrice}
               />
             )}
 
@@ -574,24 +516,90 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
                   <span className="font-black font-mono">{formatPrice(order.totalEstimatedPrice)} تومان</span>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-[#FAF9F5] border border-[#E5E0D8] text-[#141413] space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black">وضعیت تسویه مالی:</span>
-                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                      ثبت رایگان
-                    </span>
+                {isAwaitingPayment && payableAmount != null && (
+                  <div className="space-y-2 pt-1">
+                    {typeof order.agreedBasePrice === "number" && (
+                      <div className="flex items-center justify-between text-[#66605B] font-medium">
+                        <span>دستمزد توافق‌شده:</span>
+                        <span className="font-bold text-[#141413] font-mono">
+                          {formatPrice(order.agreedBasePrice)} تومان
+                        </span>
+                      </div>
+                    )}
+                    {typeof order.agreedTravelFee === "number" && order.agreedTravelFee > 0 && (
+                      <div className="flex items-center justify-between text-[#66605B] font-medium">
+                        <span>ایاب‌وذهاب:</span>
+                        <span className="font-bold text-[#141413] font-mono">
+                          {formatPrice(order.agreedTravelFee)} تومان
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-sm font-black text-[#141413] pt-2 border-t border-dashed border-[#E5E0D8]">
+                      <span>مبلغ قابل پرداخت:</span>
+                      <span className="font-mono">{formatPrice(payableAmount)} تومان</span>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-[#66605B] leading-relaxed pt-1">
-                    ثبت اولیه درخواست در جار ۱۰۰٪ رایگان است. تسویه حساب و هماهنگی نهایی پس از بررسی کارشناسان جار و توافق با شما انجام خواهد شد.
-                  </p>
-                </div>
+                )}
+
+                {isAwaitingPayment && isOwnerOrAdmin ? (
+                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black">وضعیت تسویه مالی:</span>
+                      <span className="text-[11px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md">
+                        در انتظار پرداخت شما
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-amber-900/80 leading-relaxed">
+                      متخصص انتخاب شده است. با پرداخت مبلغ توافق‌شده، پروژه قطعی می‌شود و مبلغ نزد جار امانت می‌ماند.
+                    </p>
+                    <a
+                      href={`/api/order/pay?orderId=${encodeURIComponent(order.id)}`}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#141413] text-white text-xs font-medium hover:bg-[#282725] transition-colors"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      <span>
+                        {payableAmount != null
+                          ? `پرداخت ${formatPrice(payableAmount)} تومان`
+                          : "پرداخت و قطعی کردن پروژه"}
+                      </span>
+                    </a>
+                  </div>
+                ) : order.paidAt || parsedStatus === "CONFIRMED" ? (
+                  <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black">وضعیت تسویه مالی:</span>
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
+                        پرداخت شده
+                      </span>
+                    </div>
+                    {payableAmount != null && (
+                      <p className="text-[10px] text-emerald-900/80 leading-relaxed pt-1 font-mono">
+                        مبلغ قطعی: {formatPrice(payableAmount)} تومان
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-2xl bg-[#FAF9F5] border border-[#E5E0D8] text-[#141413] space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black">وضعیت تسویه مالی:</span>
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                        ثبت رایگان
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-[#66605B] leading-relaxed pt-1">
+                      ثبت اولیه رایگان است. بعد از انتخاب متخصص، پرداخت مبلغ توافق‌شده پروژه را قطعی می‌کند.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Mandatory Transparent Guidance Note */}
               <div className="flex items-start gap-2 rounded-xl bg-[#FAF9F5] border border-[#E5E0D8] p-3 text-[#66605B] text-right">
                 <AlertCircle className="h-4 w-4 text-[#66605B] shrink-0 mt-0.5" />
                 <p className="text-[10px] leading-relaxed font-medium">
-                  «مبلغ فوق برآورد تخمینی پروژه است؛ پرداخت و تسویه حساب نهایی طبق توافق و قرارداد بعد از تأیید و قبل از تحویل فایل‌ها انجام می‌شود.»
+                  {isAwaitingPayment
+                    ? "«مبلغ پرداختی همان مبلغ توافق‌شده با متخصص منتخب است و تا انجام پروژه نزد جار امانت می‌ماند.»"
+                    : "«مبلغ فوق برآورد تخمینی پروژه است؛ پرداخت نهایی بعد از انتخاب متخصص و بر اساس پیشنهاد او انجام می‌شود.»"}
                 </p>
               </div>
 

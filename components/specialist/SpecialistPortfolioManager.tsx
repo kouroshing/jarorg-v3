@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Heart,
   PartyPopper,
@@ -32,6 +33,7 @@ import {
   UploadCloud,
   X,
   Plus,
+  Clock,
   Loader2,
   Trash2,
   Eye,
@@ -110,6 +112,7 @@ export default function SpecialistPortfolioManager({
   initialPortfolioItems,
   initialAgreedToTerms,
 }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<CategoryType>("PERSONAL");
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(initialSelectedCategories);
   const [agreedToTerms, setAgreedToTerms] = useState(Boolean(initialAgreedToTerms));
@@ -118,9 +121,15 @@ export default function SpecialistPortfolioManager({
   const [requirementWarning, setRequirementWarning] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [submitOutcome, setSubmitOutcome] = useState<{
+    redirect: string | null;
+    message: string | null;
+  } | null>(null);
 
-  // Mandatory thresholds
-  const MIN_CATEGORIES = 3;
+  // The bar Jar actually holds specialists to: one specialty they can be shown
+  // for. Asking for three full categories up front locked people out of the
+  // panel with fifty approved shots sitting in one of them.
+  const MIN_CATEGORIES = 1;
   const MIN_ITEMS_PER_CATEGORY = 10;
 
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItemData[]>(initialPortfolioItems);
@@ -162,24 +171,23 @@ export default function SpecialistPortfolioManager({
       .filter((c) => c.count < MIN_ITEMS_PER_CATEGORY);
   }, [selectedSlugs, itemsByCategory]);
 
-  const isCatFulfilled = selectedSlugs.length >= MIN_CATEGORIES;
-  const isEveryCategoryFulfilled = isCatFulfilled && incompleteCategories.length === 0;
+  const fulfilledCategories = useMemo(
+    () => selectedSlugs.filter((slug) => (itemsByCategory[slug]?.length || 0) >= MIN_ITEMS_PER_CATEGORY),
+    [selectedSlugs, itemsByCategory]
+  );
+
+  const isEveryCategoryFulfilled = fulfilledCategories.length >= MIN_CATEGORIES;
 
   // Progress percentage calculation
   const overallProgressPercent = useMemo(() => {
     if (selectedSlugs.length === 0) return 0;
-    const catScore = Math.min(1, selectedSlugs.length / MIN_CATEGORIES) * 35;
-    const itemsScore =
-      selectedSlugs.reduce((acc, slug) => {
-        const count = itemsByCategory[slug]?.length || 0;
-        return acc + Math.min(1, count / MIN_ITEMS_PER_CATEGORY);
-      }, 0) /
-      selectedSlugs.length *
-      65;
-    return Math.min(100, Math.round(catScore + itemsScore));
+    const best = Math.max(
+      ...selectedSlugs.map((slug) => itemsByCategory[slug]?.length || 0)
+    );
+    return Math.min(100, Math.round((best / MIN_ITEMS_PER_CATEGORY) * 100));
   }, [selectedSlugs, itemsByCategory]);
 
-  const isReadyToPublish = isEveryCategoryFulfilled && agreedToTerms;
+  const isReadyToSubmit = isEveryCategoryFulfilled && agreedToTerms;
 
   // Toggle or uncheck category freely with auto-save
   const handleToggleCategory = (slug: string) => {
@@ -208,17 +216,15 @@ export default function SpecialistPortfolioManager({
   // Final confirmation and publish handler
   const handleFinalPublish = async () => {
     if (!isEveryCategoryFulfilled) {
-      if (selectedSlugs.length < MIN_CATEGORIES) {
-        setRequirementWarning(
-          `برای انتشار پروفایل، باید حداقل ۳ شاخه تخصصی انتخاب کنید (تعداد فعلی: ${selectedSlugs.length}).`
-        );
+      if (selectedSlugs.length === 0) {
+        setRequirementWarning("ابتدا حداقل یک شاخه تخصصی را انتخاب کنید.");
       } else {
         const details = incompleteCategories
           .map((c) => `«${c.title}» (${c.count}/۱۰ فایل)`)
           .join("، ");
 
         setRequirementWarning(
-          `برای انتشار پروفایل، باید برای تمام دسته‌بندی‌های انتخابی حداقل ۱۰ نمونه‌کار آپلود شده باشد (یا دسته‌های ناقص را غیرفعال کنید). شاخه‌های نیازمند تکمیل: ${details}`
+          `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
         );
       }
       setTimeout(() => setRequirementWarning(null), 7000);
@@ -227,7 +233,7 @@ export default function SpecialistPortfolioManager({
 
     if (!agreedToTerms) {
       setRequirementWarning(
-        "برای تایید نهایی و انتشار پرونده، پذیرش تعهدنامه حفظ محرمانگی و عدم انتشار تصاویر خصوصی کارفرمایان الزامی است."
+        "برای ارسال پرونده، پذیرش تعهدنامه حفظ محرمانگی و عدم انتشار تصاویر خصوصی کارفرمایان الزامی است."
       );
       setTimeout(() => setRequirementWarning(null), 7000);
       return;
@@ -239,9 +245,13 @@ export default function SpecialistPortfolioManager({
     try {
       const res = await publishSpecialistProfile(agreedToTerms);
       if (res.success) {
+        setSubmitOutcome({
+          redirect: res.redirect ?? null,
+          message: res.message ?? null,
+        });
         setShowSuccessModal(true);
       } else {
-        setRequirementWarning(res.error || "خطا در تایید نهایی و انتشار پرونده.");
+        setRequirementWarning(res.error || "خطا در ارسال پرونده برای بررسی.");
         setTimeout(() => setRequirementWarning(null), 7000);
       }
     } catch (err: any) {
@@ -396,16 +406,20 @@ export default function SpecialistPortfolioManager({
               />
               <span className="text-xs font-bold text-jar-primary truncate">
                 {isEveryCategoryFulfilled ? (
-                  "پرونده آماده انتشار است"
+                  <>
+                    پرونده آماده ارسال برای بررسی است
+                    <span className="hidden sm:inline text-emerald-700 font-bold mr-1.5">
+                      ({fulfilledCategories.length} شاخه کامل)
+                    </span>
+                  </>
+                ) : selectedSlugs.length === 0 ? (
+                  "یک شاخه تخصصی انتخاب کنید"
                 ) : (
                   <>
-                    <span className="font-mono">{selectedSlugs.length}</span>/
-                    <span className="font-mono">{MIN_CATEGORIES}</span> شاخه انتخاب شده
-                    {selectedSlugs.length >= MIN_CATEGORIES && incompleteCategories.length > 0 && (
-                      <span className="hidden sm:inline text-jar-logo font-bold mr-1.5">
-                        ({incompleteCategories.length} شاخه نیازمند ۱۰ فایل)
-                      </span>
-                    )}
+                    <span className="font-mono">{overallProgressPercent}</span>٪ تا تکمیل اولین شاخه
+                    <span className="hidden sm:inline text-jar-logo font-bold mr-1.5">
+                      (۱۰ فایل در یک شاخه کافی است)
+                    </span>
                   </>
                 )}
               </span>
@@ -434,13 +448,13 @@ export default function SpecialistPortfolioManager({
             disabled={isPublishing}
             title={
               !isEveryCategoryFulfilled
-                ? "برای انتشار پروفایل، باید برای تمام دسته‌بندی‌های انتخابی حداقل ۱۰ نمونه‌کار آپلود شده باشد (یا دسته‌های ناقص را غیرفعال کنید)."
+                ? "برای ارسال پرونده، حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار لازم است."
                 : !agreedToTerms
-                ? "برای تایید نهایی، تیک پذیرش تعهدنامه حفظ محرمانگی اطلاعات را فعال کنید."
-                : "تایید نهایی و انتشار پروفایل"
+                ? "برای ارسال پرونده، تیک پذیرش تعهدنامه حفظ محرمانگی اطلاعات را فعال کنید."
+                : "ارسال پرونده برای بررسی کارشناسان جار"
             }
             className={`w-full sm:w-auto inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 text-xs font-medium transition-colors cursor-pointer ${
-              isReadyToPublish
+              isReadyToSubmit
                 ? "bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
                 : "bg-jar-canvas text-jar-muted border border-jar-border hover:bg-jar-soft hover:text-jar-primary"
             }`}
@@ -448,17 +462,17 @@ export default function SpecialistPortfolioManager({
             {isPublishing ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>در حال ثبت...</span>
+                <span>در حال ارسال...</span>
               </>
-            ) : isReadyToPublish ? (
+            ) : isReadyToSubmit ? (
               <>
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>تایید نهایی و انتشار پروفایل</span>
+                <span>ارسال پرونده برای بررسی</span>
               </>
             ) : !isEveryCategoryFulfilled ? (
               <>
                 <Lock className="h-3 w-3" />
-                <span>تایید نهایی (الزامات ناقص)</span>
+                <span>ارسال پرونده (الزامات ناقص)</span>
               </>
             ) : (
               <>
@@ -549,7 +563,7 @@ export default function SpecialistPortfolioManager({
               </span>
             </div>
             <p className="text-xs text-jar-muted mt-0.5 font-medium">
-              برای افزودن یا لغو هر شاخه، روی تگ آن کلیک کنید (حداقل ۳ شاخه برای انتشار الزامی است).
+              برای افزودن یا لغو هر شاخه، روی تگ آن کلیک کنید (برای ارسال پرونده، یک شاخه با ۱۰ نمونه‌کار کافی است).
             </p>
           </div>
 
@@ -641,7 +655,7 @@ export default function SpecialistPortfolioManager({
               هنوز تخصص فعالی انتخاب نشده است
             </h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              برای فعال‌شدن استودیوی آپلود، حداقل ۳ تخصص را از بخش تگ‌های بالا انتخاب کنید.
+              برای فعال‌شدن استودیوی آپلود، حداقل یک تخصص را از بخش تگ‌های بالا انتخاب کنید.
             </p>
           </div>
         ) : (
@@ -969,36 +983,43 @@ export default function SpecialistPortfolioManager({
             className="relative w-full max-w-md overflow-hidden rounded-3xl bg-jar-surface p-6 sm:p-8 text-center shadow-2xl border border-jar-border space-y-5 animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 shadow-xs">
-              <Sparkles className="h-7 w-7" />
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 shadow-xs">
+              <Clock className="h-7 w-7" />
             </div>
 
             <div className="space-y-1.5">
               <h3 className="text-lg font-bold text-jar-primary">
-                تبریک! پرونده تخصصی شما منتشر شد
+                پرونده شما برای بررسی ارسال شد
               </h3>
               <p className="text-xs text-jar-muted leading-relaxed max-w-sm mx-auto">
-                شما با موفقیت {selectedSlugs.length} شاخه تخصصی و {totalContent} نمونه‌کار را در سامانه ثبت کردید. اکنون پرونده شما در صفحه متخصصان جار فعال گردید.
+                {submitOutcome?.message ||
+                  `${selectedSlugs.length} شاخه تخصصی و ${totalContent} نمونه‌کار ثبت شد. کارشناسان جار پرونده شما را بررسی می‌کنند و نتیجه را اطلاع می‌دهند.`}
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 py-1">
               <div className="rounded-2xl bg-jar-canvas p-3 text-center border border-jar-border">
-                <span className="block text-[10px] text-jar-muted font-medium">شاخه‌های فعال</span>
+                <span className="block text-[10px] text-jar-muted font-medium">شاخه‌های ارسالی</span>
                 <span className="text-sm font-bold text-jar-primary">{selectedSlugs.length} شاخه</span>
               </div>
-              <div className="rounded-2xl bg-emerald-50 p-3 text-center border border-emerald-100">
-                <span className="block text-[10px] text-emerald-700 font-medium">محتوای آپلود شده</span>
-                <span className="text-sm font-bold text-emerald-700">{totalContent} فایل</span>
+              <div className="rounded-2xl bg-amber-50 p-3 text-center border border-amber-100">
+                <span className="block text-[10px] text-amber-700 font-medium">محتوای آپلود شده</span>
+                <span className="text-sm font-bold text-amber-700">{totalContent} فایل</span>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => setShowSuccessModal(false)}
+              onClick={() => {
+                if (submitOutcome?.redirect) {
+                  router.push(submitOutcome.redirect);
+                  return;
+                }
+                setShowSuccessModal(false);
+              }}
               className="w-full h-11 rounded-full bg-jar-primary text-white text-xs font-medium shadow-none hover:bg-jar-primaryHover transition-colors cursor-pointer"
             >
-              متوجه شدم و بازگشت
+              {submitOutcome?.redirect ? "مشاهده وضعیت بررسی" : "متوجه شدم و بازگشت"}
             </button>
           </div>
         </div>

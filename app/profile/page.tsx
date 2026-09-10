@@ -5,7 +5,6 @@ import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import { isSpecialistRole } from "@/lib/auth/roles";
 import type { ProfileUser } from "@/lib/profile/types";
 import { ProfileDashboard } from "./ProfileDashboard";
-import { SpecialistDashboard } from "./SpecialistDashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -188,42 +187,7 @@ export default async function ProfilePage({
       projects = MOCK_PROJECTS;
     }
 
-    // Fetch successful purchases for the customer's phone number
-    const purchases = await prisma.galleryPurchase.findMany({
-      where: {
-        clientPhone: session.phone,
-      },
-      include: {
-        project: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-    const successOrders = await prisma.galleryOrder.findMany({
-      where: {
-        phone: session.phone,
-        status: "SUCCESS",
-      },
-      select: {
-        projectId: true,
-        amount: true,
-        authority: true,
-      },
-    });
-
-    serializedPurchases = purchases.map((pur) => {
-      const matchingOrder = successOrders.find((o) => o.projectId === pur.projectId);
-      return {
-        id: pur.id,
-        createdAt: pur.createdAt.toISOString(),
-        projectName: pur.project.title,
-        photoCount: pur.purchasedPhotoIds.split(",").filter(Boolean).length,
-        amount: matchingOrder?.amount ?? 0,
-        authority: matchingOrder?.authority ?? null,
-      };
-    });
+    serializedPurchases = [];
   } catch (error) {
     console.error("Error fetching profile dashboard details:", error);
   }
@@ -250,7 +214,7 @@ export default async function ProfilePage({
   const isSpecialist = isSpecialistUser && !forceCustomer;
 
   if (isSpecialist) {
-    return <SpecialistDashboard user={profileUser} projects={projects} isSpecialistUser={isSpecialistUser} />;
+    redirect("/specialist/projects");
   }
 
   return (

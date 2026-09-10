@@ -19,47 +19,29 @@ export default async function PlanMockGatewayPage({ searchParams }: Props) {
     notFound();
   }
 
-  const isGallery = authority.includes("GALLERY") || authority.includes("FREE");
-  let transaction: any = null;
-  let galleryOrder: any = null;
-
-  if (isGallery) {
-    galleryOrder = await prisma.galleryOrder.findUnique({
-      where: { authority },
-      include: { project: true }
-    });
-    if (!galleryOrder) {
-      notFound();
-    }
-  } else {
-    transaction = await prisma.transaction.findUnique({
-      where: { authority },
-      include: { plan: true },
-    });
-    if (!transaction) {
-      notFound();
-    }
+  if (authority.includes("GALLERY")) {
+    notFound();
   }
 
-  const titleText = isGallery 
-    ? "شبیه‌ساز پرداخت زرین‌پال (خرید شات عکاسی)" 
-    : "شبیه‌ساز پرداخت زرین‌پال (اشتراک جار)";
+  const transaction = await prisma.transaction.findUnique({
+    where: { authority },
+    include: { plan: true },
+  });
+  if (!transaction) {
+    notFound();
+  }
 
-  const amount = isGallery ? galleryOrder.amount : transaction.amount;
-  const nameLabel = isGallery ? "پروژه عکاسی:" : "پلن اشتراک:";
-  const nameValue = isGallery ? galleryOrder.project.title : transaction.plan.nameFa;
-  const secondaryLabel = isGallery ? "شماره همراه خریدار:" : "مدت دوره:";
-  const secondaryValue = isGallery 
-    ? galleryOrder.phone 
-    : (transaction.durationMonths === 12 ? "اشتراک ۱ ساله (سالانه)" : "اشتراک ۳ ماهه");
+  const titleText = "شبیه‌ساز پرداخت زرین‌پال (اشتراک جار)";
 
-  const successVerifyUrl = isGallery
-    ? `/api/gallery/verify?Authority=${authority}&Status=OK`
-    : `/api/payment/verify?Authority=${transaction?.authority}&Status=OK`;
+  const amount = transaction.amount;
+  const nameLabel = "پلن اشتراک:";
+  const nameValue = transaction.plan.nameFa;
+  const secondaryLabel = "مدت دوره:";
+  const secondaryValue =
+    transaction.durationMonths === 12 ? "اشتراک ۱ ساله (سالانه)" : "اشتراک ۳ ماهه";
 
-  const cancelVerifyUrl = isGallery
-    ? `/api/gallery/verify?Authority=${authority}&Status=NOK`
-    : `/api/payment/verify?Authority=${transaction?.authority}&Status=NOK`;
+  const successVerifyUrl = `/api/payment/verify?Authority=${transaction.authority}&Status=OK`;
+  const cancelVerifyUrl = `/api/payment/verify?Authority=${transaction.authority}&Status=NOK`;
 
   return (
     <div className="min-h-[85dvh] flex items-center justify-center bg-slate-50 px-4 py-12 text-right font-sans" dir="rtl">

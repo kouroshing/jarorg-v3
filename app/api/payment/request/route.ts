@@ -71,21 +71,26 @@ export async function POST(request: Request) {
       finalAmount = Math.max(0, originalAmount - discountAmount);
     }
 
-    // 4b. Handle free payments (100% discount)
+    if (plan.key.toLowerCase() === "basic") {
+      return NextResponse.json(
+        { error: "پلن بیسیک رایگان است و از صفحه ثبت‌نام متخصص فعال می‌شود." },
+        { status: 400 }
+      );
+    }
+
+    if (plan.key.toLowerCase() === "pro" || plan.key.toLowerCase() === "ultra") {
+      return NextResponse.json(
+        { error: "خرید اشتراک پرو و اولترا موقتاً غیرفعال است." },
+        { status: 403 }
+      );
+    }
+
+    // 4b. Handle free payments (100% discount on a paid plan)
     if (finalAmount === 0) {
       const mockRefId = `FREE_UPGRADE_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
       const expiryDate = new Date();
       expiryDate.setMonth(expiryDate.getMonth() + (isAnnual ? 12 : 3));
-
-      // Calculate storageLimit based on plan key
-      const planKey = plan.key.toLowerCase();
-      let storageLimit = 2147483648; // Default 2GB for BASIC
-
-      if (planKey === "pro") {
-        storageLimit = 2 * 1024 * 1024 * 1024;
-      } else if (planKey === "ultra" || planKey === "pro_max") {
-        storageLimit = 20 * 1024 * 1024 * 1024;
-      }
+      const storageLimit = Math.max(0, plan.maxStorage) * 1024 * 1024;
 
       await prisma.$transaction(async (tx) => {
         // a. Create Transaction as SUCCESS
@@ -137,14 +142,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ url: callbackUrl });
     }
 
-    const envMerchant = process.env.ZARINPAL_MERCHANT_ID?.trim();
-    const merchantId = (envMerchant && envMerchant !== "sandbox" && envMerchant !== "" && envMerchant !== "undefined")
-      ? envMerchant
-      : "8428f2e7-b867-411d-bf02-526eb2708f93";
+    const merchantId = process.env.ZARINPAL_MERCHANT_ID?.trim();
     const isProd = process.env.NODE_ENV === "production";
+    const isSandbox = !merchantId || merchantId === "sandbox" || merchantId === "undefined";
 
-    // 5. Mock Sandbox Gateway
-    if (merchantId === "sandbox" || merchantId === "") {
+    if (isProd && isSandbox) {
+      return NextResponse.json(
+        { error: "تنظیمات درگاه پرداخت زرین‌پال در محیط سرور صحیح نیست." },
+        { status: 500 }
+      );
+    }
+
+    // 5. Mock Sandbox Gateway — never enabled in production.
+    if (!isProd && isSandbox) {
       const mockAuthority = `MOCK_AUTH_PLAN_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
 
       // Create transaction row

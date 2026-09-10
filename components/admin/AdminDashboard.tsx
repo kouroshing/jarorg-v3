@@ -12,12 +12,14 @@ import {
   ArrowPathIcon,
   CheckCircleIcon,
   ClockIcon,
+  UserPlusIcon,
 } from "@heroicons/react/24/outline";
 
 export interface DashboardData {
   ordersNeedingActionCount: number;
   ordersTodayCount: number;
   pendingPortfolioCount: number;
+  pendingSpecialistCount: number;
   jaramoozMonthlyRevenue: number;
   chartData: Array<{
     date: string;
@@ -39,6 +41,7 @@ export default function AdminDashboard({ data }: { data: DashboardData }) {
     ordersNeedingActionCount,
     ordersTodayCount,
     pendingPortfolioCount,
+    pendingSpecialistCount,
     jaramoozMonthlyRevenue,
     chartData,
     recentPendingOrders,
@@ -69,13 +72,52 @@ export default function AdminDashboard({ data }: { data: DashboardData }) {
           </Link>
           <Link
             href="/admin/PortfolioItem"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
           >
             <span>بررسی نمونه‌کارها</span>
             <PhotoIcon className="w-3.5 h-3.5" />
           </Link>
+          <Link
+            href="/admin/review"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors"
+          >
+            <span>بررسی متخصصان</span>
+            {pendingSpecialistCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-white/25 text-[10px] font-black">
+                {pendingSpecialistCount.toLocaleString("fa-IR")}
+              </span>
+            )}
+            <UserPlusIcon className="w-3.5 h-3.5" />
+          </Link>
         </div>
       </div>
+
+      {/* A specialist sitting in PENDING_REVIEW cannot see a single project, so
+          this queue is the one thing on the dashboard that blocks people. */}
+      {pendingSpecialistCount > 0 && (
+        <Link
+          href="/admin/review"
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-4 hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+              <UserPlusIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                {pendingSpecialistCount.toLocaleString("fa-IR")} متخصص در انتظار تایید شما هستند
+              </p>
+              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+                تا زمانی که پرونده تایید نشود، متخصص به کارتابل پروژه‌ها دسترسی ندارد.
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white shrink-0">
+            <span>ورود به صف بررسی</span>
+            <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
+          </span>
+        </Link>
+      )}
 
       {/* Top Metric Cards: 1 Hero Card + 3 Secondary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">

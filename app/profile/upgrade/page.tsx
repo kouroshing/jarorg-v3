@@ -1,7 +1,17 @@
+import { getPlansList } from "@/app/actions/planActions";
 import PlansClientPage from "../../plans/PlansClientPage";
 
 export const dynamic = "force-dynamic";
 
-export default function UpgradePage() {
-  return <PlansClientPage isLoggedIn={true} />;
+export default async function UpgradePage() {
+  const result = await getPlansList();
+  const plans = (result.data ?? []).map((plan) => ({
+    key: plan.key,
+    nameFa: plan.nameFa,
+    price3Months: plan.price3Months,
+    price12Months: plan.price12Months,
+    features: plan.features,
+  }));
+
+  return <PlansClientPage isLoggedIn={true} plans={plans} />;
 }

@@ -73,10 +73,16 @@ export async function GET(request: Request) {
 
     const merchantId = process.env.ZARINPAL_MERCHANT_ID?.trim();
     const isProd = process.env.NODE_ENV === "production";
+    const isSandbox = !merchantId || merchantId === "sandbox";
 
-    // Sandbox / development: settle immediately so the flow can be walked
-    // through end to end without a real gateway.
-    if (!isProd || !merchantId || merchantId === "sandbox") {
+    if (isProd && isSandbox) {
+      console.error("[order/pay] Missing production Zarinpal merchant ID");
+      return NextResponse.redirect(new URL(`/order/${order.id}?payment=configuration_error`, request.url));
+    }
+
+    // Sandbox is available only outside production and never represents a real
+    // payment in a production deployment.
+    if (!isProd && isSandbox) {
       await markOrderPaid(order.id, `SANDBOX-${Date.now()}`);
       return NextResponse.redirect(new URL(`/order/${order.id}?payment=success`, request.url));
     }

@@ -1,12 +1,13 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
+import { courseChargeAmount } from "@/lib/jaramooz/pricing";
+import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Authenticate user session
     const session = await getSession();
     if (!session) {
       return NextResponse.json(
@@ -15,7 +16,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Parse courseId from request body
     const body = await request.json().catch(() => ({}));
     const { courseId } = body;
 
@@ -26,14 +26,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Find course in database by ID or slug
     let course = await prisma.course.findFirst({
       where: {
-        OR: [
-          { id: courseId },
-          { slug: courseId },
-          { slug: "photography-masterclass" },
-        ],
+        OR: [{ id: courseId }, { slug: courseId }],
       },
     });
 
@@ -44,14 +39,15 @@ export async function POST(request: NextRequest) {
           slug: "photography-masterclass",
           title: "مسترکلاس ۱۰۰ روزه عکاسی تجاری",
           description: "جامع‌ترین دوره ورود به بازار کار و بستن قراردادهای بین‌المللی عکاسی",
-          price: 9100000,
+          price: 9_100_000,
           image: "/jaramooz/cover.jpg",
         },
         update: {},
       });
     }
 
-    // 4. Create/Upsert PENDING purchase record
+    const amount = courseChargeAmount(course.price);
+
     await prisma.purchase.upsert({
       where: {
         userId_courseId: {
@@ -62,33 +58,25 @@ export async function POST(request: NextRequest) {
       create: {
         userId: session.userId,
         courseId: course.id,
+        amount,
         status: "PENDING",
       },
       update: {
+        amount,
         status: "PENDING",
         authority: null,
         refId: null,
       },
     });
 
-    const envMerchant = process.env.ZARINPAL_MERCHANT_ID?.trim();
-    const merchantId = (envMerchant && envMerchant !== "sandbox" && envMerchant !== "" && envMerchant !== "undefined")
-      ? envMerchant
-      : "8428f2e7-b867-411d-bf02-526eb2708f93";
-    const isProd = process.env.NODE_ENV === "production";
-
-    if (isProd && (merchantId === "sandbox" || merchantId === "")) {
-      return NextResponse.json(
-        { error: "تنظیمات درگاه پرداخت زرین‌پال در حالت پروداکشن صحیح نیست." },
-        { status: 500 }
-      );
+    const merchant = resolveZarinpalMerchant();
+    if (!merchant.ok) {
+      return NextResponse.json({ error: merchant.error }, { status: 500 });
     }
 
-    // 5. Check if we should use local sandbox simulation
-    if (merchantId === "sandbox" || merchantId === "") {
+    if (merchant.sandbox) {
       const mockAuthority = `MOCK_AUTH_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
 
-      // Update purchase with mock authority
       await prisma.purchase.update({
         where: {
           userId_courseId: {
@@ -96,14 +84,14 @@ export async function POST(request: NextRequest) {
             courseId: course.id,
           },
         },
-        data: { authority: mockAuthority },
+        data: { authority: mockAuthority, amount },
       });
 
       const mockGatewayUrl = `${request.nextUrl.origin}/jaramooz/payment/mock-gateway?authority=${mockAuthority}`;
       return NextResponse.json({ url: mockGatewayUrl });
     }
 
-    // 6. Connect to production Zarinpal API
+    const isProd = process.env.NODE_ENV === "production";
     const requestUrl = "https://api.zarinpal.com/pg/v4/payment/request.json";
     const gatewayUrl = "https://www.zarinpal.com/pg/StartPay/";
     const callbackUrl = isProd
@@ -111,8 +99,8 @@ export async function POST(request: NextRequest) {
       : `${request.nextUrl.origin}/api/jaramooz/payment/verify`;
 
     const zarinpalBody = {
-      merchant_id: merchantId,
-      amount: course.price,
+      merchant_id: merchant.merchantId,
+      amount,
       callback_url: callbackUrl,
       description: `خرید دوره: ${course.title}`,
       metadata: {
@@ -124,7 +112,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(zarinpalBody),
-      signal: AbortSignal.timeout(15000), // 15s timeout
+      signal: AbortSignal.timeout(15000),
     });
 
     const payload: any = await response.json().catch(() => null);
@@ -136,7 +124,6 @@ export async function POST(request: NextRequest) {
 
     const authority = payload.data.authority;
 
-    // Update purchase with official authority
     await prisma.purchase.update({
       where: {
         userId_courseId: {
@@ -144,11 +131,11 @@ export async function POST(request: NextRequest) {
           courseId: course.id,
         },
       },
-      data: { authority },
+      data: { authority, amount },
     });
 
     return NextResponse.json({ url: `${gatewayUrl}${authority}` });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[payment_request_error]", error);
     return NextResponse.json(
       { error: "خطای داخلی سرور در اتصال به درگاه پرداخت." },

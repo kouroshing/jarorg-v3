@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,11 @@ const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic
 
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: "برای بارگذاری تصویر ابتدا وارد شوید." }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 

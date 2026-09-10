@@ -26,6 +26,16 @@ const nextConfig = {
         destination: "/order",
         permanent: true,
       },
+      {
+        source: "/gallery/:path*",
+        destination: "/",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/gallery",
+        destination: "/dashboard/wallet",
+        permanent: false,
+      },
     ];
   },
   async rewrites() {
@@ -55,6 +65,10 @@ const nextConfig = {
         },
         {
           source: "/:path*.sqlite3",
+          destination: "/api/blocked",
+        },
+        {
+          source: "/uploads/gallery/:path*",
           destination: "/api/blocked",
         },
       ],

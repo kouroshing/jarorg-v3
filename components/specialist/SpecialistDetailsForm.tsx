@@ -37,6 +37,8 @@ interface Props {
   initialBaseLng?: number | null;
   initialBaseAddress?: string | null;
   hasEligiblePortfolio: boolean;
+  mode?: "onboarding" | "edit";
+  returnTo?: string;
 }
 
 export default function SpecialistDetailsForm({
@@ -49,6 +51,8 @@ export default function SpecialistDetailsForm({
   initialBaseLng,
   initialBaseAddress,
   hasEligiblePortfolio,
+  mode = "onboarding",
+  returnTo,
 }: Props) {
   const router = useRouter();
   const [city, setCity] = useState(initialCity || "");
@@ -67,7 +71,9 @@ export default function SpecialistDetailsForm({
   const [baseDistrict, setBaseDistrict] = useState("");
   const [showNdaModal, setShowNdaModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const isEdit = mode === "edit";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +89,7 @@ export default function SpecialistDetailsForm({
       return;
     }
 
-    if (!agreedToTerms) {
+    if (!isEdit && !agreedToTerms) {
       setError("پذیرش تعهدنامه حفظ محرمانگی و عدم انتشار فایل‌های مشتریان الزامی است.");
       return;
     }
@@ -98,10 +104,14 @@ export default function SpecialistDetailsForm({
         baseLng: baseCoords.lng,
         baseAddress: baseAddress.trim() || baseDistrict || undefined,
         agreedToTerms: true,
+        returnTo,
       });
 
       if (!res.success) {
         setError(res.error || "خطایی در ثبت اطلاعات رخ داد.");
+      } else if (isEdit) {
+        setSaved(true);
+        router.refresh();
       } else if (res.redirect) {
         router.push(res.redirect);
         router.refresh();
@@ -225,7 +235,15 @@ export default function SpecialistDetailsForm({
           </div>
         </div>
 
-        {/* NDA & Terms Agreement Card */}
+        {saved && (
+          <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>پروفایل کاری ذخیره شد. ایاب‌وذهاب پروژه‌های بعدی از مبدأ جدید حساب می‌شود.</span>
+          </div>
+        )}
+
+        {/* NDA only during first onboarding */}
+        {!isEdit && (
         <div className="rounded-3xl border border-jar-border bg-jar-surface p-6 sm:p-8 shadow-xs backdrop-blur-xl space-y-4">
           <div className="flex items-center gap-2 border-b border-jar-border pb-3">
             <ShieldCheck className="h-5 w-5 text-emerald-600" />
@@ -257,6 +275,7 @@ export default function SpecialistDetailsForm({
             </div>
           </div>
         </div>
+        )}
 
         {/* Submit Actions */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
@@ -271,14 +290,20 @@ export default function SpecialistDetailsForm({
               <CheckCircle2 className="h-4 w-4" />
             )}
             <span>
-              {hasEligiblePortfolio ? "تأیید نهایی و فعال‌سازی حساب کاربری" : "ذخیره و ورود به مرحله آپلود نمونه‌کارها"}
+              {isEdit
+                ? "ذخیره پروفایل کاری"
+                : hasEligiblePortfolio
+                  ? "تأیید نهایی و فعال‌سازی حساب کاربری"
+                  : "ذخیره و ورود به مرحله آپلود نمونه‌کارها"}
             </span>
           </button>
 
           <span className="text-xs text-jar-muted font-medium">
-            {hasEligiblePortfolio
-              ? "✓ شرط ۱۰ نمونه‌کار شما قبلاً احراز شده است."
-              : "توجه: پس از ثبت مشخصات، بارگذاری ۱۰ نمونه‌کار الزامی است."}
+            {isEdit
+              ? "تغییر مبدأ، ایاب‌وذهاب پروژه‌های بعدی را عوض می‌کند."
+              : hasEligiblePortfolio
+                ? "✓ شرط ۱۰ نمونه‌کار شما قبلاً احراز شده است."
+                : "توجه: پس از ثبت مشخصات، بارگذاری ۱۰ نمونه‌کار الزامی است."}
           </span>
         </div>
       </form>

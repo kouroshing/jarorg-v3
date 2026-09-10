@@ -19,6 +19,7 @@ import {
   recordOtpSend,
 } from "@/lib/auth/otp-rate-limit";
 import { sendOtpSms } from "@/lib/sms/send-otp";
+import { safeInternalPath } from "@/lib/http/safe-path";
 
 export type AuthActionResult =
   | { success: true }
@@ -32,7 +33,10 @@ async function establishSessionForPhone(phoneDigits: string, defaultRole?: strin
   // We only upgrade to ADMIN if dbRole is ADMIN.
   let user = await prisma.user.findUnique({ where: { phone: phoneDigits } });
   
-  const createData: any = { phone: phoneDigits, role: defaultRole || dbRole };
+  const createData: any = {
+    phone: phoneDigits,
+    role: defaultRole === "SPECIALIST" ? "SPECIALIST" : dbRole,
+  };
   if (displayName) createData.displayName = displayName;
 
   if (!user) {
@@ -46,9 +50,12 @@ async function establishSessionForPhone(phoneDigits: string, defaultRole?: strin
     // If it's an admin phone, enforce ADMIN. Otherwise, keep existing role (which might be SPECIALIST).
     if (dbRole === "ADMIN" && user.role !== "ADMIN") {
       updateData.role = "ADMIN";
-    } else if (defaultRole && user.role !== defaultRole && user.role !== "ADMIN") {
-      // If a specific default role is requested (like SPECIALIST) and user isn't admin
-      updateData.role = defaultRole;
+    } else if (
+      defaultRole === "SPECIALIST" &&
+      user.role !== "SPECIALIST" &&
+      user.role !== "ADMIN"
+    ) {
+      updateData.role = "SPECIALIST";
     }
 
     if (Object.keys(updateData).length > 0) {
@@ -73,7 +80,7 @@ async function signInUser(
   displayName?: string
 ): Promise<never> {
   await establishSessionForPhone(phoneDigits, defaultRole, displayName);
-  redirect(encodeURI(redirectTo));
+  redirect(encodeURI(safeInternalPath(redirectTo)));
 }
 
 /**

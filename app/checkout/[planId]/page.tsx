@@ -1,6 +1,5 @@
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import CheckoutForm from "@/components/payment/CheckoutForm";
 import { redirect } from "next/navigation";
 
 export const metadata = {
@@ -42,20 +41,9 @@ export default async function CheckoutPage({ params, searchParams }: PageProps) 
     redirect("/profile/upgrade");
   }
 
-  const serializedPlan = {
-    id: plan.id,
-    key: plan.key,
-    nameFa: plan.nameFa,
-    price3Months: plan.price3Months,
-    price12Months: plan.price12Months,
-    features: plan.features
-  };
+  if (plan.key.toLowerCase() === "basic") {
+    redirect("/join");
+  }
 
-  const period = searchParams.period || "standard";
-
-  return (
-    <div className="flex min-h-[50vh] items-center justify-center py-6">
-      <CheckoutForm plan={serializedPlan} period={period} />
-    </div>
-  );
+  redirect("/plans");
 }

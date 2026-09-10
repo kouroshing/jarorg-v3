@@ -60,12 +60,27 @@ module.exports = {
           "0%": { transform: "translateY(100%)" },
           "100%": { transform: "translateY(0)" },
         },
+        "radar-sweep": {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        "orbit-slow": {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        "orbit-reverse": {
+          "0%": { transform: "rotate(360deg)" },
+          "100%": { transform: "rotate(0deg)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-step": "fade-step 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-in": "fade-in 0.35s ease-out forwards",
         "slide-up": "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        "radar-sweep": "radar-sweep 3.8s linear infinite",
+        "orbit-slow": "orbit-slow 14s linear infinite",
+        "orbit-reverse": "orbit-reverse 19s linear infinite",
       },
     },
   },

@@ -1,8 +1,15 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { isAdminSession } from "@/lib/auth/admin";
+import {
+  evaluateEligibility,
+  MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
+  SPECIALIST_REVIEW_PATH,
+} from "@/lib/specialists/eligibility";
+import { missingRequirementLabels } from "@/lib/specialists/review";
 
 export type AdminActionResult =
   | { success: true; message?: string }
@@ -194,6 +201,183 @@ export async function approvePortfolioAction(ids: (string | number)[]) {
     type: "success" as const,
     message: `${stringIds.length} نمونه‌کار با موفقیت تایید شد.`,
   };
+}
+
+function revalidateSpecialistSurfaces() {
+  revalidatePath("/admin/review");
+  revalidatePath(SPECIALIST_REVIEW_PATH);
+  revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
+  revalidatePath("/specialist/portfolio");
+  revalidatePath("/specialist/profile");
+}
+
+async function loadProfileForReview(specialistId: string) {
+  return prisma.specialistProfile.findUnique({
+    where: { id: specialistId },
+    include: {
+      user: { select: { id: true, displayName: true } },
+      portfolioItems: { select: { id: true, categorySlug: true, reviewStatus: true } },
+    },
+  });
+}
+
+/**
+ * Approves a specialist so they can take work. This is the only place a profile
+ * becomes ACTIVE — onboarding deliberately stops at PENDING_REVIEW.
+ *
+ * `approveAllPending` is the common case: the admin has looked through the
+ * gallery and wants to accept the remaining shots in one go.
+ */
+export async function approveSpecialistAction({
+  specialistId,
+  approveAllPending = false,
+  note,
+}: {
+  specialistId: string;
+  approveAllPending?: boolean;
+  note?: string;
+}): Promise<AdminActionResult> {
+  const session = await getSession();
+  if (!isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
+  }
+
+  const profile = await loadProfileForReview(specialistId);
+  if (!profile) {
+    return { success: false, error: "پروفایل متخصص یافت نشد." };
+  }
+
+  if (approveAllPending) {
+    await prisma.portfolioItem.updateMany({
+      where: { specialistId, reviewStatus: "PENDING" },
+      data: { reviewStatus: "APPROVED", rejectionReason: null },
+    });
+  }
+
+  const items = approveAllPending
+    ? profile.portfolioItems.map((item) =>
+        item.reviewStatus === "PENDING" ? { ...item, reviewStatus: "APPROVED" } : item
+      )
+    : profile.portfolioItems;
+
+  const eligibility = evaluateEligibility({
+    city: profile.city,
+    baseLat: profile.baseLat,
+    baseLng: profile.baseLng,
+    agreedToTerms: profile.agreedToTerms,
+    portfolioItems: items,
+    selectedCategories: profile.selectedCategories,
+  });
+
+  if (eligibility.qualifiedCategories.length === 0) {
+    const missing = missingRequirementLabels(eligibility);
+    return {
+      success: false,
+      error: missing.length
+        ? `این پرونده هنوز کامل نیست: ${missing.join("، ")}.`
+        : `برای فعال‌سازی، حداقل ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در یک شاخه لازم است.`,
+    };
+  }
+
+  await prisma.specialistProfile.update({
+    where: { id: specialistId },
+    data: {
+      status: "ACTIVE",
+      reviewedAt: new Date(),
+      reviewedBy: session.phone || session.userId || "admin",
+      reviewNote: note?.trim() || null,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: profile.userId,
+      title: "پرونده شما تایید شد",
+      message:
+        "پرونده متخصص شما توسط کارشناسان جار تایید شد. از همین حالا می‌توانید پروژه‌های باز را ببینید و اعلام آمادگی کنید.",
+      type: "SUCCESS",
+      link: "/specialist/projects",
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: session.phone || session.userId || "admin",
+      action: "SPECIALIST_APPROVED",
+      targetModel: "SpecialistProfile",
+      targetId: specialistId,
+      note: note?.trim() || "تایید و فعال‌سازی متخصص",
+    },
+  });
+
+  revalidateSpecialistSurfaces();
+
+  return {
+    success: true,
+    message: `«${profile.user?.displayName || "متخصص"}» تایید شد و کارتابل او باز است.`,
+  };
+}
+
+/**
+ * Sends a file back to the specialist with a reason. The profile drops to
+ * INCOMPLETE so they can fix what was wrong and submit again.
+ */
+export async function rejectSpecialistAction({
+  specialistId,
+  reason,
+}: {
+  specialistId: string;
+  reason: string;
+}): Promise<AdminActionResult> {
+  const session = await getSession();
+  if (!isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
+  }
+
+  if (!reason.trim()) {
+    return { success: false, error: "نوشتن دلیل بازگرداندن پرونده الزامی است." };
+  }
+
+  const profile = await loadProfileForReview(specialistId);
+  if (!profile) {
+    return { success: false, error: "پروفایل متخصص یافت نشد." };
+  }
+
+  await prisma.specialistProfile.update({
+    where: { id: specialistId },
+    data: {
+      status: "INCOMPLETE",
+      reviewedAt: new Date(),
+      reviewedBy: session.phone || session.userId || "admin",
+      reviewNote: reason.trim(),
+      submittedForReviewAt: null,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: profile.userId,
+      title: "پرونده شما نیاز به اصلاح دارد",
+      message: `کارشناسان جار پرونده شما را بازگرداندند. دلیل: ${reason.trim()}`,
+      type: "WARNING",
+      link: SPECIALIST_REVIEW_PATH,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: session.phone || session.userId || "admin",
+      action: "SPECIALIST_REJECTED",
+      targetModel: "SpecialistProfile",
+      targetId: specialistId,
+      note: `علت بازگرداندن: ${reason.trim()}`,
+    },
+  });
+
+  revalidateSpecialistSurfaces();
+
+  return { success: true, message: "پرونده به متخصص بازگردانده شد و دلیل برای او ارسال گردید." };
 }
 
 /**

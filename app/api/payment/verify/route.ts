@@ -54,10 +54,12 @@ export async function GET(request: NextRequest) {
       }
       refId = `MOCK_REF_PLAN_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
     } else {
-      const envMerchant = process.env.ZARINPAL_MERCHANT_ID?.trim();
-      const merchantId = (envMerchant && envMerchant !== "sandbox" && envMerchant !== "" && envMerchant !== "undefined")
-        ? envMerchant
-        : "8428f2e7-b867-411d-bf02-526eb2708f93";
+      const merchantId = process.env.ZARINPAL_MERCHANT_ID?.trim();
+      const isSandbox = !merchantId || merchantId === "sandbox" || merchantId === "undefined";
+
+      if (isSandbox) {
+        return safeRedirect(`${origin}/profile?payment=failed&error=payment_configuration`);
+      }
 
       const verifyUrl = "https://payment.zarinpal.com/pg/v4/payment/verify.json";
       const zarinpalBody = {
@@ -95,26 +97,17 @@ export async function GET(request: NextRequest) {
     // 6. Complete Transaction & Upgrade User (Atomic DB Operation)
     const expiryDate = new Date();
     expiryDate.setMonth(expiryDate.getMonth() + transaction.durationMonths);
+    const storageLimit = Math.max(0, transaction.plan.maxStorage) * 1024 * 1024;
 
-    // Calculate storageLimit based on plan key
-    const planKey = transaction.plan.key.toLowerCase();
-    let storageLimit = 2147483648; // Default 2GB for BASIC
-
-    if (planKey === "pro") {
-      storageLimit = 2 * 1024 * 1024 * 1024; // 2 GB (2,147,483,648 bytes)
-    } else if (planKey === "ultra" || planKey === "pro_max") {
-      storageLimit = 20 * 1024 * 1024 * 1024; // 20 GB (21,474,836,480 bytes)
-    }
-
-    await prisma.$transaction(async (tx) => {
-      // a. Mark transaction as success
-      await tx.transaction.update({
-        where: { id: transaction.id },
-        data: {
-          status: "SUCCESS",
-          refId,
-        },
+    const applied = await prisma.$transaction(async (tx) => {
+      // Claim the transaction atomically. A repeated callback must not upgrade
+      // the plan or consume a coupon a second time.
+      const claimed = await tx.transaction.updateMany({
+        where: { id: transaction.id, status: "PENDING" },
+        data: { status: "SUCCESS", refId },
       });
+
+      if (claimed.count !== 1) return false;
 
       // b. Upgrade user plan and storage limits
       await tx.user.update({
@@ -135,11 +128,15 @@ export async function GET(request: NextRequest) {
               increment: 1,
             },
           },
-        }).catch((err) => {
-          console.error("Failed to increment coupon usedCount:", err);
         });
       }
+
+      return true;
     });
+
+    if (!applied) {
+      return safeRedirect(`${origin}/profile?payment=success`);
+    }
 
     // 7. Fire Jarchi automation event (Non-blocking)
     triggerEvent("plan-upgraded", {

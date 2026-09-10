@@ -50,18 +50,26 @@ export async function GET(request: Request) {
 
     // The authority was recorded before the redirect; a mismatch means this
     // callback belongs to a different payment attempt.
-    if (order.paymentAuthority && order.paymentAuthority !== authority) {
+    if (!order.paymentAuthority || order.paymentAuthority !== authority) {
       console.warn("[order/verify] authority mismatch", { orderId });
-      return NextResponse.redirect(new URL(`/order/${orderId}?payment=failed`, request.url));
+      return NextResponse.redirect(new URL(`/order/${order.id}?payment=failed`, request.url));
     }
 
     const merchantId = process.env.ZARINPAL_MERCHANT_ID?.trim();
-    if (!merchantId || merchantId === "sandbox") {
-      await markOrderPaid(orderId, `SANDBOX-${authority}`);
-      return NextResponse.redirect(new URL(`/order/${orderId}?payment=success`, request.url));
+    const isProd = process.env.NODE_ENV === "production";
+    const isSandbox = !merchantId || merchantId === "sandbox";
+
+    if (isProd && isSandbox) {
+      console.error("[order/verify] Missing production Zarinpal merchant ID");
+      return NextResponse.redirect(new URL(`/order/${order.id}?payment=configuration_error`, request.url));
     }
 
-    const verifyRes = await fetch("https://api.zarinpal.com/pg/v4/payment/verify.json", {
+    if (!isProd && isSandbox) {
+      await markOrderPaid(orderId, `SANDBOX-${authority}`);
+      return NextResponse.redirect(new URL(`/order/${order.id}?payment=success`, request.url));
+    }
+
+    const verifyRes = await fetch("https://payment.zarinpal.com/pg/v4/payment/verify.json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

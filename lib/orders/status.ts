@@ -213,13 +213,13 @@ export const ORDER_STATUS_PRESENTATION: Record<OrderStatus, OrderStatusPresentat
     textColor: "text-[#CC785C]",
   },
   MATCHING: {
-    label: "در حال بررسی و هماهنگی",
+    label: "در حال جستجوی متخصص",
     adminLabel: "در حال جستجو و تطبیق متخصص",
     badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
     textColor: "text-[#CC785C]",
   },
   HAS_APPLICANTS: {
-    label: "دارای متقاضی متخصص - در انتظار انتخاب شما",
+    label: "متخصصان اعلام آمادگی کردند",
     adminLabel: "دارای پیشنهاد متخصصان",
     badgeBg: "bg-indigo-100 text-indigo-900 border-indigo-300",
     textColor: "text-indigo-800",

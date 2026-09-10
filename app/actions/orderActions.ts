@@ -136,6 +136,11 @@ export async function createOrderAction(input: CreateOrderInput) {
 
 export async function getOrderById(orderId: string) {
   try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "سفارش موردنظر یافت نشد." };
+    }
+
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -164,6 +169,15 @@ export async function getOrderById(orderId: string) {
       return { success: false, error: "سفارش موردنظر یافت نشد." };
     }
 
+    const isOwner =
+      (order.userId && order.userId === session.userId) ||
+      (order.contactPhone && order.contactPhone === session.phone);
+    const isAdmin = session.role === "admin";
+
+    if (!isOwner && !isAdmin) {
+      return { success: false, error: "سفارش موردنظر یافت نشد." };
+    }
+
     return {
       success: true,
       order: {
@@ -171,7 +185,7 @@ export async function getOrderById(orderId: string) {
         moodboardUrls: order.moodboardUrls ? JSON.parse(order.moodboardUrls) : [],
       },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Failed to fetch order:", error);
     return { success: false, error: "خطا در دریافت اطلاعات سفارش." };
   }

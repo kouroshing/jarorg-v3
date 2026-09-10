@@ -132,22 +132,23 @@ export function ProfileDashboard({
           <ChevronLeft className="h-5 w-5 text-[#66605B] shrink-0" />
         </Link>
       ) : (
-        <div
-          className="mt-6 flex items-center justify-between rounded-2xl bg-gray-50/50 p-4 border border-gray-150 opacity-50 pointer-events-none cursor-not-allowed"
+        <Link
+          href="/join"
+          className="mt-6 flex items-center justify-between rounded-2xl bg-white p-4 transition-colors duration-200 hover:border-[#141413]/40 border border-[#E5E0D8] shadow-xs"
         >
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white border border-gray-150 text-gray-400">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#CC785C]/10 border border-[#CC785C]/20 text-[#CC785C]">
               <Briefcase className="h-5 w-5" strokeWidth={1.5} />
             </div>
             <div className="text-right">
-              <h4 className="text-xs font-black text-black">💼 ثبت‌نام متخصصین (موقتاً غیرفعال)</h4>
-              <p className="mt-1 text-[9px] font-bold text-gray-405 leading-relaxed">
-                دسترسی به ابزارهای کاری، مدیریت پروژه‌ها و درآمد.
+              <h4 className="text-xs font-black text-[#141413]">ثبت‌نام به‌عنوان متخصص</h4>
+              <p className="mt-1 text-[9px] font-medium text-[#66605B] leading-relaxed">
+                پورتفولیو، پروژه‌های آماده و تسویه در کیف پول جار.
               </p>
             </div>
           </div>
-          <ChevronLeft className="h-5 w-5 text-gray-300 shrink-0" />
-        </div>
+          <ChevronLeft className="h-5 w-5 text-[#66605B] shrink-0" />
+        </Link>
       )}
 
       {/* Main Body: My Orders only */}

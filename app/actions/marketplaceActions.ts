@@ -69,6 +69,15 @@ export type SubmitProjectInterestInput = z.infer<typeof submitInterestSchema>;
 export type { SpecialistEligibilityResult, SpecialistStatus } from "@/lib/auth/specialistAuth";
 import { getAuthorizedSpecialist } from "@/lib/auth/specialistAuth";
 
+export type SpecialistTokenSummary = {
+  granted: number;
+  spent: number;
+  remaining: number;
+  planName: string;
+  costApply: number;
+  costDismiss: number;
+};
+
 export interface AvailableOrderSpecialistView {
   id: string;
   categorySlug: string;
@@ -163,14 +172,7 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
   error?: string;
   redirectTo?: string;
   orders?: AvailableOrderSpecialistView[];
-  tokens?: {
-    granted: number;
-    spent: number;
-    remaining: number;
-    planName: string;
-    costApply: number;
-    costDismiss: number;
-  };
+  tokens?: SpecialistTokenSummary;
 }> {
   try {
     const session = await getSession();
@@ -512,6 +514,7 @@ export async function submitProjectInterestAction(
     }
 
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
     revalidatePath(`/order/${orderId}`);
 
     return { success: true, interestId: result.id };
@@ -619,6 +622,7 @@ export async function withdrawProjectInterestAction(
     }
 
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
     revalidatePath(`/order/${interest.orderId}`);
 
     return { success: true };
@@ -776,7 +780,12 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
 export async function selectSpecialistForOrderAction(
   orderId: string,
   interestId: string
-): Promise<{ success: boolean; error?: string; selectedSpecialistId?: string }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  selectedSpecialistId?: string;
+  agreedTotalPrice?: number;
+}> {
   try {
     const session = await getSession();
     if (!session || !session.userId) {
@@ -884,13 +893,18 @@ export async function selectSpecialistForOrderAction(
       title: "شما برای یک پروژه انتخاب شدید!",
       message: `کارفرما شما را برای انجام پروژه «${result.categoryTitle}» انتخاب کرد. به‌محض پرداخت کارفرما، پروژه قطعی می‌شود و اطلاعات تماس در اختیارتان قرار می‌گیرد.`,
       type: "SUCCESS",
-      link: `/specialist/projects`,
+      link: `/specialist/mine`,
     });
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
 
-    return { success: true, selectedSpecialistId: result.specialistId };
+    return {
+      success: true,
+      selectedSpecialistId: result.specialistId,
+      agreedTotalPrice: result.agreedTotalPrice,
+    };
   } catch (error: any) {
     console.error("Error in selectSpecialistForOrderAction:", error);
     return {
@@ -993,6 +1007,7 @@ export async function confirmSpecialistSelectionAction(
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
 
     return { success: true };
   } catch (error: any) {
@@ -1100,6 +1115,7 @@ export async function declineSpecialistSelectionAction(
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
 
     return { success: true };
   } catch (error: any) {
@@ -1230,12 +1246,13 @@ export async function cancelOrderByClientAction(
         title: "لغو سفارش توسط کارفرما",
         message: `سفارش «${result.categoryTitle}» توسط کارفرما لغو شد.`,
         type: "WARNING",
-        link: `/specialist/projects`,
+        link: `/specialist/mine`,
       });
     }
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
 
     return { success: true };
   } catch (error: any) {
@@ -1320,6 +1337,7 @@ export async function dismissOrderAction(
     }
 
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
     return { success: true };
   } catch (error) {
     console.error("Error in dismissOrderAction:", error);
@@ -1353,6 +1371,7 @@ export async function undismissOrderAction(
     });
 
     revalidatePath("/specialist/projects");
+    revalidatePath("/specialist/mine");
     return { success: true };
   } catch (error) {
     console.error("Error in undismissOrderAction:", error);

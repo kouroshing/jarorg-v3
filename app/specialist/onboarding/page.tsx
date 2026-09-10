@@ -10,15 +10,7 @@ export default async function SpecialistOnboardingPage() {
     redirect(encodeURI("/join"));
   }
 
-  // Enforce structured onboarding routing
-  if (!state.hasEligiblePortfolio) {
-    redirect(encodeURI("/specialist/onboarding/portfolio"));
-  }
-
-  if (!state.hasCity || !state.hasNda) {
-    redirect(encodeURI("/specialist/onboarding/details"));
-  }
-
-  // All criteria met -> redirect to marketplace feed
-  redirect(encodeURI("/specialist/projects"));
+  // The job board is only reachable through an admin approval, so this hub just
+  // forwards to whichever step is actually blocking the specialist.
+  redirect(encodeURI(state.nextStep || "/specialist/onboarding/portfolio"));
 }

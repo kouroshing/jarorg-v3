@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import {
   X,
   Send,
@@ -11,6 +12,7 @@ import {
   Clock,
   Coins,
   ShieldCheck,
+  Car,
 } from "lucide-react";
 import {
   submitProjectInterestAction,
@@ -18,11 +20,25 @@ import {
 } from "@/app/actions/marketplaceActions";
 import { formatPrice } from "@/components/order/BudgetSlider";
 
+function parseToman(raw: string): number | undefined {
+  const en = raw.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/\D/g, "");
+  if (!en) return undefined;
+  const n = parseInt(en, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function tomanField(raw: string): string {
+  const n = parseToman(raw);
+  return n != null ? n.toLocaleString("fa-IR") : "";
+}
+
 interface SpecialistInterestModalProps {
   order: AvailableOrderSpecialistView | null;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (orderId: string, interestId: string) => void;
+  tokenCostApply?: number;
+  tokensRemaining?: number;
 }
 
 export default function SpecialistInterestModal({
@@ -30,13 +46,39 @@ export default function SpecialistInterestModal({
   isOpen,
   onClose,
   onSuccess,
+  tokenCostApply = 1,
+  tokensRemaining,
 }: SpecialistInterestModalProps) {
   const [message, setMessage] = useState("");
   const [proposedPrice, setProposedPrice] = useState<string>("");
+  const [overrideTravel, setOverrideTravel] = useState(false);
+  const [travelFee, setTravelFee] = useState("");
+  const [travelReason, setTravelReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (!isOpen) {
+      setMessage("");
+      setProposedPrice("");
+      setOverrideTravel(false);
+      setTravelFee("");
+      setTravelReason("");
+      setError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen || !order) return null;
+
+  const outOfTokens =
+    typeof tokensRemaining === "number" && tokensRemaining < tokenCostApply;
+
+  const quotedTravel = order.travel?.isFree ? 0 : order.travel?.fee ?? 0;
+  const priceNum = parseToman(proposedPrice);
+  const travelNum = parseToman(travelFee);
+  const feePrice = priceNum ?? order.totalEstimatedPrice;
+  const feeTravel = overrideTravel ? travelNum ?? quotedTravel : quotedTravel;
+  const feeTotal = feePrice + feeTravel;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,13 +90,31 @@ export default function SpecialistInterestModal({
       return;
     }
 
-    const priceNum = proposedPrice ? parseInt(proposedPrice.replace(/[^0-9]/g, ""), 10) : undefined;
+    if (outOfTokens) {
+      setError("توکن این ماه برای اعلام آمادگی کافی نیست.");
+      return;
+    }
+
+    if (overrideTravel) {
+      if (travelNum == null) {
+        setError("مبلغ ایاب‌وذهاب را وارد کنید یا حالت خودکار را نگه دارید.");
+        return;
+      }
+      if (travelReason.trim().length < 5) {
+        setError("برای تغییر ایاب‌وذهاب باید دلیلش را بنویسید.");
+        return;
+      }
+    }
+
+    const priceNum = parseToman(proposedPrice);
 
     startTransition(async () => {
       const res = await submitProjectInterestAction({
         orderId: order.id,
         message: cleanMsg,
         proposedPrice: priceNum || null,
+        travelFeeOverride: overrideTravel ? travelNum ?? null : null,
+        travelFeeOverrideReason: overrideTravel ? travelReason.trim() : null,
       });
 
       if (!res.success) {
@@ -75,7 +135,7 @@ export default function SpecialistInterestModal({
       />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-lg rounded-3xl border border-jar-border bg-jar-surface p-6 sm:p-8 shadow-2xl z-10 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl border border-jar-border bg-jar-surface p-6 sm:p-8 shadow-2xl z-10 space-y-5 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-jar-border pb-4">
           <div className="flex items-center gap-2.5">
@@ -114,6 +174,14 @@ export default function SpecialistInterestModal({
               {formatPrice(order.totalEstimatedPrice)} تومان
             </span>
           </div>
+          {order.travel && (
+            <div className="col-span-2 flex items-center justify-between">
+              <span className="text-jar-muted">ایاب‌وذهاب برآوردی:</span>
+              <span className="font-bold text-jar-primary font-mono">
+                {order.travel.isFree ? "رایگان" : `${formatPrice(order.travel.fee)} تومان`}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Form */}
@@ -159,10 +227,9 @@ export default function SpecialistInterestModal({
             <div className="relative">
               <input
                 type="text"
-                value={proposedPrice ? Number(proposedPrice.replace(/\D/g, "")).toLocaleString("fa-IR") : ""}
+                value={tomanField(proposedPrice)}
                 onChange={(e) => {
                   const val = e.target.value.replace(/[^0-9۰-۹]/g, "");
-                  // convert persian digits to english
                   const enVal = val.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
                   setProposedPrice(enVal);
                 }}
@@ -173,11 +240,70 @@ export default function SpecialistInterestModal({
             </div>
           </div>
 
+          <div className="space-y-2 rounded-2xl border border-jar-border bg-jar-canvas p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-1.5 text-xs font-bold text-jar-primary">
+                <Car className="h-4 w-4 text-jar-logo" />
+                ایاب‌وذهاب
+              </label>
+              {order.travel ? (
+                <span className="text-[11px] font-mono text-jar-muted">
+                  پیشنهاد جار: {order.travel.isFree ? "رایگان" : `${formatPrice(order.travel.fee)} تومان`}
+                  {order.travel.distanceKm != null
+                    ? ` · حدود ${Math.round(order.travel.distanceKm).toLocaleString("fa-IR")} کیلومتر`
+                    : ""}
+                </span>
+              ) : (
+                <Link href="/specialist/profile" className="text-[11px] font-bold text-jar-logo hover:underline">
+                  مبدأ حرکت ثبت نشده — تکمیل پروفایل
+                </Link>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-[11px] font-medium text-jar-muted cursor-pointer">
+              <input
+                type="checkbox"
+                checked={overrideTravel}
+                onChange={(e) => setOverrideTravel(e.target.checked)}
+                className="h-4 w-4 rounded border-jar-border"
+              />
+              می‌خواهم مبلغ ایاب‌وذهاب را خودم عوض کنم
+            </label>
+            {overrideTravel && (
+              <div className="space-y-2 pt-1">
+                <input
+                  type="text"
+                  value={tomanField(travelFee)}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9۰-۹]/g, "");
+                    setTravelFee(val.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+                  }}
+                  placeholder="مبلغ ایاب‌وذهاب به تومان"
+                  className="w-full h-11 rounded-full border border-jar-border bg-jar-surface px-4 text-xs font-mono outline-none focus:border-jar-logo"
+                />
+                <textarea
+                  value={travelReason}
+                  onChange={(e) => setTravelReason(e.target.value)}
+                  rows={2}
+                  placeholder="چرا با مبلغ خودکار جار فرق دارد؟ مثلاً عوارض، ون تجهیزات، مسیر خاص..."
+                  className="w-full rounded-2xl border border-jar-border bg-jar-surface p-3 text-xs outline-none focus:border-jar-logo"
+                />
+              </div>
+            )}
+            <div className="flex items-center justify-between border-t border-jar-border/60 pt-2 text-xs">
+              <span className="text-jar-muted font-medium">جمع قابل نمایش به کارفرما</span>
+              <span className="font-bold font-mono text-jar-primary">{formatPrice(feeTotal)} تومان</span>
+            </div>
+          </div>
+
           {/* Privacy Guidance Note */}
           <div className="flex items-start gap-2 rounded-2xl bg-jar-canvas border border-jar-border p-3 text-[11px] text-jar-muted leading-relaxed">
             <ShieldCheck className="h-4 w-4 text-jar-logo shrink-0 mt-0.5" />
             <p>
-              کارفرما متن پیام و پورتفولیوی متصل به این شاخه شما را بررسی خواهد کرد. اطلاعات تماس پس از تایید و انتخاب نهایی شما فعال می‌شود.
+              ارسال این پیشنهاد {tokenCostApply.toLocaleString("fa-IR")} توکن از سهمیه ماهانه کم می‌کند.
+              {typeof tokensRemaining === "number"
+                ? ` موجودی فعلی شما ${tokensRemaining.toLocaleString("fa-IR")} توکن است.`
+                : ""}{" "}
+              اطلاعات تماس کارفرما فقط بعد از انتخاب شما و پرداخت نمایش داده می‌شود.
             </p>
           </div>
 
@@ -194,7 +320,7 @@ export default function SpecialistInterestModal({
 
             <button
               type="submit"
-              disabled={isPending || message.trim().length < 5}
+              disabled={isPending || message.trim().length < 5 || outOfTokens}
               className="flex-[2] flex h-11 items-center justify-center gap-2 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white font-medium text-xs sm:text-sm shadow-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               {isPending ? (

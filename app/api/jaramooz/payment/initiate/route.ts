@@ -2,8 +2,31 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolvePhoneForOtp } from "@/lib/auth/otp";
 import { dbRoleFromPhone } from "@/lib/auth/roles";
+import { courseChargeAmount } from "@/lib/jaramooz/pricing";
+import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
+
+async function findCourse(courseId: string) {
+  const byIdOrSlug = await prisma.course.findFirst({
+    where: {
+      OR: [{ id: courseId }, { slug: courseId }],
+    },
+  });
+  if (byIdOrSlug) return byIdOrSlug;
+
+  return prisma.course.upsert({
+    where: { slug: "photography-masterclass" },
+    create: {
+      slug: "photography-masterclass",
+      title: "مسترکلاس ۱۰۰ روزه عکاسی تجاری",
+      description: "جامع‌ترین دوره ورود به بازار کار و بستن قراردادهای بین‌المللی عکاسی",
+      price: 9_100_000,
+      image: "/jaramooz/cover.jpg",
+    },
+    update: {},
+  });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,33 +48,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find course by ID, slug, or default photography-masterclass
-    let course = await prisma.course.findFirst({
-      where: {
-        OR: [
-          { id: courseId },
-          { slug: courseId },
-          { slug: "photography-masterclass" },
-        ],
-      },
-    });
+    const course = await findCourse(String(courseId));
+    const finalAmount = courseChargeAmount(course.price);
 
-    // Self-healing: if course does not exist in DB yet, auto-create it
-    if (!course) {
-      course = await prisma.course.upsert({
-        where: { slug: "photography-masterclass" },
-        create: {
-          slug: "photography-masterclass",
-          title: "مسترکلاس ۱۰۰ روزه عکاسی تجاری",
-          description: "جامع‌ترین دوره ورود به بازار کار و بستن قراردادهای بین‌المللی عکاسی",
-          price: 9100000,
-          image: "/jaramooz/cover.jpg",
-        },
-        update: {},
-      });
-    }
-
-    // Upsert User dynamically
     const phoneDigits = resolved.phoneDigits;
     const dbRole = dbRoleFromPhone(phoneDigits);
     const user = await prisma.user.upsert({
@@ -60,15 +59,10 @@ export async function POST(request: NextRequest) {
       update: {},
     });
 
-    const finalAmount =
-      typeof body.amount === "number" && body.amount > 0
-        ? Math.round(body.amount)
-        : course.price;
-
-    const envMerchant = process.env.ZARINPAL_MERCHANT_ID?.trim();
-    const merchantId = (envMerchant && envMerchant !== "sandbox" && envMerchant !== "" && envMerchant !== "undefined")
-      ? envMerchant
-      : "8428f2e7-b867-411d-bf02-526eb2708f93";
+    const merchant = resolveZarinpalMerchant();
+    if (!merchant.ok) {
+      return NextResponse.json({ error: merchant.error }, { status: 500 });
+    }
 
     const isProd = process.env.NODE_ENV === "production";
     const mockAuthority = `MOCK_AUTH_${Math.random().toString(36).substring(2, 15).toUpperCase()}`;
@@ -76,10 +70,11 @@ export async function POST(request: NextRequest) {
     let redirectUrl = "";
     let finalAuthority = mockAuthority;
 
-    // Test bypass accounts can use instant mock gateway if requested or proceed
-    const isTestBypass = ["09123456789", "09100138383"].includes(resolved.localPhone) && process.env.NEXT_PUBLIC_ENABLE_TEST_LOGIN === "true";
+    const isTestBypass =
+      ["09123456789", "09100138383"].includes(resolved.localPhone) &&
+      process.env.NEXT_PUBLIC_ENABLE_TEST_LOGIN === "true";
 
-    if (isTestBypass && (merchantId === "sandbox" || !isProd)) {
+    if (merchant.sandbox || (isTestBypass && !isProd)) {
       redirectUrl = `${request.nextUrl.origin}/jaramooz/payment/mock-gateway?authority=${mockAuthority}`;
     } else {
       const requestUrl = "https://api.zarinpal.com/pg/v4/payment/request.json";
@@ -89,7 +84,7 @@ export async function POST(request: NextRequest) {
         : "https://app.jarorg.ir/api/jaramooz/payment/verify";
 
       const zarinpalBody = {
-        merchant_id: merchantId,
+        merchant_id: merchant.merchantId,
         amount: finalAmount,
         callback_url: callbackUrl,
         description: `خرید دوره: ${course.title}`,
@@ -112,18 +107,16 @@ export async function POST(request: NextRequest) {
       } else {
         const errMsg = payload?.errors?.message || "خطا در پاسخ‌دهی درگاه زرین‌پال";
         console.error("[Zarinpal Payment Error] Details:", payload);
-        if (isProd && !isTestBypass) {
+        if (isProd) {
           return NextResponse.json(
             { error: `اتصال به درگاه پرداخت زرین‌پال برقرار نشد: ${errMsg}` },
             { status: 502 }
           );
         }
-        // Fallback to mock gateway for test accounts
         redirectUrl = `${request.nextUrl.origin}/jaramooz/payment/mock-gateway?authority=${mockAuthority}`;
       }
     }
 
-    // Upsert Purchase record linked to this user and course as PENDING
     await prisma.purchase.upsert({
       where: {
         userId_courseId: {
@@ -148,7 +141,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, url: redirectUrl });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[payment_initiate_error]", error);
     return NextResponse.json(
       { error: "خطای داخلی سرور در ثبت درخواست پرداخت." },

@@ -29,14 +29,18 @@ export async function markOrderPaid(orderId: string, refId: string): Promise<boo
 
     if (!order || order.paidAt) return null;
 
-    await tx.order.update({
-      where: { id: orderId },
+    const claimed = await tx.order.updateMany({
+      where: { id: orderId, paidAt: null },
       data: {
         status: "CONFIRMED" satisfies OrderStatus,
         paidAt: now,
         paymentRefId: refId,
       },
     });
+
+    // Only the callback that atomically claimed the unpaid order may apply
+    // downstream state changes. This makes repeated gateway callbacks harmless.
+    if (claimed.count !== 1) return null;
 
     await tx.projectInterest.updateMany({
       where: { orderId, status: "SELECTED" },
@@ -60,7 +64,7 @@ export async function markOrderPaid(orderId: string, refId: string): Promise<boo
       title: "پروژه قطعی شد",
       message: `کارفرما هزینه پروژه «${applied.categoryTitle || "عکاسی"}» را پرداخت کرد. از همین حالا می‌توانید در گفتگوی پروژه هماهنگ کنید؛ شماره تماس و نشانی دقیق ۲۴ ساعت پیش از شروع پروژه در اختیارتان قرار می‌گیرد.`,
       type: "SUCCESS",
-      link: "/specialist/projects",
+      link: "/specialist/mine",
     });
   }
 

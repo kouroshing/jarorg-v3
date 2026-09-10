@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
 
 export const SpecialistStatus = {
   INCOMPLETE: "INCOMPLETE",
@@ -75,6 +76,7 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
             select: {
               id: true,
               categorySlug: true,
+              reviewStatus: true,
             },
           },
         },
@@ -112,9 +114,11 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
     };
   }
 
-  // Count portfolio items per category
+  // Only work an admin has signed off decides what a specialist can be shown
+  // for. Counting raw uploads here is what let unreviewed files onto the board.
   const countByCategory: Record<string, number> = {};
   for (const item of profile.portfolioItems) {
+    if (item.reviewStatus !== "APPROVED") continue;
     countByCategory[item.categorySlug] = (countByCategory[item.categorySlug] || 0) + 1;
   }
   const categoryCounts = Object.values(countByCategory);
@@ -133,6 +137,7 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
       isSpecialist: false,
       error: "حساب همکاری شما به حالت تعلیق درآمده است. لطفاً با پشتیبانی جار تماس بگیرید.",
       errorCode: "SUSPENDED",
+      redirectTo: SPECIALIST_REVIEW_PATH,
     };
   }
 
@@ -141,7 +146,7 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
       isSpecialist: false,
       error: "پروفایل و مدارک شما در حال بررسی توسط کارشناسان جار است.",
       errorCode: "PENDING_REVIEW",
-      redirectTo: "/specialist/onboarding",
+      redirectTo: SPECIALIST_REVIEW_PATH,
     };
   }
 

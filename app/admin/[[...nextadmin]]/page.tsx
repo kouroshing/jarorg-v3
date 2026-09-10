@@ -49,6 +49,7 @@ export default async function AdminPage({
       ordersNeedingActionCount,
       ordersTodayCount,
       pendingPortfolioCount,
+      pendingSpecialistCount,
       revenueResult,
       ordersLast30Days,
       recentOrdersRaw,
@@ -71,6 +72,9 @@ export default async function AdminPage({
         where: {
           reviewStatus: "PENDING",
         },
+      }),
+      prisma.specialistProfile.count({
+        where: { status: "PENDING_REVIEW" },
       }),
       prisma.purchase.aggregate({
         _sum: { amount: true },
@@ -135,6 +139,7 @@ export default async function AdminPage({
       ordersNeedingActionCount,
       ordersTodayCount,
       pendingPortfolioCount,
+      pendingSpecialistCount,
       jaramoozMonthlyRevenue: revenueResult._sum.amount || 0,
       chartData,
       recentPendingOrders: recentOrdersRaw.map((o) => ({

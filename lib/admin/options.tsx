@@ -1,7 +1,10 @@
 import { HookError, NextAdminOptions } from "@premieroctet/next-admin";
 import CancelOrderDialog from "@/components/admin/CancelOrderDialog";
 import RejectPortfolioDialog from "@/components/admin/RejectPortfolioDialog";
-import { approvePortfolioAction } from "@/app/actions/adminActionHandlers";
+import {
+  approvePortfolioAction,
+  approveSpecialistAction,
+} from "@/app/actions/adminActionHandlers";
 import { prisma } from "@/lib/prisma";
 import { RenderBadges, RenderImageGallery } from "./formatters";
 import AdminBrandHeader from "@/components/admin/AdminBrandHeader";
@@ -27,7 +30,8 @@ export const options: NextAdminOptions = {
       },
       {
         title: "گالری آنلاین و فروش عکس",
-        models: ["GalleryProject", "GalleryPhoto", "GalleryOrder", "GalleryPurchase"],
+        // Gallery product sales are off; keep records for wallet/settlement history only.
+        models: ["GalleryProject", "GalleryPhoto", "GalleryPurchase"],
       },
       {
         title: "آکادمی جارآموز",
@@ -296,7 +300,38 @@ export const options: NextAdminOptions = {
         agreedToTerms: "تایید قرارداد و تعهدنامه",
         termsAgreedAt: "تاریخ امضا",
         createdAt: "تاریخ ایجاد",
+        submittedForReviewAt: "تاریخ ارسال برای بررسی",
+        reviewedAt: "تاریخ بررسی",
+        reviewedBy: "بررسی‌کننده",
+        reviewNote: "یادداشت بررسی",
       },
+      actions: [
+        {
+          type: "server",
+          id: "approve-specialist",
+          title: "تایید و فعال‌سازی متخصص",
+          icon: "CheckBadgeIcon",
+          canExecute: (item: any) => item.status !== "ACTIVE",
+          action: async (ids) => {
+            const results = await Promise.all(
+              ids.map((id) =>
+                approveSpecialistAction({ specialistId: String(id), approveAllPending: true })
+              )
+            );
+            const failed = results.filter((r) => !r.success);
+            if (failed.length > 0) {
+              return {
+                type: "error" as const,
+                message: failed[0].success ? "خطا" : failed[0].error,
+              };
+            }
+            return {
+              type: "success" as const,
+              message: `${results.length} متخصص تایید و فعال شد.`,
+            };
+          },
+        },
+      ],
       list: {
         display: [
           "user",
@@ -305,10 +340,33 @@ export const options: NextAdminOptions = {
           "city",
           "workArea",
           "agreedToTerms",
+          "submittedForReviewAt",
           "createdAt",
         ],
-        search: ["city", "workArea", "equipmentSummary"],
+        search: ["city", "workArea", "equipmentSummary", "status"],
         fields: {
+          status: {
+            formatter: (value) => {
+              const status = String(value ?? "INCOMPLETE");
+              const map: Record<string, [string, string]> = {
+                ACTIVE: ["تاییدشده و فعال", "bg-emerald-100 text-emerald-800 border-emerald-200"],
+                PENDING_REVIEW: [
+                  "در انتظار بررسی",
+                  "bg-amber-100 text-amber-800 border-amber-200 animate-pulse",
+                ],
+                SUSPENDED: ["تعلیق‌شده", "bg-rose-100 text-rose-800 border-rose-200"],
+                INCOMPLETE: ["ناقص", "bg-slate-100 text-slate-700 border-slate-200"],
+              };
+              const [label, className] = map[status] ?? map.INCOMPLETE;
+              return (
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold border ${className}`}
+                >
+                  {label}
+                </span>
+              );
+            },
+          },
           city: {
             formatter: (c) => c ? String(c) : "—",
           },
@@ -332,6 +390,10 @@ export const options: NextAdminOptions = {
           "portfolioReview",
           "agreedToTerms",
           "termsAgreedAt",
+          "submittedForReviewAt",
+          "reviewedAt",
+          "reviewedBy",
+          "reviewNote",
         ],
         customFields: {
           portfolioReview: {
@@ -631,45 +693,31 @@ export const options: NextAdminOptions = {
         search: ["fileName"],
       },
     },
-    GalleryOrder: {
-      title: "سفارش‌های خرید عکس گالری (Gallery Orders)",
-      icon: "ReceiptPercentIcon",
-      aliases: {
-        id: "شناسه",
-        phone: "شماره موبایل خریدار",
-        project: "پروژه گالری",
-        amount: "مبلغ سفارش (تومان)",
-        status: "وضعیت پرداخت",
-        authority: "Authority",
-        refId: "RefID",
-        createdAt: "تاریخ",
-      },
-      list: {
-        display: ["phone", "project", "amount", "status", "refId", "createdAt"],
-        search: ["phone", "authority", "refId"],
-        fields: {
-          amount: {
-            formatter: (amount) => `${Number(amount || 0).toLocaleString("fa-IR")} تومان`,
-          },
-        },
-      },
-    },
     GalleryPurchase: {
-      title: "خریدهای نهایی‌شده گالری (Gallery Purchases)",
+      title: "خریدهای گالری (Gallery Purchases)",
       icon: "CheckBadgeIcon",
       aliases: {
         id: "شناسه",
         project: "پروژه",
         clientPhone: "تلفن خریدار",
         purchasedPhotoIds: "شناسه عکس‌های خریداری‌شده",
+        amount: "مبلغ (تومان)",
+        status: "وضعیت پرداخت",
+        authority: "Authority",
+        refId: "RefID",
         createdAt: "تاریخ",
       },
       list: {
-        display: ["project", "clientPhone", "purchasedPhotoIds", "createdAt"],
-        search: ["clientPhone"],
+        display: ["project", "clientPhone", "amount", "status", "refId", "createdAt"],
+        search: ["clientPhone", "authority", "refId"],
         fields: {
+          amount: {
+            formatter: (amount: number) =>
+              `${Number(amount || 0).toLocaleString("fa-IR")} تومان`,
+          },
           purchasedPhotoIds: {
-            formatter: (val) => RenderBadges(val, "bg-sky-50 text-sky-800 border-sky-200"),
+            formatter: (val: string) =>
+              RenderBadges(val, "bg-sky-50 text-sky-800 border-sky-200"),
           },
         },
       },

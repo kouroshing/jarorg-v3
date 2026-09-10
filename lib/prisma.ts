@@ -1,7 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
 
 // Ensure database directory always exists dynamically from DATABASE_URL.
 // Prisma resolves a relative sqlite `file:` URL against the schema directory
@@ -43,11 +42,9 @@ function ensureRuntimeDatabaseSync() {
     process.env.IS_BUILD !== "true"
   ) {
     try {
-      execSync("npx prisma db push --accept-data-loss --skip-generate", {
-        stdio: "ignore",
-        env: { ...process.env },
-        timeout: 20000,
-      });
+      // Production schema changes must be applied by `prisma migrate deploy`
+      // during deployment, never implicitly with accept-data-loss at runtime.
+      return;
       runtimeSchemaSynced = true;
       console.log("✅ [prisma-init] Runtime SQLite schema synced successfully.");
     } catch (e) {

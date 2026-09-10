@@ -2,9 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { verifySessionToken } from "@/lib/auth/jwt";
 import { isAdminSession } from "@/lib/auth/admin";
+import { isSafeInternalPath } from "@/lib/http/safe-path";
 
 // Paths that require a signed-in user.
-const PROTECTED_PREFIXES = ["/profile", "/admin", "/order"];
+const PROTECTED_PREFIXES = ["/profile", "/admin", "/order", "/dashboard"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -47,15 +48,9 @@ export async function middleware(request: NextRequest) {
 
   if (session && pathname === "/login") {
     const redirectTo = request.nextUrl.searchParams.get("redirect") || "/profile";
-    try {
-      const targetUrl = new URL(redirectTo, request.nextUrl.origin);
-      return NextResponse.redirect(targetUrl);
-    } catch {
-      const fallbackUrl = request.nextUrl.clone();
-      fallbackUrl.pathname = "/profile";
-      fallbackUrl.search = "";
-      return NextResponse.redirect(fallbackUrl);
-    }
+    const path = isSafeInternalPath(redirectTo) ? redirectTo : "/profile";
+    const targetUrl = new URL(path, request.nextUrl.origin);
+    return NextResponse.redirect(targetUrl);
   }
 
   return NextResponse.next();

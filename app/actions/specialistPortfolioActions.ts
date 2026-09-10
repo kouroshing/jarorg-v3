@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { promises as fs } from "fs";
 import path from "path";
 import { ALL_CATEGORIES, CATEGORIES_BY_SLUG, CategoryType, MediaType } from "@/lib/categories";
+import { evaluateEligibility, SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
+import { notifyAdminsOfSpecialistSubmission } from "@/lib/specialists/review";
 
 export interface PortfolioItemData {
   id: string;
@@ -317,12 +319,17 @@ export async function deletePortfolioItem(
 }
 
 /**
- * Validates that all selected categories have at least 10 items before final confirmation.
+ * Hands the specialist's file to the review queue.
+ *
+ * This used to write `agreedToTerms` and report "your profile is published"
+ * without touching `status`, so nobody was ever actually reviewed and nobody
+ * was ever actually activated.
  */
 export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise<{
   success: boolean;
   error?: string;
   message?: string;
+  redirect?: string;
 }> {
   try {
     const session = await getSession();
@@ -340,7 +347,8 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
     const specialist = await prisma.specialistProfile.findUnique({
       where: { userId: session.userId },
       include: {
-        portfolioItems: true,
+        portfolioItems: { select: { categorySlug: true, reviewStatus: true } },
+        user: { select: { displayName: true, phone: true } },
       },
     });
 
@@ -348,73 +356,87 @@ export async function publishSpecialistProfile(agreedToTerms?: boolean): Promise
       return { success: false, error: "پروفایل متخصص یافت نشد." };
     }
 
-    let selectedCategories: string[] = [];
-    try {
-      if (specialist.selectedCategories) {
-        selectedCategories = JSON.parse(specialist.selectedCategories);
-      }
-    } catch {
-      selectedCategories = [];
-    }
+    const eligibility = evaluateEligibility({
+      city: specialist.city,
+      baseLat: specialist.baseLat,
+      baseLng: specialist.baseLng,
+      agreedToTerms: true,
+      portfolioItems: specialist.portfolioItems,
+      selectedCategories: specialist.selectedCategories,
+    });
 
-    if (selectedCategories.length < 3) {
-      return {
-        success: false,
-        error: `برای انتشار پرونده، باید حداقل ۳ شاخه تخصصی انتخاب کنید (تعداد فعلی: ${selectedCategories.length}).`,
-      };
-    }
-
-    // Count items per category
-    const itemsCountBySlug: Record<string, number> = {};
-    for (const item of specialist.portfolioItems) {
-      itemsCountBySlug[item.categorySlug] = (itemsCountBySlug[item.categorySlug] || 0) + 1;
-    }
-
-    const incompleteCategories: { slug: string; title: string; count: number }[] = [];
-
-    for (const slug of selectedCategories) {
-      const count = itemsCountBySlug[slug] || 0;
-      if (count < 10) {
-        const catDef = CATEGORIES_BY_SLUG[slug];
-        incompleteCategories.push({
-          slug,
-          title: catDef?.title || slug,
-          count,
-        });
-      }
-    }
-
-    if (incompleteCategories.length > 0) {
-      const details = incompleteCategories
-        .map((c) => `«${c.title}» (${c.count}/۱۰ فایل)`)
+    if (eligibility.submittableCategories.length === 0) {
+      const details = eligibility.incompleteCategories
+        .map((c) => `«${CATEGORIES_BY_SLUG[c.slug]?.title || c.slug}» (${c.count}/۱۰ فایل)`)
         .join("، ");
 
       return {
         success: false,
-        error: `برای انتشار پروفایل، باید برای تمام دسته‌بندی‌های انتخابی حداقل ۱۰ نمونه‌کار آپلود شده باشد (یا دسته‌های ناقص را غیرفعال کنید). شاخه‌های ناقص: ${details}`,
+        error: details
+          ? `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
+          : "برای ارسال پرونده ابتدا یک شاخه تخصصی انتخاب و ۱۰ نمونه‌کار بارگذاری کنید.",
       };
     }
 
-    // Update agreedToTerms and termsAgreedAt
+    // The map base and city are what Jar quotes travel from, so the file is not
+    // reviewable without them — send the specialist to finish that step first.
+    if (!eligibility.hasCity || !eligibility.hasBaseLocation) {
+      return {
+        success: false,
+        error: "برای ارسال پرونده، شهر و مبدأ حرکت روی نقشه را در گام بعدی تکمیل کنید.",
+        redirect: "/specialist/onboarding/details",
+      };
+    }
+
+    const entersReviewQueue = specialist.status === "INCOMPLETE";
+
     await prisma.specialistProfile.update({
       where: { id: specialist.id },
       data: {
         agreedToTerms: true,
         termsAgreedAt: new Date(),
+        ...(specialist.status === "ACTIVE" || specialist.status === "SUSPENDED"
+          ? {}
+          : {
+              status: "PENDING_REVIEW",
+              ...(entersReviewQueue
+                ? { submittedForReviewAt: new Date(), reviewedAt: null, reviewNote: null }
+                : {}),
+            }),
       },
     });
 
+    if (entersReviewQueue) {
+      await notifyAdminsOfSpecialistSubmission({
+        specialistUserId: session.userId,
+        displayName: specialist.user?.displayName || specialist.user?.phone || "متخصص",
+        city: specialist.city,
+      });
+    }
+
     revalidatePath("/specialist/portfolio");
     revalidatePath("/specialist/profile");
+    revalidatePath(SPECIALIST_REVIEW_PATH);
     revalidatePath("/profile");
+    revalidatePath("/admin/review");
+
+    if (specialist.status === "ACTIVE") {
+      return {
+        success: true,
+        message: "تغییرات پرونده شما ذخیره شد.",
+        redirect: "/specialist/projects",
+      };
+    }
 
     return {
       success: true,
-      message: "پرونده شما با موفقیت تایید و منتشر شد.",
+      message:
+        "پرونده شما برای بررسی کارشناسان جار ارسال شد. نتیجه بررسی از طریق اعلان به شما اطلاع داده می‌شود.",
+      redirect: SPECIALIST_REVIEW_PATH,
     };
   } catch (error: any) {
     console.error("[publishSpecialistProfile error]", error);
-    return { success: false, error: "خطای سرور در تایید نهایی و انتشار پرونده." };
+    return { success: false, error: "خطای سرور در ارسال پرونده برای بررسی." };
   }
 }
 

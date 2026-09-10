@@ -364,7 +364,6 @@ export default function JarAmoozPurchaseModal() {
           body: JSON.stringify({
             courseId: selectedCourse.courseId,
             phone: phoneDigits,
-            amount: finalCalculatedPrice,
             selectedModules: finalModules,
           }),
         });

@@ -4,7 +4,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
-import { evaluateEligibility } from "@/lib/specialists/eligibility";
+import {
+  evaluateEligibility,
+  resolveOnboardingStatus,
+  specialistLandingPath,
+  SPECIALIST_REVIEW_PATH,
+} from "@/lib/specialists/eligibility";
+import { notifyAdminsOfSpecialistSubmission } from "@/lib/specialists/review";
+import { phoneToLocalDisplay } from "@/lib/auth/phone";
 
 const detailsSchema = z.object({
   city: z.string().trim().min(2, "نام شهر الزامی است."),
@@ -17,6 +24,7 @@ const detailsSchema = z.object({
   agreedToTerms: z.boolean().refine((val) => val === true, {
     message: "پذیرش تعهدنامه و قوانین همکاری الزامی است.",
   }),
+  returnTo: z.string().optional(),
 });
 
 export type SaveSpecialistDetailsInput = z.infer<typeof detailsSchema>;
@@ -37,7 +45,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       return { success: false, error: parsed.error.issues[0]?.message || "اطلاعات نامعتبر است." };
     }
 
-    const { city, workArea, bio, equipmentSummary, agreedToTerms, baseLat, baseLng, baseAddress } =
+    const { city, workArea, bio, equipmentSummary, agreedToTerms, baseLat, baseLng, baseAddress, returnTo } =
       parsed.data;
 
     // Fetch user and profile with portfolio items
@@ -47,7 +55,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         specialistProfile: {
           include: {
             portfolioItems: {
-              select: { id: true, categorySlug: true },
+              select: { id: true, categorySlug: true, reviewStatus: true },
             },
           },
         },
@@ -66,8 +74,17 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       portfolioItems: user.specialistProfile?.portfolioItems || [],
       selectedCategories: user.specialistProfile?.selectedCategories,
     });
-    const hasEligiblePortfolio = eligibility.qualifiedCategories.length > 0;
-    const nextStatus = eligibility.status;
+
+    const currentStatus = user.specialistProfile?.status;
+    const nextStatus = resolveOnboardingStatus(currentStatus, eligibility);
+
+    // Submitting the file is a one-way door into the review queue; re-saving
+    // the same details later must not reset the clock on the admin's desk.
+    const entersReviewQueue =
+      nextStatus === "PENDING_REVIEW" && currentStatus !== "PENDING_REVIEW";
+    const reviewTimestamps = entersReviewQueue
+      ? { submittedForReviewAt: new Date(), reviewedAt: null, reviewNote: null }
+      : {};
 
     // Upsert specialist profile
     await prisma.specialistProfile.upsert({
@@ -84,6 +101,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         agreedToTerms: true,
         termsAgreedAt: new Date(),
         status: nextStatus,
+        ...reviewTimestamps,
       },
       update: {
         city,
@@ -96,6 +114,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         agreedToTerms: true,
         termsAgreedAt: new Date(),
         status: nextStatus,
+        ...reviewTimestamps,
       },
     });
 
@@ -109,14 +128,34 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       },
     });
 
+    if (entersReviewQueue) {
+      await notifyAdminsOfSpecialistSubmission({
+        specialistUserId: session.userId,
+        displayName: user.displayName || phoneToLocalDisplay(user.phone),
+        city,
+      });
+    }
+
     revalidatePath("/specialist/onboarding");
+    revalidatePath(SPECIALIST_REVIEW_PATH);
     revalidatePath("/specialist/projects");
     revalidatePath("/specialist/portfolio");
     revalidatePath("/profile");
+    revalidatePath("/admin/review");
 
-    const targetRedirect = hasEligiblePortfolio
-      ? "/specialist/projects"
-      : "/specialist/onboarding/portfolio";
+    revalidatePath("/specialist/profile");
+
+    let fallback = "/specialist/onboarding/portfolio";
+    if (nextStatus === "ACTIVE") fallback = "/specialist/projects";
+    else if (nextStatus === "PENDING_REVIEW") fallback = SPECIALIST_REVIEW_PATH;
+
+    // An approved specialist editing their profile goes back where they came
+    // from; anyone still in the queue is sent to the queue, not to the board.
+    const canReturn = nextStatus === "ACTIVE";
+    const targetRedirect =
+      canReturn && returnTo && returnTo.startsWith("/specialist") && !returnTo.startsWith("//")
+        ? returnTo
+        : fallback;
 
     return {
       success: true,
@@ -131,6 +170,10 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
 export async function getSpecialistOnboardingStateAction(): Promise<{
   isLoggedIn: boolean;
   status?: string;
+  reviewNote?: string | null;
+  submittedForReviewAt?: string | null;
+  approvedPortfolioCount?: number;
+  rejectedPortfolioCount?: number;
   hasCity?: boolean;
   hasNda?: boolean;
   hasEligiblePortfolio?: boolean;
@@ -191,21 +234,28 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     selectedCategories: profile.selectedCategories,
   });
 
+  // Progress through onboarding is measured in work the specialist has handed
+  // over, not in work an admin has signed off — nothing is approved yet at this
+  // point, and counting approvals here stranded people on step one.
   const countByCategory: Record<string, number> = {};
   for (const item of items) {
-    if (item.reviewStatus && item.reviewStatus !== "APPROVED") continue;
+    if (item.reviewStatus === "REJECTED") continue;
     countByCategory[item.categorySlug] = (countByCategory[item.categorySlug] || 0) + 1;
   }
   const categoryCounts = Object.values(countByCategory);
   const maxPortfolioInCategory = categoryCounts.length > 0 ? Math.max(...categoryCounts) : 0;
-  const hasEligiblePortfolio = eligibility.qualifiedCategories.length > 0;
+  const hasEligiblePortfolio = eligibility.submittableCategories.length > 0;
   const hasCity = eligibility.hasCity;
   const hasNda = eligibility.hasAgreedToTerms;
-  const nextStep = eligibility.nextStep;
+  const nextStep = specialistLandingPath(profile.status, eligibility);
 
   return {
     isLoggedIn: true,
     status: profile.status,
+    reviewNote: profile.reviewNote,
+    submittedForReviewAt: profile.submittedForReviewAt?.toISOString() ?? null,
+    approvedPortfolioCount: items.filter((i) => i.reviewStatus === "APPROVED").length,
+    rejectedPortfolioCount: items.filter((i) => i.reviewStatus === "REJECTED").length,
     hasCity,
     hasNda,
     hasEligiblePortfolio,

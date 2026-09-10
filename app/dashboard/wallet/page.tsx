@@ -115,12 +115,12 @@ export default function PhotographerWalletPage() {
           <div>
             <h1 className="text-xl font-extrabold text-slate-900">کیف پول و تسویه حساب</h1>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              درآمد حاصل از فروش عکس‌های خود را مدیریت کرده و درخواست تسویه حساب ثبت کنید.
+              درآمد حاصل از پروژه‌های انجام‌شده را مدیریت کرده و درخواست تسویه حساب ثبت کنید.
             </p>
           </div>
         </div>
         <Link
-          href="/dashboard/gallery"
+          href="/profile"
           className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-100 bg-white hover:bg-slate-50 transition-colors shadow-sm"
         >
           <ArrowRight className="h-5 w-5 text-slate-500" />

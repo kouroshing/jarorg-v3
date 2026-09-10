@@ -1,20 +1,20 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   Users,
   CheckCircle2,
   Sparkles,
-  ShieldCheck,
   User,
   MapPin,
   Camera,
-  Coins,
   Loader2,
   Check,
   AlertCircle,
   Radio,
+  CreditCard,
 } from "lucide-react";
 import {
   ApplicantSpecialistView,
@@ -29,6 +29,8 @@ interface OrderApplicantsListProps {
   initialApplicants: ApplicantSpecialistView[];
   isOwnerOrAdmin: boolean;
   selectedSpecialistId?: string | null;
+  /** Frozen total after selection; preferred over the live proposal total. */
+  agreedTotalPrice?: number | null;
 }
 
 export default function OrderApplicantsList({
@@ -37,15 +39,30 @@ export default function OrderApplicantsList({
   initialApplicants,
   isOwnerOrAdmin,
   selectedSpecialistId: initialSelectedSpecialistId,
+  agreedTotalPrice: initialAgreedTotalPrice,
 }: OrderApplicantsListProps) {
+  const router = useRouter();
   const [applicants, setApplicants] = useState<ApplicantSpecialistView[]>(initialApplicants);
   const [selectedSpecialistId, setSelectedSpecialistId] = useState<string | null | undefined>(
     initialSelectedSpecialistId
   );
   const [currentStatus, setCurrentStatus] = useState<string>(orderStatus);
+  const [agreedTotalPrice, setAgreedTotalPrice] = useState<number | null>(
+    initialAgreedTotalPrice ?? null
+  );
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingInterestId, setConfirmingInterestId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setApplicants(initialApplicants);
+  }, [initialApplicants]);
+
+  useEffect(() => {
+    setCurrentStatus(orderStatus);
+    setSelectedSpecialistId(initialSelectedSpecialistId);
+    setAgreedTotalPrice(initialAgreedTotalPrice ?? null);
+  }, [orderStatus, initialSelectedSpecialistId, initialAgreedTotalPrice]);
 
   if (!isOwnerOrAdmin) {
     return null;
@@ -62,7 +79,10 @@ export default function OrderApplicantsList({
         setConfirmingInterestId(null);
       } else {
         setSelectedSpecialistId(res.selectedSpecialistId);
-        setCurrentStatus("AWAITING_SPECIALIST_CONFIRMATION");
+        setCurrentStatus("AWAITING_PAYMENT");
+        if (typeof res.agreedTotalPrice === "number") {
+          setAgreedTotalPrice(res.agreedTotalPrice);
+        }
         setConfirmingInterestId(null);
         setApplicants((prev) =>
           prev.map((app) => ({
@@ -70,20 +90,28 @@ export default function OrderApplicantsList({
             status: app.id === interestId ? "SELECTED" : app.status,
           }))
         );
+        router.refresh();
       }
     });
   };
 
 
-  const isAwaitingConfirmation =
-    parseOrderStatus(currentStatus) === "AWAITING_SPECIALIST_CONFIRMATION";
-  // Legacy rows still store "MATCHED"; parseOrderStatus folds it into CONFIRMED.
-  const isFinalMatched = parseOrderStatus(currentStatus) === "CONFIRMED";
+  const parsedStatus = parseOrderStatus(currentStatus);
+  const isAwaitingPayment = parsedStatus === "AWAITING_PAYMENT";
+  const isAwaitingConfirmation = parsedStatus === "AWAITING_SPECIALIST_CONFIRMATION";
+  const isFinalMatched = parsedStatus === "CONFIRMED";
 
   // Selected applicant if in confirmation or matched
   const selectedApplicant = applicants.find(
     (app) => app.specialistId === selectedSpecialistId || app.status === "SELECTED" || app.status === "ACCEPTED"
   );
+
+  const payableAmount =
+    agreedTotalPrice && agreedTotalPrice > 0
+      ? agreedTotalPrice
+      : selectedApplicant?.totalPrice && selectedApplicant.totalPrice > 0
+        ? selectedApplicant.totalPrice
+        : null;
 
   return (
     <div className="rounded-[28px] border border-[#E5E0D8] bg-white p-5 sm:p-7 shadow-xs space-y-6 text-right" dir="rtl">
@@ -100,6 +128,8 @@ export default function OrderApplicantsList({
             <p className="text-xs text-[#66605B] font-medium">
               {isFinalMatched
                 ? "متخصص نهایی تأیید شد و پروژه قطعی است"
+                : isAwaitingPayment
+                ? "متخصص انتخاب شد. پروژه بعد از پرداخت شما قطعی می‌شود"
                 : isAwaitingConfirmation
                 ? "متخصص انتخاب شده و در انتظار تأیید نهایی ایشان است"
                 : `${applicants.length} متخصص برای همکاری در این آفیش اعلام آمادگی کرده‌اند`}
@@ -111,6 +141,14 @@ export default function OrderApplicantsList({
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black self-start sm:self-auto">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             <span>پروژه نهایی و قطعی</span>
+          </span>
+        ) : isAwaitingPayment ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-xs font-black self-start sm:self-auto">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+            <span>در انتظار پرداخت</span>
           </span>
         ) : isAwaitingConfirmation ? (
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#CC785C]/10 border border-[#CC785C]/20 text-[#CC785C] text-xs font-black self-start sm:self-auto">
@@ -135,7 +173,7 @@ export default function OrderApplicantsList({
       )}
 
       {/* When AWAITING_SPECIALIST_CONFIRMATION: Show Pending Specialist Banner */}
-      {isAwaitingConfirmation && selectedApplicant && (
+      {(isAwaitingPayment || isAwaitingConfirmation) && selectedApplicant && (
         <div className="rounded-2xl border-2 border-[#141413] bg-white p-5 space-y-4 shadow-xs">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -162,13 +200,42 @@ export default function OrderApplicantsList({
             </div>
 
             <span className="px-3 py-1 rounded-xl bg-[#141413] text-white text-xs font-medium">
-              منتخب شما (در انتظار تأیید متخصص)
+              {isAwaitingPayment ? "منتخب شما (در انتظار پرداخت)" : "منتخب شما (در انتظار تأیید متخصص)"}
             </span>
           </div>
 
           <p className="text-xs text-[#141413] leading-relaxed font-medium bg-[#FAF9F5] p-3 rounded-xl border border-[#E5E0D8]">
-            شما این متخصص را انتخاب کرده‌اید. به محض اینکه متخصص شرایط آفیش را بازبینی و تأیید نهایی کند، سفارش قطعی شده و اطلاعات تماس برای هماهنگی فعال خواهد شد. در صورت عدم پذیرش متخصص، می‌توانید سایر متقاضیان را انتخاب کنید.
+            {isAwaitingPayment
+              ? "این متخصص را انتخاب کردید. با پرداخت هزینه، پروژه قطعی می‌شود و هماهنگی شروع می‌گردد."
+              : "شما این متخصص را انتخاب کرده‌اید. به محض اینکه متخصص شرایط آفیش را بازبینی و تأیید نهایی کند، سفارش قطعی می‌شود."}
           </p>
+
+          {isAwaitingPayment && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+              <div className="space-y-1">
+                <p className="text-xs font-black text-amber-950">پرداخت برای قطعی شدن پروژه</p>
+                <p className="text-[11px] text-amber-900/80 font-medium leading-relaxed">
+                  مبلغ توافق‌شده نزد جار امانت می‌ماند تا پروژه انجام شود.
+                </p>
+                {payableAmount != null && (
+                  <p className="text-sm font-black text-[#141413] font-mono pt-0.5">
+                    {formatPrice(payableAmount)} تومان
+                  </p>
+                )}
+              </div>
+              <a
+                href={`/api/order/pay?orderId=${encodeURIComponent(orderId)}`}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[#141413] px-5 text-xs font-medium text-white transition-colors hover:bg-[#282725] shadow-none shrink-0"
+              >
+                <CreditCard className="h-4 w-4" />
+                <span>
+                  {payableAmount != null
+                    ? `پرداخت ${formatPrice(payableAmount)} تومان`
+                    : "پرداخت و قطعی کردن پروژه"}
+                </span>
+              </a>
+            </div>
+          )}
         </div>
       )}
 
@@ -220,7 +287,7 @@ export default function OrderApplicantsList({
       )}
 
       {/* If No Applicants Yet */}
-      {!isFinalMatched && !isAwaitingConfirmation && applicants.length === 0 && (
+      {!isFinalMatched && !isAwaitingConfirmation && !isAwaitingPayment && applicants.length === 0 && (
         <div className="rounded-2xl border border-dashed border-[#E5E0D8] bg-[#FAF9F5] p-8 text-center space-y-3">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#CC785C]/10 text-[#CC785C]">
             <Radio className="h-6 w-6 animate-pulse" />
@@ -333,43 +400,57 @@ export default function OrderApplicantsList({
 
                 {/* Selection Action Button */}
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E0D8]">
-                  {isThisSelected ? (
+                  {isThisSelected && isAwaitingPayment ? (
+                    <a
+                      href={`/api/order/pay?orderId=${encodeURIComponent(orderId)}`}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#141413] px-5 text-xs sm:text-sm font-medium text-white transition-colors hover:bg-[#282725] shadow-none"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      <span>
+                        {payableAmount != null
+                          ? `پرداخت ${formatPrice(payableAmount)} تومان`
+                          : "پرداخت و قطعی کردن پروژه"}
+                      </span>
+                    </a>
+                  ) : isThisSelected ? (
                     <div className="text-xs font-bold text-[#CC785C] flex items-center gap-1.5">
                       <Sparkles className="h-4 w-4 text-[#CC785C]" />
-                      <span>منتظر پاسخ و تأیید نهایی این متخصص...</span>
+                      <span>منتظر پرداخت شما برای قطعی شدن پروژه...</span>
                     </div>
                   ) : isDeclined ? (
                     <span className="text-xs text-[#A8A29A] font-medium">
                       متخصص امکان پذیرش این پروژه را نداشت
                     </span>
-                  ) : isAwaitingConfirmation ? (
+                  ) : isAwaitingConfirmation || isAwaitingPayment ? (
                     <span className="text-xs text-[#A8A29A] font-medium">
-                      در نوبت بررسی (در صورت عدم تأیید متخصص اول، فعال می‌شود)
+                      متخصص دیگری انتخاب شده است
                     </span>
                   ) : isConfirming ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <span className="text-xs font-bold text-[#141413]">
-                        آیا از انتخاب این متخصص اطمینان دارید؟
+                        با تأیید، مرحله بعد پرداخت هزینه توافق‌شده است.
                       </span>
-                      <button
-                        onClick={() => handleSelectSpecialist(applicant.id)}
-                        disabled={isPending}
-                        className="h-9 px-4 rounded-full bg-[#141413] hover:bg-[#282725] text-white font-medium text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-none"
-                      >
-                        {isPending ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Check className="h-3.5 w-3.5" />
-                        )}
-                        <span>بله، انتخاب و ارسال به متخصص</span>
-                      </button>
-                      <button
-                        onClick={() => setConfirmingInterestId(null)}
-                        disabled={isPending}
-                        className="h-9 px-3 rounded-full bg-white hover:bg-[#F3F1EC] text-[#141413] border border-[#E5E0D8] font-medium text-xs transition-colors cursor-pointer"
-                      >
-                        انصراف
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleSelectSpecialist(applicant.id)}
+                          disabled={isPending}
+                          className="h-9 px-4 rounded-full bg-[#141413] hover:bg-[#282725] text-white font-medium text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-none"
+                        >
+                          {isPending ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Check className="h-3.5 w-3.5" />
+                          )}
+                          <span>بله، انتخاب و رفتن به پرداخت</span>
+                        </button>
+                        <button
+                          onClick={() => setConfirmingInterestId(null)}
+                          disabled={isPending}
+                          className="h-9 px-3 rounded-full bg-white hover:bg-[#F3F1EC] text-[#141413] border border-[#E5E0D8] font-medium text-xs transition-colors cursor-pointer"
+                        >
+                          انصراف
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <button

@@ -90,6 +90,7 @@ export async function reportDeliveryAction(orderId: string): Promise<DeliveryRes
 
   revalidatePath(`/order/${order.id}`);
   revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
 
   return {
     success: true,
@@ -134,6 +135,7 @@ export async function confirmDeliveryAction(orderId: string): Promise<DeliveryRe
 
   revalidatePath(`/order/${order.id}`);
   revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
   revalidatePath("/dashboard/wallet");
 
   return {
@@ -303,12 +305,13 @@ export async function raiseDisputeAction(
         order.categoryTitle || "عکاسی"
       }» اعتراضی ثبت کرد. تسویه تا بررسی توسط جار متوقف شده است.`,
       type: "WARNING",
-      link: "/specialist/projects",
+      link: "/specialist/mine",
     });
   }
 
   revalidatePath(`/order/${order.id}`);
   revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
 
   return {
     success: true,
@@ -479,12 +482,13 @@ export async function requestRevisionAction(
         order.categoryTitle || "عکاسی"
       }» اصلاحاتی خواسته شده است: ${trimmed.slice(0, 120)}${trimmed.length > 120 ? "…" : ""}`,
       type: "WARNING",
-      link: "/specialist/projects",
+      link: "/specialist/mine",
     });
   }
 
   revalidatePath(`/order/${order.id}`);
   revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
 
   return {
     success: true,
