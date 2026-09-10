@@ -8,21 +8,22 @@ import {
   ArrowRight,
   ArrowLeft,
   X,
-  CreditCard,
   Loader2,
   Sparkles,
   AlertCircle
 } from "lucide-react";
 import { CATEGORIES_BY_SLUG, ALL_CATEGORIES } from "@/lib/categories";
-import { BUDGET_STOPS, formatPrice } from "@/components/order/BudgetSlider";
 import { createOrderAction } from "@/app/actions/orderActions";
 import OrderSubmitWaiting from "@/components/order/OrderSubmitWaiting";
 
 import StepCategory from "@/components/order/steps/StepCategory";
 import StepLocation, { LocationType } from "@/components/order/steps/StepLocation";
 import StepDateTime from "@/components/order/steps/StepDateTime";
-import StepBudget from "@/components/order/steps/StepBudget";
-import StepSummary from "@/components/order/steps/StepSummary";
+import StepFinalize, {
+  MIN_PROJECT_DESCRIPTION_LENGTH,
+  isValidPersonName,
+  sanitizePersonName,
+} from "@/components/order/steps/StepFinalize";
 
 interface OrderFormClientProps {
   initialContactName?: string;
@@ -41,11 +42,14 @@ function getDefaultTomorrowDate() {
   }).format(tomorrow);
 }
 
+/** Baseline rate kept server-side; client no longer picks budget on step 4. */
+const DEFAULT_HOURLY_RATE = 3_600_000;
+
 const STEP_TITLES: Record<number, string> = {
   1: "انتخاب خدمت",
   2: "محل پروژه",
   3: "زمان‌بندی و مدت آفیش",
-  4: "بودجه و پیش‌فاکتور نهایی",
+  4: "جزئیات نهایی",
 };
 
 export default function OrderFormClient({
@@ -80,14 +84,13 @@ export default function OrderFormClient({
   // The picked point, kept so the travel fee can be quoted per specialist.
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Budget State
-  const [isAutoPriced, setIsAutoPriced] = useState<boolean>(true);
-  const [selectedBudgetIndex, setSelectedBudgetIndex] = useState<number>(3); // 3.6M golden stop default
-
-  // Contact Info State
-  const [contactName, setContactName] = useState(initialContactName);
-  const [contactPhone, setContactPhone] = useState(initialContactPhone);
+  // Contact + brief (phone comes from account; not collected again)
+  const [contactName, setContactName] = useState(() =>
+    sanitizePersonName(initialContactName)
+  );
   const [projectDescription, setProjectDescription] = useState("");
+  const [referenceLink, setReferenceLink] = useState("");
+  const [moodboardUrls, setMoodboardUrls] = useState<string[]>([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitingAfterSubmit, setWaitingAfterSubmit] = useState(false);
@@ -95,9 +98,6 @@ export default function OrderFormClient({
 
   // Derived Values
   const selectedCategory = CATEGORIES_BY_SLUG[categorySlug] || ALL_CATEGORIES[0];
-  const currentBudgetStop = BUDGET_STOPS[selectedBudgetIndex] || BUDGET_STOPS[3];
-  const hourlyRate = isAutoPriced ? 3600000 : currentBudgetStop.rate;
-  const totalEstimatedPrice = hourlyRate * durationHours;
 
   const locationLabel = useMemo(() => {
     if (locationType === "CLIENT_LOCATION") {
@@ -126,9 +126,8 @@ export default function OrderFormClient({
         );
       case 4:
         return (
-          (isAutoPriced || selectedBudgetIndex >= 0) &&
-          contactPhone.trim().length >= 10 &&
-          contactName.trim().length >= 2
+          isValidPersonName(contactName) &&
+          projectDescription.trim().length >= MIN_PROJECT_DESCRIPTION_LENGTH
         );
       default:
         return true;
@@ -142,10 +141,8 @@ export default function OrderFormClient({
     bookingDate,
     durationHours,
     timeSlot,
-    isAutoPriced,
-    selectedBudgetIndex,
-    contactPhone,
     contactName,
+    projectDescription,
   ]);
 
   // Reset scroll to top on step changes
@@ -183,13 +180,15 @@ export default function OrderFormClient({
   const handleSubmitFinalOrder = async () => {
     setSubmitError(null);
 
-    if (!contactPhone.trim() || contactPhone.trim().length < 10) {
-      setSubmitError("لطفاً شماره تماس معتبر برای هماهنگی نهایی وارد فرمایید.");
+    if (!isValidPersonName(contactName)) {
+      setSubmitError("لطفاً نام و نام‌خانوادگی را فقط با حروف وارد کنید.");
       return;
     }
 
-    if (!contactName.trim() || contactName.trim().length < 2) {
-      setSubmitError("لطفاً نام و نام‌خانوادگی کارفرما را وارد فرمایید.");
+    if (projectDescription.trim().length < MIN_PROJECT_DESCRIPTION_LENGTH) {
+      setSubmitError(
+        `توضیحات پروژه باید حداقل ${MIN_PROJECT_DESCRIPTION_LENGTH} حرف باشد.`
+      );
       return;
     }
 
@@ -207,13 +206,13 @@ export default function OrderFormClient({
         districtOrCity,
         locationLat: coords?.lat ?? null,
         locationLng: coords?.lng ?? null,
-        referenceLink: "",
-        moodboardUrls: [],
+        referenceLink: referenceLink.trim(),
+        moodboardUrls,
         projectDescription: projectDescription.trim(),
-        isAutoPriced,
-        hourlyRate,
-        contactName,
-        contactPhone,
+        isAutoPriced: true,
+        hourlyRate: DEFAULT_HOURLY_RATE,
+        contactName: contactName.trim(),
+        contactPhone: initialContactPhone,
       });
 
       if (res.success && res.orderId) {
@@ -366,32 +365,22 @@ export default function OrderFormClient({
             )}
 
             {currentStep === 4 && (
-              <div className="space-y-6 sm:space-y-7">
-                <StepBudget
-                  isAutoPriced={isAutoPriced}
-                  onChangeAutoPriced={setIsAutoPriced}
-                  selectedBudgetIndex={selectedBudgetIndex}
-                  onChangeBudgetIndex={setSelectedBudgetIndex}
-                  durationHours={durationHours}
-                />
-
-                <StepSummary
-                  categoryTitle={selectedCategory.title}
-                  categorySlug={selectedCategory.slug}
-                  isFlexibleSchedule={isFlexibleSchedule}
-                  bookingDate={bookingDate}
-                  timeSlot={timeSlot}
-                  durationHours={durationHours}
-                  hourlyRate={hourlyRate}
-                  locationLabel={locationLabel}
-                  contactName={contactName}
-                  onChangeContactName={setContactName}
-                  contactPhone={contactPhone}
-                  onChangeContactPhone={setContactPhone}
-                  projectDescription={projectDescription}
-                  onChangeProjectDescription={setProjectDescription}
-                />
-              </div>
+              <StepFinalize
+                categoryTitle={selectedCategory.title}
+                categorySlug={selectedCategory.slug}
+                isFlexibleSchedule={isFlexibleSchedule}
+                bookingDate={bookingDate}
+                durationHours={durationHours}
+                locationLabel={locationLabel}
+                contactName={contactName}
+                onChangeContactName={setContactName}
+                projectDescription={projectDescription}
+                onChangeProjectDescription={setProjectDescription}
+                referenceLink={referenceLink}
+                onChangeReferenceLink={setReferenceLink}
+                moodboardUrls={moodboardUrls}
+                onChangeMoodboardUrls={setMoodboardUrls}
+              />
             )}
           </motion.div>
         </AnimatePresence>

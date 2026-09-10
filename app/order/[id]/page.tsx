@@ -19,7 +19,7 @@ import {
 } from "@/app/actions/marketplaceActions";
 import OrderClientWaiting from "@/components/order/OrderClientWaiting";
 import CancelOrderButton from "@/components/order/CancelOrderButton";
-import OrderWaitingHero from "@/components/order/OrderWaitingHero";
+import OrderAdminStage from "@/components/order/OrderAdminStage";
 import {
   isAdminTriage,
   isOnMarket,
@@ -41,7 +41,7 @@ interface OrderDetailPageProps {
 export async function generateMetadata({ params }: OrderDetailPageProps): Promise<Metadata> {
   return {
     title: `وضعیت سفارش #${params.id.slice(-6).toUpperCase()} | جار`,
-    description: "وضعیت جستجوی متخصص برای پروژه شما در جار",
+    description: "وضعیت پروژه شما در جار",
   };
 }
 
@@ -93,6 +93,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
   }
 
   const currentStatus = orderStatusPresentation(order.status);
+  const moodboardUrls = Array.isArray(order.moodboardUrls) ? order.moodboardUrls : [];
 
   return (
     <main className="min-h-screen bg-[#FAF9F5] py-10 px-4 sm:px-6 lg:px-8 text-[#141413]" dir="rtl">
@@ -137,7 +138,30 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           </div>
         )}
 
-        {isPendingFlow && <OrderWaitingHero order={order} />}
+        {isPendingFlow && parsedStatus !== "CANCELLED" && (
+          <OrderAdminStage
+            order={{
+              id: order.id,
+              status: order.status,
+              categoryTitle: order.categoryTitle,
+              contactName: order.contactName,
+              projectDescription: order.projectDescription,
+              isFlexibleSchedule: order.isFlexibleSchedule,
+              bookingDate: order.bookingDate,
+              timeSlot: order.timeSlot,
+              durationHours: order.durationHours,
+              locationType: order.locationType,
+              locationAddress: order.locationAddress,
+              districtOrCity: order.districtOrCity,
+              locationLat: order.locationLat,
+              locationLng: order.locationLng,
+              referenceLink: order.referenceLink,
+              moodboardUrls,
+              adminNote: order.adminNote ?? null,
+            }}
+            isOwnerOrAdmin={isOwnerOrAdmin}
+          />
+        )}
 
         {isOnMarket(order.status) && (
           <OrderClientWaiting
@@ -151,7 +175,6 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           />
         )}
 
-        {/* After specialist selection: payment only (no estimate sidebar) */}
         {isAwaitingPayment && isOwnerOrAdmin && (
           <div className="rounded-[28px] border border-amber-200 bg-amber-50/80 p-6 sm:p-8 space-y-5 text-center">
             <div className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-[11px] font-bold text-amber-900">

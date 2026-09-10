@@ -15,7 +15,10 @@ import {
   AlertCircle,
   Radio,
   CreditCard,
+  ExternalLink,
+  Handshake,
 } from "lucide-react";
+import Link from "next/link";
 import {
   ApplicantSpecialistView,
   selectSpecialistForOrderAction,
@@ -301,167 +304,165 @@ export default function OrderApplicantsList({
         </div>
       )}
 
-      {/* Applicants Grid (When Still Choosing or Awaiting Confirmation) */}
+      {/* Applicants Grid — clean cards for selection */}
       {!isFinalMatched && applicants.length > 0 && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {applicants.map((applicant) => {
             const isConfirming = confirmingInterestId === applicant.id;
-            const isThisSelected = applicant.specialistId === selectedSpecialistId || applicant.status === "SELECTED";
+            const isThisSelected =
+              applicant.specialistId === selectedSpecialistId ||
+              applicant.status === "SELECTED";
             const isDeclined = applicant.status === "DECLINED";
+            const cover = applicant.specialist.portfolioItems[0];
 
             return (
               <div
                 key={applicant.id}
-                className={`rounded-2xl border p-5 transition-all shadow-2xs space-y-4 ${
+                className={`rounded-2xl border overflow-hidden transition-all ${
                   isThisSelected
-                    ? "border-2 border-[#141413] bg-white"
+                    ? "border-2 border-[#141413] bg-white shadow-xs"
                     : isDeclined
-                    ? "border-[#E5E0D8] bg-[#FAF9F5]/40 opacity-75"
-                    : "border-[#E5E0D8] bg-white hover:border-[#141413]/40 hover:bg-[#FAF9F5]/50"
+                      ? "border-[#E5E0D8] bg-[#FAF9F5]/50 opacity-70"
+                      : "border-[#E5E0D8] bg-white hover:border-[#141413]/30"
                 }`}
               >
-                {/* Specialist Profile Bar */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#141413]/5 text-[#141413] font-black text-sm">
-                      <User className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="text-sm sm:text-base font-black text-[#141413]">
-                          {applicant.specialist.displayName}
-                        </h4>
-                        {applicant.specialist.isBlueTick && (
-                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">
-                            تایید شده
-                          </span>
-                        )}
-                        {isThisSelected && (
-                          <span className="px-2 py-0.5 rounded-full bg-[#CC785C]/10 border border-[#CC785C]/20 text-[#CC785C] text-[10px] font-black">
-                            انتخاب شده
-                          </span>
-                        )}
-                        {isDeclined && (
-                          <span className="px-2 py-0.5 rounded-full bg-rose-100 border border-rose-300 text-rose-800 text-[10px] font-bold">
-                            عدم پذیرش توسط متخصص
-                          </span>
-                        )}
+                <div className="flex gap-0 sm:gap-0">
+                  <div className="relative hidden sm:block w-28 shrink-0 bg-[#FAF9F5]">
+                    {cover ? (
+                      <Image
+                        src={cover.fileUrl}
+                        alt=""
+                        fill
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-[#141413]/20">
+                        <User className="h-10 w-10" />
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-[#66605B] font-medium mt-0.5">
-                        <span className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3 text-[#66605B]" />
-                          {applicant.specialist.city}
-                        </span>
-                        {applicant.specialist.hasStudio && <span>• دارای استودیو</span>}
-                        {applicant.specialist.equipment && (
-                          <span className="truncate max-w-[200px]">• {applicant.specialist.equipment}</span>
-                        )}
-                      </div>
-                    </div>
+                    )}
                   </div>
 
-                  {/* Financial Proposal */}
-                  <div className="text-right sm:text-left">
-                    <span className="block text-[10px] text-[#A8A29A] font-medium">مبلغ پیشنهادی عکاس:</span>
-                    <span className="text-sm font-black text-[#141413] font-mono">
-                      {applicant.proposedPrice
-                        ? `${formatPrice(applicant.proposedPrice)} تومان`
-                        : "مطابق برآورد پایه سفارش"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Specialist Message */}
-                {applicant.message && (
-                  <div className="rounded-xl bg-white border border-[#E5E0D8] p-3.5 text-xs text-[#141413] leading-relaxed font-medium">
-                    «{applicant.message}»
-                  </div>
-                )}
-
-                {/* Specialist Portfolio Preview in this category */}
-                {applicant.specialist.portfolioItems.length > 0 && (
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] font-bold text-[#66605B] flex items-center gap-1">
-                      <Camera className="h-3.5 w-3.5 text-[#66605B]" />
-                      <span>نمونه‌کارهای متخصص در این شاخه:</span>
-                    </span>
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                      {applicant.specialist.portfolioItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-xl overflow-hidden border border-[#E5E0D8] shrink-0 shadow-2xs"
-                        >
-                          <Image src={item.fileUrl} alt={item.title || "نمونه کار"} fill className="object-cover" />
+                  <div className="flex-1 p-4 sm:p-5 space-y-3 min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="sm:hidden flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#141413]/5">
+                          <User className="h-5 w-5" />
                         </div>
-                      ))}
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <h4 className="text-sm sm:text-base font-black text-[#141413] truncate">
+                              {applicant.specialist.displayName}
+                            </h4>
+                            {applicant.specialist.isBlueTick && (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">
+                                تایید شده
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-[#66605B] font-medium flex items-center gap-1 mt-0.5">
+                            <MapPin className="h-3 w-3 shrink-0" />
+                            {applicant.specialist.city}
+                            {applicant.specialist.hasStudio ? " · استودیو" : ""}
+                          </p>
+                        </div>
+                      </div>
+
+                      {applicant.totalPrice > 0 && (
+                        <div className="text-left shrink-0">
+                          <span className="block text-[10px] text-[#A8A29A]">پیشنهاد</span>
+                          <span className="text-sm font-black font-mono text-[#141413]">
+                            {formatPrice(applicant.totalPrice)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {applicant.message && (
+                      <p className="text-xs text-[#141413]/80 leading-relaxed line-clamp-2">
+                        «{applicant.message}»
+                      </p>
+                    )}
+
+                    {applicant.specialist.portfolioItems.length > 1 && (
+                      <div className="flex gap-1.5 overflow-x-auto">
+                        {applicant.specialist.portfolioItems.slice(0, 4).map((item) => (
+                          <div
+                            key={item.id}
+                            className="relative h-12 w-12 rounded-lg overflow-hidden border border-[#E5E0D8] shrink-0"
+                          >
+                            <Image
+                              src={item.fileUrl}
+                              alt=""
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#E5E0D8]">
+                      <Link
+                        href={`/s/${applicant.specialistId}`}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#66605B] hover:text-[#141413]"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        مشاهده پروفایل
+                      </Link>
+
+                      {isThisSelected && isAwaitingPayment ? (
+                        <a
+                          href={`/api/order/pay?orderId=${encodeURIComponent(orderId)}`}
+                          className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#141413] px-4 text-xs font-medium text-white"
+                        >
+                          <CreditCard className="h-3.5 w-3.5" />
+                          پرداخت و قطعی کردن
+                        </a>
+                      ) : isThisSelected ? (
+                        <span className="text-[11px] font-bold text-[#CC785C] flex items-center gap-1">
+                          <Sparkles className="h-3.5 w-3.5" />
+                          منتخب شما
+                        </span>
+                      ) : isDeclined ? (
+                        <span className="text-[11px] text-[#A8A29A]">انصراف متخصص</span>
+                      ) : isAwaitingConfirmation || isAwaitingPayment ? (
+                        <span className="text-[11px] text-[#A8A29A]">متخصص دیگری انتخاب شده</span>
+                      ) : isConfirming ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectSpecialist(applicant.id)}
+                            disabled={isPending}
+                            className="h-9 px-3.5 rounded-full bg-[#141413] text-white text-xs font-medium flex items-center gap-1.5"
+                          >
+                            {isPending ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                            تایید و پرداخت
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingInterestId(null)}
+                            className="h-9 px-3 rounded-full border border-[#E5E0D8] text-xs"
+                          >
+                            انصراف
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingInterestId(applicant.id)}
+                          disabled={isPending}
+                          className="h-10 px-4 rounded-full bg-[#141413] hover:bg-[#282725] text-white text-xs font-medium flex items-center gap-1.5"
+                        >
+                          <Handshake className="h-4 w-4" />
+                          شروع همکاری
+                        </button>
+                      )}
                     </div>
                   </div>
-                )}
-
-                {/* Selection Action Button */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E0D8]">
-                  {isThisSelected && isAwaitingPayment ? (
-                    <a
-                      href={`/api/order/pay?orderId=${encodeURIComponent(orderId)}`}
-                      className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#141413] px-5 text-xs sm:text-sm font-medium text-white transition-colors hover:bg-[#282725] shadow-none"
-                    >
-                      <CreditCard className="h-4 w-4" />
-                      <span>
-                        {payableAmount != null
-                          ? `پرداخت ${formatPrice(payableAmount)} تومان`
-                          : "پرداخت و قطعی کردن پروژه"}
-                      </span>
-                    </a>
-                  ) : isThisSelected ? (
-                    <div className="text-xs font-bold text-[#CC785C] flex items-center gap-1.5">
-                      <Sparkles className="h-4 w-4 text-[#CC785C]" />
-                      <span>منتظر پرداخت شما برای قطعی شدن پروژه...</span>
-                    </div>
-                  ) : isDeclined ? (
-                    <span className="text-xs text-[#A8A29A] font-medium">
-                      متخصص امکان پذیرش این پروژه را نداشت
-                    </span>
-                  ) : isAwaitingConfirmation || isAwaitingPayment ? (
-                    <span className="text-xs text-[#A8A29A] font-medium">
-                      متخصص دیگری انتخاب شده است
-                    </span>
-                  ) : isConfirming ? (
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                      <span className="text-xs font-bold text-[#141413]">
-                        با تأیید، مرحله بعد پرداخت هزینه توافق‌شده است.
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleSelectSpecialist(applicant.id)}
-                          disabled={isPending}
-                          className="h-9 px-4 rounded-full bg-[#141413] hover:bg-[#282725] text-white font-medium text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-none"
-                        >
-                          {isPending ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Check className="h-3.5 w-3.5" />
-                          )}
-                          <span>بله، انتخاب و رفتن به پرداخت</span>
-                        </button>
-                        <button
-                          onClick={() => setConfirmingInterestId(null)}
-                          disabled={isPending}
-                          className="h-9 px-3 rounded-full bg-white hover:bg-[#F3F1EC] text-[#141413] border border-[#E5E0D8] font-medium text-xs transition-colors cursor-pointer"
-                        >
-                          انصراف
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmingInterestId(applicant.id)}
-                      disabled={isPending}
-                      className="h-10 px-5 rounded-full bg-[#141413] hover:bg-[#282725] text-white font-medium text-xs sm:text-sm transition-colors shadow-none cursor-pointer flex items-center gap-1.5"
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>انتخاب این متخصص برای پروژه</span>
-                    </button>
-                  )}
                 </div>
               </div>
             );

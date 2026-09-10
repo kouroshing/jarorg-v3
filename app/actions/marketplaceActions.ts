@@ -14,6 +14,7 @@ import {
   OPEN_TO_APPLICANTS_STATUSES,
   isClientCancellable,
   isOpenToApplicants,
+  parseOrderStatus,
   storedValuesFor,
 } from "@/lib/orders/status";
 
@@ -1178,21 +1179,22 @@ export async function cancelOrderByClientAction(
         throw new Error("شما دسترسی لازم برای لغو این سفارش را ندارید.");
       }
 
-      if (order.status === "COMPLETED" || order.status === "CANCELLED") {
+      const status = parseOrderStatus(order.status);
+
+      if (status === "COMPLETED" || status === "CANCELLED") {
         throw new Error("امکان لغو سفارشی که قبلاً تکمیل یا لغو شده است وجود ندارد.");
       }
 
-      if (order.status === "CONFIRMED") {
+      if (status === "CONFIRMED") {
         throw new Error(
           "این پروژه پرداخت و قطعی شده است. برای لغو با پشتیبانی جار تماس بگیرید."
         );
       }
 
-      if (!isClientCancellable(order.status)) {
+      if (!isClientCancellable(status)) {
         throw new Error("وضعیت فعلی سفارش امکان لغو مستقیم توسط کارفرما را ندارد.");
       }
 
-      // Fetch active applicant specialists to notify
       const activeInterests = await tx.projectInterest.findMany({
         where: {
           orderId: validOrderId,
@@ -1223,20 +1225,26 @@ export async function cancelOrderByClientAction(
       };
     });
 
-    // Notify affected specialists
-    for (const specId of result.specialistIds) {
-      await createNotification({
-        userId: specId,
-        title: "لغو سفارش توسط کارفرما",
-        message: `سفارش «${result.categoryTitle}» توسط کارفرما لغو شد.`,
-        type: "WARNING",
-        link: `/specialist/mine`,
-      });
-    }
+    // Never block cancel success on notification delivery.
+    void Promise.all(
+      result.specialistIds.map((specId) =>
+        createNotification({
+          userId: specId,
+          title: "لغو سفارش توسط کارفرما",
+          message: `سفارش «${result.categoryTitle}» توسط کارفرما لغو شد.`,
+          type: "WARNING",
+          link: `/specialist/mine`,
+        })
+      )
+    ).catch((err) => {
+      console.error("Cancel notifications failed (non-blocking):", err);
+    });
 
     revalidatePath(`/order/${validOrderId}`);
+    revalidatePath("/order");
     revalidatePath("/specialist/projects");
     revalidatePath("/specialist/mine");
+    revalidatePath("/admin");
 
     return { success: true };
   } catch (error: any) {

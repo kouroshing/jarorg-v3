@@ -1,5 +1,7 @@
 import { HookError, NextAdminOptions } from "@premieroctet/next-admin";
 import CancelOrderDialog from "@/components/admin/CancelOrderDialog";
+import ApproveOrderDialog from "@/components/admin/ApproveOrderDialog";
+import RequestOrderEditDialog from "@/components/admin/RequestOrderEditDialog";
 import RejectPortfolioDialog from "@/components/admin/RejectPortfolioDialog";
 import {
   approvePortfolioAction,
@@ -70,6 +72,7 @@ export const options: NextAdminOptions = {
         contactName: "نام کارفرما",
         contactPhone: "شماره تماس کارفرما",
         adminCancelNote: "یادداشت لغو اداری",
+        adminNote: "پیام ویرایش برای کارفرما",
         projectDescription: "توضیحات و سناریو",
         referenceLink: "لینک رفرنس",
         moodboardUrls: "مودبورد تصاویر",
@@ -78,6 +81,28 @@ export const options: NextAdminOptions = {
         interests: "پیشنهادات متخصصان",
       },
       actions: [
+        {
+          type: "dialog",
+          id: "approve-order",
+          title: "تایید و انتشار",
+          icon: "CheckCircleIcon",
+          style: "default",
+          canExecute: (order) =>
+            order.status === "PENDING_REVIEW" || order.status === "NEEDS_CLIENT_EDIT",
+          component: <ApproveOrderDialog />,
+        },
+        {
+          type: "dialog",
+          id: "request-order-edit",
+          title: "درخواست ویرایش",
+          icon: "PencilSquareIcon",
+          style: "default",
+          canExecute: (order) =>
+            order.status === "PENDING_REVIEW" ||
+            order.status === "NEEDS_CLIENT_EDIT" ||
+            order.status === "CONTACTED",
+          component: <RequestOrderEditDialog />,
+        },
         {
           type: "dialog",
           id: "cancel-order",
@@ -131,6 +156,7 @@ export const options: NextAdminOptions = {
           "categorySlug",
           "categoryTitle",
           "status",
+          "adminNote",
           "adminCancelNote",
           "hourlyRate",
           "durationHours",

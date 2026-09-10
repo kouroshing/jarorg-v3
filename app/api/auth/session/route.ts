@@ -9,6 +9,7 @@ export async function GET() {
   return NextResponse.json(
     {
       authenticated: !!session,
+      userId: session?.userId ?? null,
       role: session?.role ?? null,
     },
     {

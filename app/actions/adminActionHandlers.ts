@@ -10,6 +10,8 @@ import {
   SPECIALIST_REVIEW_PATH,
 } from "@/lib/specialists/eligibility";
 import { missingRequirementLabels } from "@/lib/specialists/review";
+import { parseOrderStatus, type OrderStatus } from "@/lib/orders/status";
+import { createNotification } from "@/lib/notifications";
 
 export type AdminActionResult =
   | { success: true; message?: string }
@@ -69,7 +71,161 @@ export async function cancelOrderAction({
     },
   });
 
+  revalidatePath(`/order/${orderId}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/Order");
+  revalidatePath("/specialist/projects");
+
   return { success: true, message: "سفارش با موفقیت لغو شد و یادداشت اداری ثبت گردید." };
+}
+
+/**
+ * Admin approves a new order → publish to specialist board (MATCHING).
+ */
+export async function approveOrderAction({
+  orderId,
+}: {
+  orderId: string;
+}): Promise<AdminActionResult> {
+  const session = await getSession();
+  if (!isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
+  }
+
+  if (!orderId) {
+    return { success: false, error: "شناسه سفارش الزامی است." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, userId: true, categoryTitle: true },
+  });
+
+  if (!order) {
+    return { success: false, error: "سفارش مورد نظر یافت نشد." };
+  }
+
+  const status = parseOrderStatus(order.status);
+  if (status !== "PENDING_REVIEW" && status !== "NEEDS_CLIENT_EDIT") {
+    return {
+      success: false,
+      error: "فقط سفارش‌های در صف بررسی قابل تایید و انتشار هستند.",
+    };
+  }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: "MATCHING" satisfies OrderStatus,
+      adminNote: null,
+    },
+  });
+
+  if (order.userId) {
+    void createNotification({
+      userId: order.userId,
+      title: "درخواست شما تایید شد",
+      message: `پروژه «${order.categoryTitle || "عکاسی"}» منتشر شد و متخصصان در حال بررسی‌اند.`,
+      type: "SUCCESS",
+      link: `/order/${orderId}`,
+    });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: session.phone || session.userId || "admin",
+      action: "ORDER_APPROVED",
+      targetModel: "Order",
+      targetId: orderId,
+      note: "تایید و انتشار سفارش برای متخصصان",
+    },
+  });
+
+  revalidatePath(`/order/${orderId}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/Order");
+  revalidatePath("/specialist/projects");
+
+  return { success: true, message: "سفارش تایید و برای متخصصان منتشر شد." };
+}
+
+/**
+ * Admin asks the client to edit the order before publishing.
+ */
+export async function requestOrderEditAction({
+  orderId,
+  note,
+}: {
+  orderId: string;
+  note: string;
+}): Promise<AdminActionResult> {
+  const session = await getSession();
+  if (!isAdminSession(session)) {
+    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
+  }
+
+  if (!orderId || !note.trim()) {
+    return { success: false, error: "شناسه سفارش و پیام ویرایش الزامی است." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, userId: true, categoryTitle: true },
+  });
+
+  if (!order) {
+    return { success: false, error: "سفارش مورد نظر یافت نشد." };
+  }
+
+  const status = parseOrderStatus(order.status);
+  if (status === "CANCELLED" || status === "COMPLETED" || status === "CONFIRMED") {
+    return { success: false, error: "این سفارش قابل بازگرداندن برای ویرایش نیست." };
+  }
+
+  if (
+    status !== "PENDING_REVIEW" &&
+    status !== "NEEDS_CLIENT_EDIT" &&
+    status !== "CONTACTED"
+  ) {
+    return {
+      success: false,
+      error: "در این وضعیت امکان درخواست ویرایش وجود ندارد.",
+    };
+  }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: "NEEDS_CLIENT_EDIT" satisfies OrderStatus,
+      adminNote: note.trim(),
+    },
+  });
+
+  if (order.userId) {
+    void createNotification({
+      userId: order.userId,
+      title: "نیاز به ویرایش درخواست",
+      message: `تیم جار برای پروژه «${order.categoryTitle || "عکاسی"}» درخواست اصلاح داده است.`,
+      type: "WARNING",
+      link: `/order/${orderId}`,
+    });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: session.phone || session.userId || "admin",
+      action: "ORDER_EDIT_REQUESTED",
+      targetModel: "Order",
+      targetId: orderId,
+      note: note.trim(),
+    },
+  });
+
+  revalidatePath(`/order/${orderId}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/Order");
+
+  return { success: true, message: "درخواست ویرایش برای کارفرما ارسال شد." };
 }
 
 /**

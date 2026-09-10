@@ -166,12 +166,14 @@ model Order {
   hourlyRate          Int     @map("hourly_rate")
   totalEstimatedPrice Int     @map("total_estimated_price")
   depositAmount       Int     @default(0) @map("deposit_amount")
-  status              String  @default("MATCHING") // Real states: PENDING_DEPOSIT, DEPOSIT_PAID, MATCHING, HAS_APPLICANTS, AWAITING_SPECIALIST_CONFIRMATION, CONFIRMED, COMPLETED, CANCELLED
+  status              String  @default("PENDING_REVIEW") // PENDING_REVIEW → NEEDS_CLIENT_EDIT → MATCHING → …
 
   // Client info
   contactName     String? @map("contact_name")
   contactPhone    String? @map("contact_phone")
   adminCancelNote String? @map("admin_cancel_note")
+  /// Message shown to the client when admin requests edits (NEEDS_CLIENT_EDIT).
+  adminNote       String? @map("admin_note")
 
   // Snapshot of the accepted proposal, written when the client selects a
   // specialist. Kept on the order so a later edit to the proposal cannot

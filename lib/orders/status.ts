@@ -12,6 +12,7 @@
 /** Canonical states, in the order an order moves through them. */
 export const ORDER_STATUSES = [
   "PENDING_REVIEW",
+  "NEEDS_CLIENT_EDIT",
   "CONTACTED",
   "IN_PROGRESS",
   "PENDING_DEPOSIT",
@@ -75,6 +76,7 @@ export function storedValuesFor(...statuses: OrderStatus[]): string[] {
 /** Handled by the Jar team directly; the marketplace is not involved yet. */
 export const ADMIN_TRIAGE_STATUSES = [
   "PENDING_REVIEW",
+  "NEEDS_CLIENT_EDIT",
   "CONTACTED",
   "IN_PROGRESS",
 ] as const satisfies readonly OrderStatus[];
@@ -89,6 +91,7 @@ export const OPEN_TO_APPLICANTS_STATUSES = [
 /** The client may still cancel without involving support. */
 export const CLIENT_CANCELLABLE_STATUSES = [
   "PENDING_REVIEW",
+  "NEEDS_CLIENT_EDIT",
   "CONTACTED",
   "IN_PROGRESS",
   "PENDING_DEPOSIT",
@@ -104,6 +107,7 @@ export const CLIENT_CANCELLABLE_STATUSES = [
  */
 export const ACTIVE_CLIENT_ORDER_STATUSES = [
   "PENDING_REVIEW",
+  "NEEDS_CLIENT_EDIT",
   "CONTACTED",
   "IN_PROGRESS",
   "PENDING_DEPOSIT",
@@ -160,12 +164,21 @@ export const TERMINAL_STATUSES = [
  */
 export const NEEDS_ADMIN_ACTION_STATUSES = [
   "PENDING_REVIEW",
+  "NEEDS_CLIENT_EDIT",
   "MATCHING",
   "HAS_APPLICANTS",
 ] as const satisfies readonly OrderStatus[];
 
 export function isAdminTriage(status: string): boolean {
   return (ADMIN_TRIAGE_STATUSES as readonly string[]).includes(parseOrderStatus(status));
+}
+
+export function needsClientEdit(status: string): boolean {
+  return parseOrderStatus(status) === "NEEDS_CLIENT_EDIT";
+}
+
+export function isPendingAdminReview(status: string): boolean {
+  return parseOrderStatus(status) === "PENDING_REVIEW";
 }
 
 export function isOpenToApplicants(status: string): boolean {
@@ -211,6 +224,12 @@ export const ORDER_STATUS_PRESENTATION: Record<OrderStatus, OrderStatusPresentat
     adminLabel: "در حال بررسی اولیه ادمین",
     badgeBg: "bg-[#CC785C]/10 text-[#CC785C] border-[#CC785C]/20",
     textColor: "text-[#CC785C]",
+  },
+  NEEDS_CLIENT_EDIT: {
+    label: "نیاز به ویرایش توسط شما",
+    adminLabel: "درخواست ویرایش از کارفرما",
+    badgeBg: "bg-amber-100 text-amber-950 border-amber-300",
+    textColor: "text-amber-900",
   },
   CONTACTED: {
     label: "تماس گرفته شد / در حال پیگیری",

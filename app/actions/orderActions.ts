@@ -6,10 +6,12 @@ import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
 import {
   ACTIVE_CLIENT_ORDER_STATUSES,
+  parseOrderStatus,
   storedValuesFor,
   type OrderStatus,
 } from "@/lib/orders/status";
 import { resolveScheduledAt } from "@/lib/date/jalali";
+import { revalidatePath } from "next/cache";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -94,11 +96,26 @@ export async function createOrderAction(input: CreateOrderInput) {
       return { success: false, error: "مدت زمان پروژه باید حداقل ۱ ساعت باشد." };
     }
 
-    if (!input.hourlyRate || input.hourlyRate < 500000) {
-      return { success: false, error: "نرخ ساعتی انتخاب‌شده نامعتبر است." };
+    const contactName = (input.contactName || "").trim();
+    if (contactName.length < 2 || /[0-9۰-۹٠-٩]/.test(contactName)) {
+      return {
+        success: false,
+        error: "نام و نام‌خانوادگی را فقط با حروف (بدون عدد) وارد کنید.",
+      };
     }
 
-    const totalEstimatedPrice = input.hourlyRate * input.durationHours;
+    const projectDescription = (input.projectDescription || "").trim();
+    if (projectDescription.length < 120) {
+      return {
+        success: false,
+        error: "توضیحات پروژه باید حداقل ۱۲۰ حرف باشد.",
+      };
+    }
+
+    // Baseline until the selected specialist sets the agreed total later.
+    const hourlyRate =
+      input.hourlyRate && input.hourlyRate >= 500000 ? input.hourlyRate : 3_600_000;
+    const totalEstimatedPrice = hourlyRate * input.durationHours;
     const depositAmount = 0; // Deposit is completely removed from upfront flow
 
     const categoryDef = CATEGORIES_BY_SLUG[input.categorySlug];
@@ -125,17 +142,14 @@ export async function createOrderAction(input: CreateOrderInput) {
         locationLng: input.locationLng ?? null,
         referenceLink: input.referenceLink || null,
         moodboardUrls: input.moodboardUrls ? JSON.stringify(input.moodboardUrls) : null,
-        projectDescription: input.projectDescription || null,
+        projectDescription,
         isAutoPriced,
-        hourlyRate: input.hourlyRate,
+        hourlyRate,
         totalEstimatedPrice,
         depositAmount,
-        // Straight onto the specialist board. This used to be PENDING_REVIEW,
-        // which nothing moved an order out of and no query looked for: the job
-        // board, the admin dashboard, and the cancel button all filtered it out,
-        // so every new order landed somewhere no one could see it.
-        status: "MATCHING" satisfies OrderStatus,
-        contactName: input.contactName || null,
+        // Always land in admin review before the specialist board.
+        status: "PENDING_REVIEW" satisfies OrderStatus,
+        contactName,
         contactPhone: input.contactPhone || session.phone || null,
         userId: session.userId,
       },
@@ -223,5 +237,123 @@ export async function getOrderById(orderId: string) {
   } catch (error: unknown) {
     console.error("Failed to fetch order:", error);
     return { success: false, error: "خطا در دریافت اطلاعات سفارش." };
+  }
+}
+
+export interface UpdateOrderByClientInput {
+  orderId: string;
+  contactName: string;
+  projectDescription: string;
+  isFlexibleSchedule?: boolean;
+  bookingDate?: string | null;
+  timeSlot?: string | null;
+  durationHours: number;
+  locationType: "CLIENT_LOCATION" | "SPECIALIST_ADVICE" | "JAR_STUDIO";
+  locationAddress?: string;
+  districtOrCity?: string;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  referenceLink?: string;
+  moodboardUrls?: string[];
+}
+
+/** Client resubmits after admin asked for edits. */
+export async function updateOrderByClientAction(input: UpdateOrderByClientInput) {
+  try {
+    await ensurePrismaSchemaReady();
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد حساب کاربری شوید." };
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id: input.orderId },
+      select: {
+        id: true,
+        userId: true,
+        contactPhone: true,
+        status: true,
+        categorySlug: true,
+        hourlyRate: true,
+      },
+    });
+
+    if (!order) {
+      return { success: false, error: "سفارش یافت نشد." };
+    }
+
+    const isOwner =
+      (order.userId && order.userId === session.userId) ||
+      (order.contactPhone && order.contactPhone === session.phone);
+    if (!isOwner && session.role !== "admin") {
+      return { success: false, error: "دسترسی ندارید." };
+    }
+
+    if (parseOrderStatus(order.status) !== "NEEDS_CLIENT_EDIT") {
+      return {
+        success: false,
+        error: "این سفارش در حال حاضر قابل ویرایش نیست.",
+      };
+    }
+
+    const contactName = input.contactName.trim();
+    if (contactName.length < 2 || /[0-9۰-۹٠-٩]/.test(contactName)) {
+      return {
+        success: false,
+        error: "نام و نام‌خانوادگی را فقط با حروف وارد کنید.",
+      };
+    }
+
+    const projectDescription = input.projectDescription.trim();
+    if (projectDescription.length < 120) {
+      return {
+        success: false,
+        error: "توضیحات پروژه باید حداقل ۱۲۰ حرف باشد.",
+      };
+    }
+
+    if (input.durationHours < 1) {
+      return { success: false, error: "مدت زمان پروژه باید حداقل ۱ ساعت باشد." };
+    }
+
+    const isFlexibleSchedule = input.isFlexibleSchedule ?? true;
+    const totalEstimatedPrice = order.hourlyRate * input.durationHours;
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        contactName,
+        projectDescription,
+        isFlexibleSchedule,
+        bookingDate: isFlexibleSchedule ? input.bookingDate || null : input.bookingDate,
+        timeSlot: isFlexibleSchedule ? input.timeSlot || null : input.timeSlot,
+        durationHours: input.durationHours,
+        scheduledAt: resolveScheduledAt(
+          isFlexibleSchedule ? input.bookingDate || null : input.bookingDate,
+          input.timeSlot
+        ),
+        locationType: input.locationType,
+        locationAddress: input.locationAddress || null,
+        districtOrCity: input.districtOrCity || null,
+        locationLat: input.locationLat ?? null,
+        locationLng: input.locationLng ?? null,
+        referenceLink: input.referenceLink || null,
+        moodboardUrls: input.moodboardUrls
+          ? JSON.stringify(input.moodboardUrls)
+          : null,
+        totalEstimatedPrice,
+        status: "PENDING_REVIEW" satisfies OrderStatus,
+        adminNote: null,
+      },
+    });
+
+    revalidatePath(`/order/${order.id}`);
+    revalidatePath("/admin");
+    revalidatePath("/admin/Order");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to update order:", error);
+    return { success: false, error: "خطا در ذخیره ویرایش سفارش." };
   }
 }

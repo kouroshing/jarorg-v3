@@ -42,18 +42,29 @@ function useAuthStatus(initialAuth: AuthStatus) {
   const [auth, setAuth] = useState<AuthStatus>(initialAuth);
 
   useEffect(() => {
+    setAuth(initialAuth);
+  }, [initialAuth]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     fetch("/api/auth/session")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.role === "ADMIN") {
-          setAuth("admin");
-        } else if (data.userId) {
-          setAuth("user");
-        } else {
+      .then((data: { authenticated?: boolean; role?: string | null }) => {
+        if (cancelled) return;
+        if (!data?.authenticated) {
           setAuth("guest");
+          return;
         }
+        setAuth(data.role === "admin" ? "admin" : "user");
       })
-      .catch(() => setAuth("guest"));
+      .catch(() => {
+        // Keep server-provided initialAuth on network failure.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return auth;
@@ -169,15 +180,15 @@ export function Navbar({ initialAuth }: NavbarProps) {
             {isLoggedIn ? (
               <Link
                 href="/profile"
-                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-3 sm:px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
               >
                 <User className="h-3.5 w-3.5 text-jar-primary" />
-                <span>داشبورد</span>
+                <span>پروفایل</span>
               </Link>
             ) : (
               <Link
                 href="/login"
-                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-3 sm:px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-all shadow-2xs"
               >
                 <LogIn className="h-3.5 w-3.5 text-jar-muted" />
                 <span>ورود</span>
@@ -302,7 +313,7 @@ export function Navbar({ initialAuth }: NavbarProps) {
                 >
                   <div className="flex items-center gap-2.5">
                     <User className="h-4 w-4 text-jar-primary" />
-                    <span>داشبورد کاربری</span>
+                    <span>پروفایل</span>
                   </div>
                   <ArrowLeft className="h-3.5 w-3.5 text-stone-400" />
                 </Link>
@@ -399,8 +410,8 @@ export function Navbar({ initialAuth }: NavbarProps) {
                   isActive("/login") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
                 }`}
               >
-                <User className="h-5 w-5" strokeWidth={isActive("/login") ? 2.5 : 2} />
-                <span>پروفایل</span>
+                <LogIn className="h-5 w-5" strokeWidth={isActive("/login") ? 2.5 : 2} />
+                <span>ورود</span>
               </Link>
             )}
           </li>

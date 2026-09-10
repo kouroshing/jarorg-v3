@@ -33,12 +33,18 @@ export default function CancelOrderButton({
     if (!confirmed) return;
 
     startTransition(async () => {
-      const res = await cancelOrderByClientAction(orderId);
-      if (!res.success) {
-        setError(res.error || "خطا در لغو سفارش.");
-      } else {
-        router.push("/order");
+      try {
+        const res = await cancelOrderByClientAction(orderId);
+        if (!res.success) {
+          setError(res.error || "خطا در لغو سفارش.");
+          return;
+        }
+        // Stay on this order so the cancelled state renders — avoid /order
+        // which would look like a hang if anything still counted as active.
+        router.replace(`/order/${orderId}`);
         router.refresh();
+      } catch {
+        setError("ارتباط با سرور قطع شد. لطفاً دوباره تلاش کنید.");
       }
     });
   };
