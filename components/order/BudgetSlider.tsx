@@ -3,6 +3,9 @@
 import React, { useMemo, useRef, useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, CheckCircle2, Award, Zap, TrendingUp, Clock, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { formatPrice, formatShortPrice } from "@/lib/format/price";
+
+export { formatPrice, formatShortPrice };
 
 export interface BudgetStop {
   index: number;
@@ -71,8 +74,6 @@ export const BUDGET_STOPS: BudgetStop[] = [
     badge: "سینمایی و کارگردانی VIP",
   },
 ];
-
-export { formatPrice, formatShortPrice } from "@/lib/format/price";
 
 interface BudgetSliderProps {
   selectedIndex: number;
