@@ -4,7 +4,11 @@ import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
-import type { OrderStatus } from "@/lib/orders/status";
+import {
+  ACTIVE_CLIENT_ORDER_STATUSES,
+  storedValuesFor,
+  type OrderStatus,
+} from "@/lib/orders/status";
 import { resolveScheduledAt } from "@/lib/date/jalali";
 
 export interface CreateOrderInput {
@@ -27,6 +31,25 @@ export interface CreateOrderInput {
   contactPhone?: string;
 }
 
+/** Open / in-flight project for this client, if any. */
+export async function findActiveOrderForUser(userId: string, phone?: string | null) {
+  return prisma.order.findFirst({
+    where: {
+      AND: [
+        {
+          OR: [
+            { userId },
+            ...(phone ? [{ contactPhone: phone }] : []),
+          ],
+        },
+        { status: { in: storedValuesFor(...ACTIVE_CLIENT_ORDER_STATUSES) } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, categoryTitle: true },
+  });
+}
+
 export async function createOrderAction(input: CreateOrderInput) {
   try {
     await ensurePrismaSchemaReady();
@@ -37,6 +60,16 @@ export async function createOrderAction(input: CreateOrderInput) {
       return {
         success: false,
         error: "برای ثبت سفارش، لطفاً ابتدا با شماره همراه خود وارد حساب شوید.",
+      };
+    }
+
+    const active = await findActiveOrderForUser(session.userId, session.phone);
+    if (active) {
+      return {
+        success: false,
+        error:
+          "شما یک پروژه فعال دارید. تا پایان یا لغو آن نمی‌توانید پروژه جدیدی ثبت کنید.",
+        orderId: active.id,
       };
     }
 

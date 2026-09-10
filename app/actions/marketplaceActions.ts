@@ -1182,33 +1182,14 @@ export async function cancelOrderByClientAction(
         throw new Error("امکان لغو سفارشی که قبلاً تکمیل یا لغو شده است وجود ندارد.");
       }
 
-      // Security: Disallow simple client cancellation if a specialist is selected or order is CONFIRMED
-      if (
-        order.status === "CONFIRMED" ||
-        order.status === "AWAITING_SPECIALIST_CONFIRMATION" ||
-        order.selectedSpecialistId
-      ) {
+      if (order.status === "CONFIRMED") {
         throw new Error(
-          "امکان لغو مستقیم این سفارش وجود ندارد؛ متخصص برای این پروژه انتخاب یا قطعی شده است. لطفاً برای لغو یا تغییرات با پشتیبانی جار تماس بگیرید."
+          "این پروژه پرداخت و قطعی شده است. برای لغو با پشتیبانی جار تماس بگیرید."
         );
       }
 
       if (!isClientCancellable(order.status)) {
         throw new Error("وضعیت فعلی سفارش امکان لغو مستقیم توسط کارفرما را ندارد.");
-      }
-
-      // Enforce 72-hour cancellation rule (Only allow cancel after 72 hours from order creation)
-      const orderCreatedAt = new Date(order.createdAt).getTime();
-      const now = Date.now();
-      const hoursElapsed = (now - orderCreatedAt) / (1000 * 60 * 60);
-
-      if (hoursElapsed < 72 && session?.role !== "admin") {
-        const remainingMs = 72 * 3600 * 1000 - (now - orderCreatedAt);
-        const remainingHours = Math.floor(remainingMs / (1000 * 3600));
-        const remainingMinutes = Math.floor((remainingMs % (1000 * 3600)) / (1000 * 60));
-        throw new Error(
-          `امکان لغو سفارش تا ۷۲ ساعت پس از ثبت سفارش وجود ندارد. زمان باقی‌مانده تا فعال‌سازی امکان لغو: ${remainingHours} ساعت و ${remainingMinutes} دقیقه.`
-        );
       }
 
       // Fetch active applicant specialists to notify
@@ -1222,7 +1203,10 @@ export async function cancelOrderByClientAction(
 
       await tx.order.update({
         where: { id: validOrderId },
-        data: { status: "CANCELLED" },
+        data: {
+          status: "CANCELLED",
+          selectedSpecialistId: null,
+        },
       });
 
       await tx.projectInterest.updateMany({

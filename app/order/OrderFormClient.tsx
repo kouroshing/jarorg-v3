@@ -221,6 +221,9 @@ export default function OrderFormClient({
         window.setTimeout(() => {
           router.push(`/order/${res.orderId}`);
         }, 2200);
+      } else if (res.orderId) {
+        // Active project already exists — send them there.
+        router.push(`/order/${res.orderId}`);
       } else {
         setSubmitError(res.error || "خطا در ثبت نهایی سفارش. لطفاً دوباره تلاش کنید.");
         setIsSubmitting(false);

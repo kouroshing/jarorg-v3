@@ -1,0 +1,145 @@
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Radio } from "lucide-react";
+import {
+  ApplicantSpecialistView,
+  getOrderApplicantsForClientAction,
+} from "@/app/actions/marketplaceActions";
+import OrderMatchingRadar from "./OrderMatchingRadar";
+import OrderApplicantsList from "./OrderApplicantsList";
+import CancelOrderButton from "./CancelOrderButton";
+import { isOnMarket, parseOrderStatus } from "@/lib/orders/status";
+
+function faNum(value: number): string {
+  return value.toLocaleString("fa-IR");
+}
+
+interface OrderClientWaitingProps {
+  orderId: string;
+  categoryTitle: string;
+  orderStatus: string;
+  initialApplicants: ApplicantSpecialistView[];
+  isOwnerOrAdmin: boolean;
+  selectedSpecialistId?: string | null;
+  agreedTotalPrice?: number | null;
+}
+
+/**
+ * Minimal waiting surface after submit: radar + status + cancel.
+ * Specialist cards appear only when someone applies (needed for selection).
+ * No financial summary here — that comes after selection.
+ */
+export default function OrderClientWaiting({
+  orderId,
+  categoryTitle,
+  orderStatus,
+  initialApplicants,
+  isOwnerOrAdmin,
+  selectedSpecialistId,
+  agreedTotalPrice,
+}: OrderClientWaitingProps) {
+  const router = useRouter();
+  const [applicants, setApplicants] = useState(initialApplicants);
+  const [status, setStatus] = useState(orderStatus);
+  const previousCount = useRef(initialApplicants.length);
+
+  useEffect(() => {
+    setApplicants(initialApplicants);
+    setStatus(orderStatus);
+  }, [initialApplicants, orderStatus]);
+
+  useEffect(() => {
+    if (!isOwnerOrAdmin) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      const res = await getOrderApplicantsForClientAction(orderId);
+      if (cancelled || !res.success) return;
+
+      const next = res.applicants ?? [];
+      previousCount.current = next.length;
+      setApplicants(next);
+
+      if (res.orderStatus) {
+        setStatus(res.orderStatus);
+        if (!isOnMarket(res.orderStatus)) {
+          router.refresh();
+        }
+      }
+    };
+
+    const interval = window.setInterval(poll, 7000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isOwnerOrAdmin, orderId, router]);
+
+  const foundCount = applicants.filter((a) => a.status !== "WITHDRAWN").length;
+  const waiting = foundCount === 0;
+  const parsed = parseOrderStatus(status);
+
+  return (
+    <section
+      className="relative overflow-hidden rounded-[32px] border border-jar-border bg-jar-surface shadow-xs"
+      dir="rtl"
+    >
+      <div className="relative z-10 space-y-8 p-6 sm:p-9">
+        <div className="flex flex-col items-center text-center gap-5">
+          <OrderMatchingRadar size={200} foundCount={foundCount} />
+
+          <div className="space-y-2.5 max-w-md">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-jar-logo/25 bg-jar-logo/10 px-3 py-1 text-[11px] font-bold text-jar-logo">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-jar-logo opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-jar-logo" />
+              </span>
+              {waiting
+                ? "در انتظار اعلام آمادگی متخصصان"
+                : `${faNum(foundCount)} متخصص اعلام آمادگی کردند`}
+            </div>
+
+            <h1 className="text-xl sm:text-2xl font-black text-jar-primary tracking-tight">
+              {waiting
+                ? `در حال پیدا کردن متخصص برای ${categoryTitle}`
+                : "یکی از متخصصان را انتخاب کنید"}
+            </h1>
+
+            <p className="text-xs sm:text-sm text-jar-muted font-medium leading-relaxed">
+              {waiting
+                ? "پروژه شما برای متخصصان واجد شرایط ارسال شد. همین صفحه به‌روز می‌شود."
+                : "بعد از انتخاب، مرحله پرداخت باز می‌شود و پروژه قطعی می‌گردد."}
+            </p>
+
+            <div className="inline-flex items-center gap-1 rounded-full border border-jar-border bg-jar-canvas px-2.5 py-1 text-[11px] font-medium text-jar-muted">
+              <Radio className="h-3 w-3 text-jar-logo" />
+              {parsed === "HAS_APPLICANTS" ? "پیشنهادها رسیده" : "منتشرشده برای متخصصان"}
+            </div>
+          </div>
+        </div>
+
+        {!waiting && (
+          <OrderApplicantsList
+            orderId={orderId}
+            orderStatus={status}
+            initialApplicants={applicants}
+            isOwnerOrAdmin={isOwnerOrAdmin}
+            selectedSpecialistId={selectedSpecialistId}
+            agreedTotalPrice={agreedTotalPrice}
+          />
+        )}
+
+        <div className="max-w-sm mx-auto w-full">
+          <CancelOrderButton
+            orderId={orderId}
+            orderStatus={status}
+            isOwnerOrAdmin={isOwnerOrAdmin}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}

@@ -89,10 +89,30 @@ export const OPEN_TO_APPLICANTS_STATUSES = [
 /** The client may still cancel without involving support. */
 export const CLIENT_CANCELLABLE_STATUSES = [
   "PENDING_REVIEW",
+  "CONTACTED",
+  "IN_PROGRESS",
   "PENDING_DEPOSIT",
   "DEPOSIT_PAID",
   "MATCHING",
   "HAS_APPLICANTS",
+  "AWAITING_PAYMENT",
+] as const satisfies readonly OrderStatus[];
+
+/**
+ * Any live project that blocks the client from opening a second order.
+ * Only COMPLETED / CANCELLED free the slot.
+ */
+export const ACTIVE_CLIENT_ORDER_STATUSES = [
+  "PENDING_REVIEW",
+  "CONTACTED",
+  "IN_PROGRESS",
+  "PENDING_DEPOSIT",
+  "DEPOSIT_PAID",
+  "MATCHING",
+  "HAS_APPLICANTS",
+  "AWAITING_PAYMENT",
+  "AWAITING_SPECIALIST_CONFIRMATION",
+  "CONFIRMED",
 ] as const satisfies readonly OrderStatus[];
 
 /**
@@ -158,6 +178,10 @@ export function isOnMarket(status: string): boolean {
 
 export function isClientCancellable(status: string): boolean {
   return (CLIENT_CANCELLABLE_STATUSES as readonly string[]).includes(parseOrderStatus(status));
+}
+
+export function isActiveClientOrder(status: string): boolean {
+  return (ACTIVE_CLIENT_ORDER_STATUSES as readonly string[]).includes(parseOrderStatus(status));
 }
 
 export function isMatched(status: string): boolean {
