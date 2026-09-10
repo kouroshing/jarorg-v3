@@ -59,10 +59,22 @@ function ensureRuntimeDatabaseSync() {
   }
 
   try {
+    // Use the binary shipped in node_modules. `npx prisma` tries to hit the
+    // npm registry and write under /root/.npm, which is read-only on Liara.
+    const prismaBin = path.join(process.cwd(), "node_modules", ".bin", "prisma");
+    const cmd = fs.existsSync(prismaBin)
+      ? `"${prismaBin}" db push --skip-generate`
+      : "node ./node_modules/prisma/build/index.js db push --skip-generate";
+
     console.log("[prisma-init] Syncing SQLite schema (prisma db push)...");
-    execSync("npx prisma db push --skip-generate", {
+    execSync(cmd, {
       stdio: "inherit",
-      env: process.env,
+      env: {
+        ...process.env,
+        // Keep any incidental npm writes off the read-only root FS.
+        NPM_CONFIG_CACHE: "/tmp/npm-cache",
+        npm_config_cache: "/tmp/npm-cache",
+      },
       timeout: 180_000,
     });
     runtimeSchemaSynced = true;
