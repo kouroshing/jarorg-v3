@@ -1,6 +1,6 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
@@ -29,6 +29,8 @@ export interface CreateOrderInput {
 
 export async function createOrderAction(input: CreateOrderInput) {
   try {
+    await ensurePrismaSchemaReady();
+
     const session = await getSession();
 
     if (!session?.userId) {
