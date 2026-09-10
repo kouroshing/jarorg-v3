@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -32,24 +33,45 @@ try {
   console.error("[prisma-init] Failed to ensure database directory exists:", err);
 }
 
-// In production runtime, if tables are not initialized or on cold start, ensure schema is pushed
+/**
+ * Liara's Next platform starts `next start` directly and skips package.json
+ * scripts that prepend `prisma db push`. Without an explicit sync here the
+ * Prisma client drifts from the SQLite file on the data disk — which is exactly
+ * how production lost the `orders` table while still serving the app.
+ *
+ * Non-destructive only: adds missing tables/columns. Does not pass
+ * --accept-data-loss.
+ */
 let runtimeSchemaSynced = false;
 function ensureRuntimeDatabaseSync() {
   if (runtimeSchemaSynced) return;
   if (
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PHASE !== "phase-production-build" &&
-    process.env.IS_BUILD !== "true"
+    process.env.NEXT_PHASE === "phase-production-build" ||
+    process.env.IS_BUILD === "true"
   ) {
-    try {
-      // Production schema changes must be applied by `prisma migrate deploy`
-      // during deployment, never implicitly with accept-data-loss at runtime.
-      return;
-      runtimeSchemaSynced = true;
-      console.log("✅ [prisma-init] Runtime SQLite schema synced successfully.");
-    } catch (e) {
-      console.warn("⚠️ [prisma-init] Runtime schema sync notice:", e instanceof Error ? e.message : e);
-    }
+    return;
+  }
+
+  // Dev uses `prisma db push` / migrate by hand; don't block every reload.
+  if (process.env.NODE_ENV !== "production") {
+    runtimeSchemaSynced = true;
+    return;
+  }
+
+  try {
+    console.log("[prisma-init] Syncing SQLite schema (prisma db push)...");
+    execSync("npx prisma db push --skip-generate", {
+      stdio: "inherit",
+      env: process.env,
+      timeout: 180_000,
+    });
+    runtimeSchemaSynced = true;
+    console.log("✅ [prisma-init] Runtime SQLite schema synced successfully.");
+  } catch (e) {
+    console.error(
+      "❌ [prisma-init] Schema sync failed — order/create and related writes will error until this succeeds:",
+      e instanceof Error ? e.message : e
+    );
   }
 }
 
@@ -75,7 +97,7 @@ export async function configureSqlitePragmas(client: PrismaClient) {
 const prismaClientSingleton = () => {
   ensureRuntimeDatabaseSync();
   const client = new PrismaClient();
-  configureSqlitePragmas(client);
+  void configureSqlitePragmas(client);
   return client;
 };
 
@@ -86,6 +108,6 @@ declare global {
 export const prisma = globalThis.prisma ?? prismaClientSingleton();
 
 // Ensure pragmas run on existing instance as well
-configureSqlitePragmas(prisma);
+void configureSqlitePragmas(prisma);
 
 if (process.env.NODE_ENV !== "production") globalThis.prisma = prisma;
