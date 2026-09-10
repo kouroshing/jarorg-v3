@@ -23,7 +23,7 @@ import {
   Headphones,
 } from "lucide-react";
 import { getOrderById } from "@/app/actions/orderActions";
-import { formatPrice } from "@/components/order/BudgetSlider";
+import { formatPrice } from "@/lib/format/price";
 import { getSession } from "@/lib/auth/session";
 import {
   getOrderApplicantsForClientAction,
