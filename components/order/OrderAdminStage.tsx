@@ -15,7 +15,7 @@ interface OrderAdminStageProps {
 
 export default function OrderAdminStage({ order, isOwnerOrAdmin }: OrderAdminStageProps) {
   if (needsClientEdit(order.status)) {
-    return <OrderClientEditForm order={order} />;
+    return <OrderClientEditForm order={order} isOwnerOrAdmin={isOwnerOrAdmin} />;
   }
 
   return <OrderAdminPending order={order} isOwnerOrAdmin={isOwnerOrAdmin} />;

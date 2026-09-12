@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import {
+  hasAdminPermission,
+  resolveAdminAccess,
+} from "@/lib/auth/adminAccess";
 import { getSpecialistReviewCards } from "@/lib/specialists/review";
 import SpecialistReviewBoard from "@/components/admin/SpecialistReviewBoard";
 
@@ -17,8 +20,9 @@ export default async function AdminSpecialistReviewPage({
   searchParams: { status?: string };
 }) {
   const session = await getSession();
-  if (!isAdminSession(session)) {
-    redirect("/login?redirect=/admin/review");
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "specialists_review")) {
+    redirect("/admin");
   }
 
   const filter = searchParams?.status === "all" ? "all" : "pending";

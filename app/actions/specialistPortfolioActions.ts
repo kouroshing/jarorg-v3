@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { promises as fs } from "fs";
 import path from "path";
 import { ALL_CATEGORIES, CATEGORIES_BY_SLUG, CategoryType, MediaType } from "@/lib/categories";
+import { getUploadRoot, resolveUploadDiskPath } from "@/lib/storage/uploads";
 import {
   evaluateEligibility,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
@@ -25,6 +26,7 @@ export interface PortfolioItemData {
   title: string | null;
   caption: string | null;
   fileSize: number | null;
+  reviewStatus: string;
   createdAt: string;
 }
 
@@ -91,6 +93,7 @@ export async function getSpecialistCategoriesAndPortfolio(): Promise<SpecialistC
       title: item.title,
       caption: item.caption,
       fileSize: item.fileSize,
+      reviewStatus: item.reviewStatus || "PENDING",
       createdAt: item.createdAt.toISOString(),
     }));
 
@@ -217,6 +220,15 @@ export async function uploadPortfolioItem(
       };
     }
 
+    const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+    const MAX_VIDEO_BYTES = 40 * 1024 * 1024;
+    if (mediaType === "IMAGE" && file.size > MAX_IMAGE_BYTES) {
+      return { success: false, error: "حجم تصویر نباید بیشتر از ۲۵ مگابایت باشد." };
+    }
+    if (mediaType === "VIDEO" && file.size > MAX_VIDEO_BYTES) {
+      return { success: false, error: "حجم ویدیو نباید بیشتر از ۴۰ مگابایت باشد." };
+    }
+
     // Ensure specialist profile exists
     const specialist = await prisma.specialistProfile.upsert({
       where: { userId: session.userId },
@@ -227,13 +239,13 @@ export async function uploadPortfolioItem(
       update: {},
     });
 
-    // Save file locally to public/uploads/portfolio
+    // Persist under UPLOAD_ROOT (Liara disk) / public/uploads
     const ext = path.extname(file.name) || (mediaType === "IMAGE" ? ".jpg" : ".mp4");
     const cleanFilename = `portfolio_${categorySlug}_${Date.now()}_${Math.random()
       .toString(36)
       .substring(2, 9)}${ext}`;
 
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "portfolio");
+    const uploadDir = path.join(getUploadRoot(), "portfolio");
     await fs.mkdir(uploadDir, { recursive: true });
 
     const filePath = path.join(uploadDir, cleanFilename);
@@ -273,6 +285,7 @@ export async function uploadPortfolioItem(
         title: newItem.title,
         caption: newItem.caption,
         fileSize: newItem.fileSize,
+        reviewStatus: newItem.reviewStatus || "PENDING",
         createdAt: newItem.createdAt.toISOString(),
       },
     };
@@ -309,10 +322,12 @@ export async function deletePortfolioItem(
       return { success: false, error: "شما دسترسی حذف این فایل را ندارید." };
     }
 
-    // Try deleting physical file from disk if local
+    // Delete physical file from UPLOAD_ROOT / public/uploads
     if (item.fileUrl.startsWith("/uploads/")) {
-      const diskPath = path.join(process.cwd(), "public", item.fileUrl);
-      await fs.unlink(diskPath).catch(() => {});
+      const diskPath = resolveUploadDiskPath(item.fileUrl);
+      if (diskPath) {
+        await fs.unlink(diskPath).catch(() => {});
+      }
     }
 
     await prisma.portfolioItem.delete({
@@ -352,7 +367,7 @@ export async function publishSpecialistProfile(): Promise<{
       where: { userId: session.userId },
       include: {
         portfolioItems: { select: { categorySlug: true, reviewStatus: true } },
-        user: { select: { displayName: true, phone: true } },
+        user: { select: { displayName: true, phone: true, planId: true } },
       },
     });
 
@@ -369,6 +384,7 @@ export async function publishSpecialistProfile(): Promise<{
       displayName: specialist.user?.displayName,
       portfolioItems: specialist.portfolioItems,
       selectedCategories: specialist.selectedCategories,
+      hasPlan: Boolean(specialist.user?.planId),
     });
 
     if (eligibility.submittableCategories.length === 0) {
@@ -389,6 +405,14 @@ export async function publishSpecialistProfile(): Promise<{
         success: false,
         error: `حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی انتخاب کنید.`,
         redirect: "/specialist/onboarding/categories",
+      };
+    }
+
+    if (!eligibility.hasPlan) {
+      return {
+        success: false,
+        error: "ابتدا اشتراک خود را انتخاب کنید.",
+        redirect: "/specialist/onboarding/subscription",
       };
     }
 

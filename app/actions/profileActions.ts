@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 
 const nameSchema = z
   .string()
@@ -48,7 +48,12 @@ export async function updateUserStorageLimit(
   limitBytes: number
 ): Promise<UpdateProfileResult> {
   const session = await getSession();
-  if (!session || !isAdminSession(session)) {
+  try {
+    await requireAdminPermission(session, "settings_manage");
+  } catch {
+    return { success: false, error: "Unauthorized" };
+  }
+  if (!session?.userId) {
     return { success: false, error: "Unauthorized" };
   }
 

@@ -103,18 +103,12 @@ export async function submitProjectForm(formData: BookingData): Promise<BookingR
     const adminPatternCode = process.env.ADMIN_NOTIF_PATTERN_CODE?.trim() || "";
     const adminMobilesString = process.env.ADMIN_MOBILES?.trim() || "09100138383,09126301407";
 
-    console.log("\n--- [SECURE DIRECT BOOKING SAVE & IPPANEL SMS DISPATCH] ---");
-    console.log(`User ID: ${session.userId} | Phone: ${phone.trim()}`);
-    console.log(`Pattern Code: ${adminPatternCode}`);
-    console.log(`Values:`, {
-      name: fullName.trim(),
-      description: summaryWithExpert,
-      link: cleanLink,
-      budget: budgetRange,
-      phone: phone.trim(),
-      time: bestContactTime
-    });
-    console.log("----------------------------------------------------------\n");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[booking] dispatch prepared", {
+        userId: session.userId,
+        hasPattern: Boolean(adminPatternCode),
+      });
+    }
 
     // Parse recipient phone numbers from env
     const recipients = adminMobilesString.split(",").map(num => num.trim()).filter(Boolean);
@@ -140,9 +134,11 @@ export async function submitProjectForm(formData: BookingData): Promise<BookingR
             time: String(bestContactTime)
           }
         });
-        console.log(`✓ SMS notification successfully sent to: ${recipient}`);
+        if (process.env.NODE_ENV === "development") {
+          console.log("[booking] SMS sent to recipient index", recipients.indexOf(recipient));
+        }
       } catch (smsError) {
-        console.error(`[IPPanel SMS Dispatch Error] Failed to notify ${recipient}:`, smsError);
+        console.error("[IPPanel SMS Dispatch Error] Failed to notify a recipient:", smsError);
       }
     });
 

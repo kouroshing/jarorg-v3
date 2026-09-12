@@ -11,7 +11,7 @@ import React from "react";
 export default function JarBillowBackground() {
   return (
     <div 
-      className="absolute inset-0 pointer-events-none overflow-hidden z-0 select-none"
+      className="absolute inset-0 pointer-events-none overflow-hidden -z-10 select-none"
       style={{
         contain: "paint layout",
         transform: "translate3d(0, 0, 0)",

@@ -25,16 +25,6 @@ CREATE TABLE "users" (
 );
 
 -- CreateTable
-CREATE TABLE "experts" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "image_url" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "is_active" BOOLEAN NOT NULL DEFAULT true,
-    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- CreateTable
 CREATE TABLE "verification_codes" (
     "phone" TEXT NOT NULL PRIMARY KEY,
     "code" TEXT NOT NULL,
@@ -70,9 +60,7 @@ CREATE TABLE "projects" (
     "google_drive_folder_id" TEXT,
     "total_size" REAL NOT NULL DEFAULT 0,
     "user_id" TEXT,
-    "expert_id" TEXT,
-    CONSTRAINT "projects_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "projects_expert_id_fkey" FOREIGN KEY ("expert_id") REFERENCES "experts" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    CONSTRAINT "projects_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -351,11 +339,16 @@ CREATE TABLE "specialist_profiles" (
     "work_area" TEXT,
     "bio" TEXT,
     "equipment_summary" TEXT,
+    "is_mobile_grapher" BOOLEAN NOT NULL DEFAULT false,
     "selected_categories" TEXT,
     "avatar_url" TEXT,
     "base_lat" REAL,
     "base_lng" REAL,
     "base_address" TEXT,
+    "studio_name" TEXT,
+    "studio_lat" REAL,
+    "studio_lng" REAL,
+    "studio_address" TEXT,
     "agreed_to_terms" BOOLEAN NOT NULL DEFAULT false,
     "terms_agreed_at" DATETIME,
     "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -478,4 +471,24 @@ CREATE INDEX "audit_logs_target_model_target_id_idx" ON "audit_logs"("target_mod
 
 -- CreateIndex
 CREATE INDEX "audit_logs_created_at_idx" ON "audit_logs"("created_at");
+
+-- CreateTable
+CREATE TABLE "admin_staff" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "phone" TEXT NOT NULL,
+    "label" TEXT,
+    "role_key" TEXT NOT NULL DEFAULT 'CUSTOM',
+    "permissions" TEXT NOT NULL DEFAULT '[]',
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" DATETIME NOT NULL,
+    "created_by_phone" TEXT,
+    "note" TEXT
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "admin_staff_phone_key" ON "admin_staff"("phone");
+
+-- CreateIndex
+CREATE INDEX "admin_staff_is_active_idx" ON "admin_staff"("is_active");
 

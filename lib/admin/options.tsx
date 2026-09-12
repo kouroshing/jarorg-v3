@@ -19,33 +19,28 @@ export const options: NextAdminOptions = {
   sidebar: {
     groups: [
       {
-        title: "سفارش‌ها و مارکت‌پلیس",
-        models: ["Order", "ProjectInterest"],
-      },
-      {
-        title: "کاربران و متخصصان",
-        models: ["User", "SpecialistProfile", "PortfolioItem", "Expert"],
+        title: "عملیات روزمره",
+        models: ["Order", "ProjectInterest", "SpecialistProfile", "PortfolioItem"],
       },
       {
         title: "مالی و اشتراک‌ها",
-        models: ["Transaction", "WithdrawalRequest", "Plan", "DiscountCode"],
+        models: ["WithdrawalRequest", "Transaction", "Plan", "DiscountCode"],
       },
       {
-        title: "گالری آنلاین و فروش عکس",
-        // Gallery product sales are off; keep records for wallet/settlement history only.
-        models: ["GalleryProject", "GalleryPhoto", "GalleryPurchase"],
+        title: "کاربران",
+        models: ["User"],
       },
       {
         title: "آکادمی جارآموز",
         models: ["Course", "Purchase"],
       },
       {
-        title: "سیستم و ارتباطات",
-        models: ["Notification", "NotificationTemplate", "PwaSettings", "Project"],
+        title: "سیستم و تنظیمات",
+        models: ["PwaSettings", "Notification", "NotificationTemplate", "AuditLog"],
       },
       {
-        title: "امنیت و حسابرسی",
-        models: ["AuditLog"],
+        title: "آرشیو (کم‌استفاده)",
+        models: ["GalleryProject", "GalleryPhoto", "GalleryPurchase", "Project"],
       },
     ],
   },
@@ -79,6 +74,7 @@ export const options: NextAdminOptions = {
         user: "حساب کارفرما",
         selectedSpecialist: "متخصص منتخب",
         interests: "پیشنهادات متخصصان",
+        orderApplicants: "متقاضیان و انتخاب سریع",
       },
       actions: [
         {
@@ -153,6 +149,7 @@ export const options: NextAdminOptions = {
       },
       edit: {
         display: [
+          "orderApplicants",
           "categorySlug",
           "categoryTitle",
           "status",
@@ -177,6 +174,11 @@ export const options: NextAdminOptions = {
           "selectedSpecialist",
           "interests",
         ],
+        customFields: {
+          orderApplicants: {
+            helperText: "لیست متقاضیان و انتخاب متخصص بدون رفتن به مدل Interest",
+          },
+        },
         fields: {
           status: {
             validate: (value) =>
@@ -319,8 +321,9 @@ export const options: NextAdminOptions = {
         status: "وضعیت تایید",
         city: "شهر",
         workArea: "محدوده فعالیت",
-        bio: "بیوگرافی",
+        bio: "بیوگرافی (فقط ادمین)",
         equipmentSummary: "تجهیزات تخصصی",
+        isMobileGrapher: "موبایل‌گرافر",
         selectedCategories: "دسته‌بندی‌های فعال",
         portfolioReview: "بررسی نمونه‌کارهای عکاس/فیلمبردار",
         agreedToTerms: "تایید قرارداد و تعهدنامه",
@@ -412,6 +415,7 @@ export const options: NextAdminOptions = {
           "workArea",
           "bio",
           "equipmentSummary",
+          "isMobileGrapher",
           "selectedCategories",
           "portfolioReview",
           "agreedToTerms",
@@ -453,7 +457,7 @@ export const options: NextAdminOptions = {
           id: "approve-portfolio",
           title: "تایید نمونه‌کار",
           icon: "CheckCircleIcon",
-          canExecute: (item: any) => item.reviewStatus !== "APPROVED",
+          canExecute: (item: any) => item.reviewStatus === "PENDING",
           action: async (ids) => {
             return approvePortfolioAction(ids);
           },
@@ -464,7 +468,7 @@ export const options: NextAdminOptions = {
           title: "رد نمونه‌کار + ارسال دلیل",
           icon: "XCircleIcon",
           style: "destructive",
-          canExecute: (item: any) => item.reviewStatus !== "REJECTED",
+          canExecute: (item: any) => item.reviewStatus === "PENDING",
           component: <RejectPortfolioDialog />,
         },
       ],
@@ -880,22 +884,6 @@ export const options: NextAdminOptions = {
         fields: {
           serviceDetails: { format: "json" },
         },
-      },
-    },
-    Expert: {
-      title: "عکاسان ویژه آزمایشی (Experts)",
-      icon: "UserGroupIcon",
-      aliases: {
-        id: "شناسه",
-        name: "نام عکاس",
-        imageUrl: "آدرس تصویر",
-        description: "بیوگرافی",
-        isActive: "وضعیت نمایش",
-        createdAt: "تاریخ ثبت",
-      },
-      list: {
-        display: ["name", "isActive", "createdAt"],
-        search: ["name"],
       },
     },
     AuditLog: {

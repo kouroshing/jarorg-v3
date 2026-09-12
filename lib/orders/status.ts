@@ -99,6 +99,7 @@ export const CLIENT_CANCELLABLE_STATUSES = [
   "MATCHING",
   "HAS_APPLICANTS",
   "AWAITING_PAYMENT",
+  "AWAITING_SPECIALIST_CONFIRMATION",
 ] as const satisfies readonly OrderStatus[];
 
 /**

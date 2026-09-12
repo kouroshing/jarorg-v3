@@ -100,7 +100,8 @@ export function Navbar({ initialAuth }: NavbarProps) {
       pathname.startsWith("/join") ||
       pathname.startsWith("/specialist") ||
       pathname.startsWith("/order") ||
-      pathname.startsWith("/admin"))
+      pathname.startsWith("/admin") ||
+      pathname.startsWith("/profile"))
   ) {
     return null;
   }
@@ -428,6 +429,7 @@ const STANDALONE_PREFIXES = [
   "/specialist",
   "/join",
   "/legal",
+  "/profile",
 ];
 
 export function MainLayout({ children }: { children: React.ReactNode }) {

@@ -71,6 +71,12 @@ const nextConfig = {
           source: "/uploads/gallery/:path*",
           destination: "/api/blocked",
         },
+        // Runtime uploads live on the Liara disk (/app/public/uploads). Standalone
+        // Next does not serve that path from public/, so route through the API.
+        {
+          source: "/uploads/:path*",
+          destination: "/api/uploads/:path*",
+        },
       ],
       afterFiles: [],
       fallback: [],

@@ -9,7 +9,6 @@ import {
   User,
   Lock,
   CheckCircle2,
-  Coins,
   Link2,
   UploadCloud,
   X,
@@ -17,6 +16,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { CategoryIcon } from "@/components/order/steps/StepCategory";
+import OrderBudgetAdjuster from "@/components/order/OrderBudgetAdjuster";
 
 export const MIN_PROJECT_DESCRIPTION_LENGTH = 120;
 
@@ -51,6 +51,8 @@ interface StepFinalizeProps {
   onChangeReferenceLink: (val: string) => void;
   moodboardUrls: string[];
   onChangeMoodboardUrls: (urls: string[]) => void;
+  selectedBudgetIndex: number;
+  onChangeBudgetIndex: (index: number) => void;
 }
 
 export default function StepFinalize({
@@ -68,6 +70,8 @@ export default function StepFinalize({
   onChangeReferenceLink,
   moodboardUrls,
   onChangeMoodboardUrls,
+  selectedBudgetIndex,
+  onChangeBudgetIndex,
 }: StepFinalizeProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -128,7 +132,7 @@ export default function StepFinalize({
           جزئیات نهایی درخواست
         </h2>
         <p className="text-xs sm:text-sm text-jar-muted leading-relaxed">
-          خلاصه پروژه را تأیید کنید؛ قیمت نهایی بعد از انتخاب متخصص مشخص می‌شود.
+          خلاصه پروژه را تأیید کنید و بودجه پیشنهادی را با اسلایدر تنظیم کنید.
         </p>
       </div>
 
@@ -162,21 +166,12 @@ export default function StepFinalize({
         </div>
       </div>
 
-      {/* Pricing note — no numbers */}
-      <div className="rounded-2xl border border-jar-border bg-jar-canvas/80 px-3.5 py-3 flex gap-3 items-start">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-jar-surface border border-jar-border">
-          <Coins className="h-4 w-4 text-jar-primary" />
-        </div>
-        <div className="min-w-0 space-y-0.5">
-          <p className="text-sm font-black text-jar-primary">
-            مبلغ پروژه + هزینه‌های جانبی
-          </p>
-          <p className="text-xs text-jar-muted leading-relaxed">
-            در این مرحله مبلغی پرداخت نمی‌شود. متخصص منتخب قیمت نهایی را بررسی و اعلام می‌کند؛
-            پرداخت پس از توافق انجام می‌شود.
-          </p>
-        </div>
-      </div>
+      {/* Budget slider — rates from lib/pricing/budgetStops (dashboard-ready) */}
+      <OrderBudgetAdjuster
+        selectedIndex={selectedBudgetIndex}
+        onSelectIndex={onChangeBudgetIndex}
+        durationHours={durationHours}
+      />
 
       {/* Name */}
       <div className="space-y-1.5">

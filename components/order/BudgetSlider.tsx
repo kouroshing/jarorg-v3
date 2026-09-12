@@ -2,78 +2,18 @@
 
 import React, { useMemo, useRef, useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { Sparkles, CheckCircle2, Award, Zap, TrendingUp, Clock, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { Sparkles, Award, Info, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { formatPrice, formatShortPrice } from "@/lib/format/price";
+import {
+  type BudgetStop,
+  getBudgetStops,
+} from "@/lib/pricing/budgetStops";
 
 export { formatPrice, formatShortPrice };
+export type { BudgetStop };
 
-export interface BudgetStop {
-  index: number;
-  rate: number;
-  shortLabel: string;
-  level: "low" | "golden" | "high";
-  hint: string;
-  badge: string;
-}
-
-export const BUDGET_STOPS: BudgetStop[] = [
-  {
-    index: 0,
-    rate: 900000,
-    shortLabel: "۹۰۰ هزار",
-    level: "low",
-    hint: "مناسب کارهای اقتصادی با موبایل/دوربین پایه - داوطلب محدود",
-    badge: "پایه / دانشجویی",
-  },
-  {
-    index: 1,
-    rate: 1800000,
-    shortLabel: "۱.۸ م",
-    level: "low",
-    hint: "مناسب کارهای اقتصادی با موبایل/دوربین پایه - داوطلب محدود",
-    badge: "اقتصادی",
-  },
-  {
-    index: 2,
-    rate: 2700000,
-    shortLabel: "۲.۷ م",
-    level: "low",
-    hint: "مناسب کارهای اقتصادی با موبایل/دوربین پایه - داوطلب محدود",
-    badge: "نیمه‌حرفه‌ای",
-  },
-  {
-    index: 3,
-    rate: 3600000,
-    shortLabel: "۳.۶ م",
-    level: "golden",
-    hint: "پیشنهادی جار - بیشترین تعداد عکاس داوطلب و کیفیت تضمینی",
-    badge: "پیشنهادی جار",
-  },
-  {
-    index: 4,
-    rate: 6500000,
-    shortLabel: "۶.۵ م",
-    level: "high",
-    hint: "کیفیت سینمایی و تجاری - اولویت اول متخصصین برتر",
-    badge: "حرفه‌ای و استودیویی",
-  },
-  {
-    index: 5,
-    rate: 11000000,
-    shortLabel: "۱۱ م",
-    level: "high",
-    hint: "کیفیت سینمایی و تجاری - اولویت اول متخصصین برتر",
-    badge: "تبلیغاتی و پریمیوم",
-  },
-  {
-    index: 6,
-    rate: 18000000,
-    shortLabel: "۱۸ م",
-    level: "high",
-    hint: "کیفیت سینمایی و تجاری - اولویت اول متخصصین برتر",
-    badge: "سینمایی و کارگردانی VIP",
-  },
-];
+/** @deprecated Prefer getBudgetStops() — kept for existing imports. */
+export const BUDGET_STOPS: BudgetStop[] = getBudgetStops();
 
 interface BudgetSliderProps {
   selectedIndex: number;
@@ -88,7 +28,8 @@ export default function BudgetSlider({
   durationHours,
   onChangeDuration,
 }: BudgetSliderProps) {
-  const currentStop = BUDGET_STOPS[selectedIndex] || BUDGET_STOPS[3];
+  const stops = getBudgetStops();
+  const currentStop = stops[selectedIndex] || stops[3];
 
   const totalEstimatedPrice = useMemo(() => {
     return currentStop.rate * durationHours;
@@ -116,7 +57,7 @@ export default function BudgetSlider({
     const fraction = getFractionFromClientX(e.clientX);
     const percent = fraction * 100;
     setDragPercent(percent);
-    const targetIndex = Math.round(fraction * (BUDGET_STOPS.length - 1));
+    const targetIndex = Math.round(fraction * (stops.length - 1));
     if (targetIndex !== selectedIndex) {
       onSelectIndex(targetIndex);
     }
@@ -127,7 +68,7 @@ export default function BudgetSlider({
       const fraction = getFractionFromClientX(e.clientX);
       const percent = fraction * 100;
       setDragPercent(percent);
-      const targetIndex = Math.round(fraction * (BUDGET_STOPS.length - 1));
+      const targetIndex = Math.round(fraction * (stops.length - 1));
       if (targetIndex !== selectedIndex) {
         onSelectIndex(targetIndex);
       }
@@ -224,14 +165,14 @@ export default function BudgetSlider({
         {/* Top Track Label Row */}
         <div className="flex items-center justify-between text-xs font-bold text-[#66605B]">
           <span className="text-[#141413] font-black">
-            پایه ({formatShortPrice(BUDGET_STOPS[0].rate * durationHours)} ت)
+            پایه ({formatShortPrice(stops[0].rate * durationHours)} ت)
           </span>
           <span className="inline-flex items-center gap-1 text-[#CC785C] font-black text-[11px] bg-[#CC785C]/10 border border-[#CC785C]/20 px-2.5 py-0.5 rounded-full">
             <Sparkles className="h-3 w-3 text-[#CC785C]" />
-            <span>پیشنهادی جار ({formatShortPrice(BUDGET_STOPS[3].rate * durationHours)})</span>
+            <span>پیشنهادی جار ({formatShortPrice(stops[3].rate * durationHours)})</span>
           </span>
           <span className="text-[#141413] font-black">
-            VIP ({formatShortPrice(BUDGET_STOPS[6].rate * durationHours)})
+            VIP ({formatShortPrice(stops[6].rate * durationHours)})
           </span>
         </div>
 
@@ -271,7 +212,7 @@ export default function BudgetSlider({
                   width: `${
                     dragPercent !== null
                       ? dragPercent
-                      : (selectedIndex / (BUDGET_STOPS.length - 1)) * 100
+                      : (selectedIndex / (stops.length - 1)) * 100
                   }%`,
                 }}
               />
@@ -279,10 +220,10 @@ export default function BudgetSlider({
 
             {/* 7 Station Dots along track */}
             <div className="absolute inset-0 pointer-events-none">
-              {BUDGET_STOPS.map((stop) => {
+              {stops.map((stop) => {
                 const isPassedOrActive = stop.index <= selectedIndex;
                 const isCurrent = stop.index === selectedIndex;
-                const posPercent = (stop.index / (BUDGET_STOPS.length - 1)) * 100;
+                const posPercent = (stop.index / (stops.length - 1)) * 100;
 
                 return (
                   <div
@@ -320,14 +261,14 @@ export default function BudgetSlider({
                   right: `${
                     dragPercent !== null
                       ? dragPercent
-                      : (selectedIndex / (BUDGET_STOPS.length - 1)) * 100
+                      : (selectedIndex / (stops.length - 1)) * 100
                   }%`,
                 }}
                 animate={{
                   right: `${
                     dragPercent !== null
                       ? dragPercent
-                      : (selectedIndex / (BUDGET_STOPS.length - 1)) * 100
+                      : (selectedIndex / (stops.length - 1)) * 100
                   }%`,
                 }}
                 transition={
@@ -351,9 +292,9 @@ export default function BudgetSlider({
         {/* Tick Labels Below Track - Exactly Centered Under Each Dot */}
         <div className="relative h-5 px-5 sm:px-6 pt-1">
           <div className="relative w-full h-full">
-            {BUDGET_STOPS.map((stop) => {
+            {stops.map((stop) => {
               const isSelected = selectedIndex === stop.index;
-              const posPercent = (stop.index / (BUDGET_STOPS.length - 1)) * 100;
+              const posPercent = (stop.index / (stops.length - 1)) * 100;
 
               return (
                 <div

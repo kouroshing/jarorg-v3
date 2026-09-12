@@ -2,366 +2,278 @@
 
 import React from "react";
 import Link from "next/link";
-import { AreaChart, Badge } from "@tremor/react";
 import {
   ExclamationTriangleIcon,
-  CalendarDaysIcon,
-  PhotoIcon,
-  AcademicCapIcon,
-  ArrowTopRightOnSquareIcon,
-  ArrowPathIcon,
-  CheckCircleIcon,
-  ClockIcon,
   UserPlusIcon,
+  ArrowTopRightOnSquareIcon,
+  BanknotesIcon,
+  MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
+import AdminOrderTriageQueue, {
+  type TriageOrderRow,
+} from "@/components/admin/AdminOrderTriageQueue";
+import AdminWithdrawalQueue, {
+  type WithdrawalRow,
+} from "@/components/admin/AdminWithdrawalQueue";
+import { formatJalaliDate } from "@/lib/date/jalali";
+import type { AdminPermission } from "@/lib/auth/adminPermissions";
 
 export interface DashboardData {
-  ordersNeedingActionCount: number;
-  ordersTodayCount: number;
-  pendingPortfolioCount: number;
+  pendingReviewCount: number;
+  matchingStuckCount: number;
+  awaitingPaymentCount: number;
   pendingSpecialistCount: number;
-  jaramoozMonthlyRevenue: number;
-  chartData: Array<{
-    date: string;
-    "تعداد سفارش‌ها": number;
-  }>;
-  recentPendingOrders: Array<{
-    id: string;
-    categoryTitle: string | null;
-    status: string;
-    totalEstimatedPrice: number;
-    createdAt: string;
-    contactName: string | null;
-    contactPhone: string | null;
-  }>;
+  pendingPortfolioCount: number;
+  pendingWithdrawalCount: number;
+  triageOrders: TriageOrderRow[];
+  matchingOrders: TriageOrderRow[];
+  withdrawals: WithdrawalRow[];
 }
 
-export default function AdminDashboard({ data }: { data: DashboardData }) {
-  const {
-    ordersNeedingActionCount,
-    ordersTodayCount,
-    pendingPortfolioCount,
-    pendingSpecialistCount,
-    jaramoozMonthlyRevenue,
-    chartData,
-    recentPendingOrders,
-  } = data;
+export default function AdminDashboard({
+  data,
+  permissions = [],
+  isSuper = false,
+}: {
+  data: DashboardData;
+  permissions?: AdminPermission[];
+  isSuper?: boolean;
+}) {
+  const allowed = new Set(permissions);
+  const can = (p: AdminPermission) => isSuper || allowed.has(p);
+  const canOrders = can("orders_manage");
+  const canReview = can("specialists_review");
+  const canFinance = can("finance_manage");
+  const canStats = can("stats_view");
 
   return (
-    <div className="w-full max-w-full space-y-6 px-3 sm:px-6 lg:px-8 py-5 pb-16 overflow-hidden text-right">
-      {/* Header Bar */}
-      <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
+    <div className="w-full max-w-full space-y-6 px-3 sm:px-6 lg:px-8 py-5 pb-16 overflow-hidden text-right" dir="rtl">
+      <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
-            <span>مرکز فرماندهی و داشبورد جار</span>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-              زنده و برخط
-            </span>
+          <h1 className="text-lg sm:text-2xl font-black text-slate-900">
+            کار امروز ادمین
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            خلاصه وضعیت سفارش‌ها، بررسی‌های معوق و شاخص‌های کلیدی پلتفرم
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
+            فقط صف‌های فوری. آمار و نمودار در بخش جداست.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/admin/Order"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
-          >
-            <span>سفارش‌ها</span>
-            <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-          </Link>
-          <Link
-            href="/admin/PortfolioItem"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
-          >
-            <span>بررسی نمونه‌کارها</span>
-            <PhotoIcon className="w-3.5 h-3.5" />
-          </Link>
+        {canReview && (
           <Link
             href="/admin/review"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl"
           >
-            <span>بررسی متخصصان</span>
-            {pendingSpecialistCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-white/25 text-[10px] font-black">
-                {pendingSpecialistCount.toLocaleString("fa-IR")}
+            <UserPlusIcon className="w-4 h-4" />
+            صف بررسی متخصص
+            {data.pendingSpecialistCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px]">
+                {data.pendingSpecialistCount.toLocaleString("fa-IR")}
               </span>
             )}
-            <UserPlusIcon className="w-3.5 h-3.5" />
           </Link>
-        </div>
+        )}
       </div>
 
-      {/* A specialist sitting in PENDING_REVIEW cannot see a single project, so
-          this queue is the one thing on the dashboard that blocks people. */}
-      {pendingSpecialistCount > 0 && (
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {canOrders && (
+          <Kpi
+            href="#triage"
+            label="تایید سفارش"
+            value={data.pendingReviewCount}
+            tone="rose"
+            hint="PENDING_REVIEW"
+          />
+        )}
+        {canReview && (
+          <Kpi
+            href="/admin/review"
+            label="بررسی متخصص"
+            value={data.pendingSpecialistCount}
+            tone="amber"
+            hint="پرونده معوق"
+          />
+        )}
+        {canFinance && (
+          <Kpi
+            href="#withdrawals"
+            label="تسویه معلق"
+            value={data.pendingWithdrawalCount}
+            tone="emerald"
+            hint="کیف پول"
+          />
+        )}
+        {canOrders && (
+          <Kpi
+            href="#matching"
+            label="تطبیق گیرکرده"
+            value={data.matchingStuckCount}
+            tone="slate"
+            hint="بدون متقاضی / قدیمی"
+          />
+        )}
+        {canOrders && (
+          <Kpi
+            href="/admin/Order"
+            label="در انتظار پرداخت"
+            value={data.awaitingPaymentCount}
+            tone="indigo"
+            hint="AWAITING_PAYMENT"
+          />
+        )}
+        {canReview && (
+          <Kpi
+            href="/admin/review"
+            label="نمونه‌کار معوق"
+            value={data.pendingPortfolioCount}
+            tone="purple"
+            hint="از صف بررسی"
+          />
+        )}
+      </div>
+
+      {canReview && data.pendingSpecialistCount > 0 && (
         <Link
           href="/admin/review"
-          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-4 hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 hover:bg-amber-100 transition-colors"
         >
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-700 flex items-center justify-center shrink-0">
               <UserPlusIcon className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                {pendingSpecialistCount.toLocaleString("fa-IR")} متخصص در انتظار تایید شما هستند
+              <p className="text-sm font-bold text-amber-900">
+                {data.pendingSpecialistCount.toLocaleString("fa-IR")} متخصص در انتظار تایید
               </p>
-              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">
-                تا زمانی که پرونده تایید نشود، متخصص به کارتابل پروژه‌ها دسترسی ندارد.
+              <p className="text-xs text-amber-800/80 mt-0.5">
+                تا تایید نشوند به کارتابل پروژه دسترسی ندارند.
               </p>
             </div>
           </div>
           <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white shrink-0">
-            <span>ورود به صف بررسی</span>
+            ورود به صف بررسی
             <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
           </span>
         </Link>
       )}
 
-      {/* Top Metric Cards: 1 Hero Card + 3 Secondary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
-        {/* HERO CARD: Orders Needing Action */}
-        <div className="lg:col-span-1 md:col-span-2 relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 via-rose-600 to-red-700 text-white p-4 sm:p-6 shadow-md flex flex-col justify-between w-full min-w-0">
-          <div className="absolute -left-6 -bottom-6 w-32 h-32 bg-white/10 rounded-full blur-xl pointer-events-none" />
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-rose-100 flex items-center gap-1.5">
-                <ExclamationTriangleIcon className="w-4 h-4 text-amber-300 animate-pulse" />
-                اولویت بحرانی
-              </span>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white/20 text-white backdrop-blur-xs">
-                تاخیر بالای ۲۴ ساعت یا بدون متخصص
-              </span>
-            </div>
-            <h3 className="text-base sm:text-lg font-bold text-rose-50 mt-2">
-              سفارش‌های در انتظار اقدام
-            </h3>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-4xl sm:text-5xl font-black tracking-tight">
-                {ordersNeedingActionCount.toLocaleString("fa-IR")}
-              </span>
-              <span className="text-sm font-medium text-rose-100">سفارش معوق</span>
-            </div>
-            <p className="text-xs text-rose-100/90 mt-2 leading-relaxed">
-              سفارش‌هایی که در وضعیت جستجو یا با پیشنهاد قرار دارند و نیازمند پیگیری یا انتساب قطعی هستند.
-            </p>
-          </div>
-          <div className="mt-5 pt-4 border-t border-white/15">
-            <Link
-              href="/admin/Order"
-              className="inline-flex items-center justify-center w-full gap-2 px-4 py-2 text-xs font-bold bg-white text-rose-700 hover:bg-rose-50 rounded-xl transition shadow-xs"
-            >
-              <span>مشاهده و تعیین تکلیف سفارش‌ها</span>
-              <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </div>
-
-        {/* SECONDARY CARD 1: Orders Today */}
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs flex flex-col justify-between w-full min-w-0">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">سفارش‌های امروز</span>
-              <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center">
-                <CalendarDaysIcon className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white">
-                {ordersTodayCount.toLocaleString("fa-IR")}
-              </span>
-              <span className="text-xs font-bold text-slate-400">ثبت‌شده از بامداد</span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              پروژه‌ها و فرم‌های جدید عکاسی و فیلم‌برداری ثبت‌شده توسط مشتریان
-            </p>
-          </div>
-          <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400">
-              <ClockIcon className="w-3.5 h-3.5" />
-              ورودی ۲۴ ساعت گذشته
-            </span>
-          </div>
-        </div>
-
-        {/* SECONDARY CARD 2: Pending Portfolio Reviews */}
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">بررسی نمونه‌کارها</span>
-              <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center">
-                <PhotoIcon className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white">
-                {pendingPortfolioCount.toLocaleString("fa-IR")}
-              </span>
-              <span className="text-xs font-bold text-purple-600 bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
-                در انتظار بررسی
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              نمونه‌کارهای ارسالی عکاسان که برای انتشار در پروفایل نیازمند تایید یا رد کیفی هستند
-            </p>
-          </div>
-          <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <Link
-              href="/admin/PortfolioItem"
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1"
-            >
-              <span>ورود به صف تایید آثار</span>
-              <span>←</span>
-            </Link>
-          </div>
-        </div>
-
-        {/* SECONDARY CARD 3: Monthly Jaramooz Revenue */}
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">درآمد ماهانه آکادمی</span>
-              <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center">
-                <AcademicCapIcon className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-1.5">
-              <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-                {jaramoozMonthlyRevenue.toLocaleString("fa-IR")}
-              </span>
-              <span className="text-xs font-bold text-amber-600">تومان</span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              مجموع مبالغ واریزشده موفق بابت فروش دوره‌های آموزشی پلتفرم جارآموز در ۳۰ روز اخیر
-            </p>
-          </div>
-          <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <Link
-              href="/admin/Purchase"
-              className="text-xs font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1"
-            >
-              <span>گزارش تراکنش‌های خرید</span>
-              <span>←</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* 30-Day Orders Trend Chart (Tremor AreaChart) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xs w-full max-w-full overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-              روند ثبت سفارش‌های پلتفرم در ۳۰ روز اخیر
+      {canOrders && (
+        <section id="triage" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <ExclamationTriangleIcon className="w-5 h-5 text-rose-500" />
+              میز کار تایید سفارش
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              توزیع زمانی پروژه‌های ثبت‌شده توسط مشتریان به تفکیک روز
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-              <span className="w-2 h-2 rounded-full bg-indigo-500" />
-              تعداد سفارش‌ها
+            <span className="text-[11px] font-bold text-slate-400">
+              {data.triageOrders.length.toLocaleString("fa-IR")} مورد
             </span>
           </div>
-        </div>
+          <AdminOrderTriageQueue orders={data.triageOrders} />
+        </section>
+      )}
 
-        {chartData.length > 0 ? (
-          <div className="mt-4 pt-2 w-full max-w-full overflow-x-auto min-w-0 pb-2" dir="ltr">
-            <div className="min-w-[500px] sm:min-w-full">
-              <AreaChart
-                className="h-72 w-full"
-                data={chartData}
-                index="date"
-                categories={["تعداد سفارش‌ها"]}
-                colors={["indigo"]}
-                showLegend={false}
-                showGridLines={true}
-                showAnimation={true}
-                curveType="monotone"
-                yAxisWidth={35}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="h-48 flex items-center justify-center text-xs text-slate-400">
-            داده‌ای برای نمایش در ۳۰ روز اخیر یافت نشد.
-          </div>
-        )}
-      </div>
-
-      {/* Recent Orders Table Snapshot */}
-      {recentPendingOrders.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xs w-full max-w-full overflow-hidden">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-black text-slate-900 dark:text-white">
-                آخرین سفارش‌های نیازمند اقدام فوری
-              </h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
-                {recentPendingOrders.length.toLocaleString("fa-IR")} مورد
-              </span>
-            </div>
+      {canFinance && (
+        <section id="withdrawals" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <BanknotesIcon className="w-5 h-5 text-emerald-600" />
+              صف تسویه کیف پول
+            </h2>
             <Link
-              href="/admin/Order"
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+              href="/admin/WithdrawalRequest"
+              className="text-[11px] font-bold text-indigo-600"
             >
-              مشاهده جدول کامل
+              همه رکوردها
             </Link>
           </div>
-          <div className="w-full max-w-full overflow-x-auto">
-            <table className="min-w-[620px] w-full text-right text-xs">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold">
-                  <th className="py-2.5 px-3">شناسه سفارش</th>
-                  <th className="py-2.5 px-3">شاخه‌ی خدمات</th>
-                  <th className="py-2.5 px-3">وضعیت فعلی</th>
-                  <th className="py-2.5 px-3">مبلغ برآورد (تومان)</th>
-                  <th className="py-2.5 px-3">کاربر / تماس</th>
-                  <th className="py-2.5 px-3">تاریخ ثبت</th>
-                  <th className="py-2.5 px-3 text-center">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {recentPendingOrders.map((ord) => (
-                  <tr key={ord.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3 px-3 font-mono text-slate-500">
-                      {ord.id.slice(0, 8)}...
-                    </td>
-                    <td className="py-3 px-3 text-slate-900 dark:text-white font-bold">
-                      {ord.categoryTitle || "پروژه عکاسی"}
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
-                        {ord.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-slate-700 dark:text-slate-300">
-                      {ord.totalEstimatedPrice.toLocaleString("fa-IR")} تومان
-                    </td>
-                    <td className="py-3 px-3 text-slate-600 dark:text-slate-400">
-                      {ord.contactName || "—"} ({ord.contactPhone || "—"})
-                    </td>
-                    <td className="py-3 px-3 text-slate-500">
-                      {new Date(ord.createdAt).toLocaleDateString("fa-IR")}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <Link
-                        href={`/admin/Order/${ord.id}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950 dark:text-indigo-300 transition-colors"
-                      >
-                        <span>تعیین متخصص / ویرایش</span>
-                        <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <AdminWithdrawalQueue requests={data.withdrawals} />
+        </section>
+      )}
+
+      {canOrders && (
+        <section id="matching" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <MagnifyingGlassIcon className="w-5 h-5 text-slate-500" />
+              تطبیق نیازمند پیگیری
+            </h2>
+            <span className="text-[11px] font-bold text-slate-400">
+              {data.matchingOrders.length.toLocaleString("fa-IR")} مورد
+            </span>
           </div>
+          {data.matchingOrders.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-xs text-slate-500">
+              سفارش گیرکرده‌ای در تطبیق نیست.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {data.matchingOrders.map((ord) => (
+                <Link
+                  key={ord.id}
+                  href={`/admin/Order/${ord.id}`}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:bg-slate-50"
+                >
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">
+                      {ord.categoryTitle || "پروژه"}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {(ord.applicantCount ?? 0).toLocaleString("fa-IR")} متقاضی ·{" "}
+                      {formatJalaliDate(new Date(ord.createdAt))}
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-bold text-indigo-600">باز کردن ←</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {canStats && (
+        <div className="pt-2">
+          <Link
+            href="/admin/stats"
+            className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
+          >
+            مشاهده آمار و گزارش‌ها ←
+          </Link>
         </div>
       )}
     </div>
+  );
+}
+
+function Kpi({
+  href,
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  href: string;
+  label: string;
+  value: number;
+  tone: "rose" | "amber" | "emerald" | "slate" | "indigo" | "purple";
+  hint: string;
+}) {
+  const tones: Record<string, string> = {
+    rose: "border-rose-200 bg-rose-50 text-rose-900",
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    slate: "border-slate-200 bg-slate-50 text-slate-900",
+    indigo: "border-indigo-200 bg-indigo-50 text-indigo-900",
+    purple: "border-purple-200 bg-purple-50 text-purple-900",
+  };
+  const Comp = href.startsWith("#") ? "a" : Link;
+  return (
+    <Comp
+      href={href}
+      className={`rounded-2xl border p-3 shadow-xs ${tones[tone]}`}
+    >
+      <p className="text-[10px] font-bold opacity-70">{label}</p>
+      <p className="text-2xl font-black mt-1 tabular-nums">
+        {value.toLocaleString("fa-IR")}
+      </p>
+      <p className="text-[10px] font-medium opacity-60 mt-0.5">{hint}</p>
+    </Comp>
   );
 }

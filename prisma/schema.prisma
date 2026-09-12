@@ -60,19 +60,6 @@ model User {
 }
 
 /// Featured specialist shown on the site and assignable to projects.
-model Expert {
-  id          String   @id @default(uuid())
-  name        String
-  imageUrl    String   @map("image_url")
-  description String
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  projects Project[]
-
-  @@map("experts")
-}
-
 /// One-time login code sent via SMS (upserted per phone).
 model VerificationCode {
   phone     String   @id
@@ -116,9 +103,6 @@ model Project {
 
   userId String? @map("user_id")
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  expertId String? @map("expert_id")
-  expert   Expert? @relation(fields: [expertId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@map("projects")
@@ -527,6 +511,9 @@ model SpecialistProfile {
   workArea           String? @map("work_area")
   bio                String?
   equipmentSummary   String? @map("equipment_summary")
+  /// When true, specialist works primarily with phones (موبایل‌گرافر) and
+  /// equipment UI switches to the mobile handset catalog.
+  isMobileGrapher    Boolean @default(false) @map("is_mobile_grapher")
   selectedCategories String? @map("selected_categories") // JSON string of selected category slugs
   /// Public face shown to clients on applicant cards.
   avatarUrl          String? @map("avatar_url")
@@ -536,6 +523,12 @@ model SpecialistProfile {
   baseLat     Float?  @map("base_lat")
   baseLng     Float?  @map("base_lng")
   baseAddress String? @map("base_address")
+
+  /// Fixed studio / shoot space — registered on a separate map from travel base.
+  studioName    String? @map("studio_name")
+  studioLat     Float?  @map("studio_lat")
+  studioLng     Float?  @map("studio_lng")
+  studioAddress String? @map("studio_address")
 
   agreedToTerms Boolean   @default(false) @map("agreed_to_terms")
   termsAgreedAt DateTime? @map("terms_agreed_at")
@@ -598,4 +591,25 @@ model AuditLog {
   @@index([targetModel, targetId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// Explicit staff admins with scoped permissions.
+/// Super-admin (ADMIN_MOBILE / hardcoded) always bypasses this table.
+model AdminStaff {
+  id             String   @id @default(uuid())
+  /// Normalized Iran mobile digits (98…).
+  phone          String   @unique
+  label          String?
+  /// OPS | FINANCE | SUPPORT | CUSTOM — never trust client strings blindly.
+  roleKey        String   @default("CUSTOM") @map("role_key")
+  /// JSON string[] of allowlisted permission keys (server-expanded).
+  permissions    String   @default("[]")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdByPhone String?  @map("created_by_phone")
+  note           String?
+
+  @@index([isActive])
+  @@map("admin_staff")
 }

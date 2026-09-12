@@ -24,6 +24,7 @@ export const ONBOARDING_STEPS = [
   { id: "profile", href: "/specialist/onboarding/profile", label: "اطلاعات پایه", short: "پایه" },
   { id: "categories", href: "/specialist/onboarding/categories", label: "دسته‌بندی‌ها", short: "دسته" },
   { id: "portfolio", href: "/specialist/onboarding/portfolio", label: "نمونه‌کارها", short: "نمونه" },
+  { id: "subscription", href: "/specialist/onboarding/subscription", label: "اشتراک", short: "اشتراک" },
   { id: "details", href: "/specialist/onboarding/details", label: "محل فعالیت", short: "محل" },
   { id: "terms", href: "/specialist/onboarding/terms", label: "تعهدنامه", short: "تعهد" },
   { id: "review", href: SPECIALIST_REVIEW_PATH, label: "بررسی ادمین", short: "بررسی" },
@@ -46,6 +47,11 @@ export type EligibilityInput = {
   portfolioItems: PortfolioItemLike[];
   /** JSON string of category slugs, as stored on SpecialistProfile. */
   selectedCategories?: string | null;
+  /**
+   * When provided, gates the subscription onboarding step.
+   * Omit (or true) in admin paths that should not redirect to plan selection.
+   */
+  hasPlan?: boolean | null;
 };
 
 export type EligibilityResult = {
@@ -59,6 +65,7 @@ export type EligibilityResult = {
   hasCity: boolean;
   hasBaseLocation: boolean;
   hasAgreedToTerms: boolean;
+  hasPlan: boolean;
   /** Categories they offer that do not have enough uploaded work yet. */
   incompleteCategories: { slug: string; count: number }[];
   /** Categories with enough uploaded work — what the admin will look at. */
@@ -95,8 +102,7 @@ function countByCategory(
 const isPendingOrApproved = (item: PortfolioItemLike) => item.reviewStatus !== "REJECTED";
 
 /** Only vetted work decides what a specialist can be shown for. */
-const isApproved = (item: PortfolioItemLike) =>
-  !item.reviewStatus || item.reviewStatus === "APPROVED";
+const isApproved = (item: PortfolioItemLike) => item.reviewStatus === "APPROVED";
 
 export function evaluateEligibility(input: EligibilityInput): EligibilityResult {
   const uploaded = countByCategory(input.portfolioItems, isPendingOrApproved);
@@ -125,12 +131,15 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     Number.isFinite(input.baseLng) &&
     !(input.baseLat === 0 && input.baseLng === 0);
   const hasAgreedToTerms = input.agreedToTerms === true;
+  // Admin/review callers omit hasPlan → treat as satisfied so activation is unchanged.
+  const hasPlan = input.hasPlan !== false;
 
   const isSubmittable =
     hasDisplayName &&
     hasAvatar &&
     hasCategories &&
     submittableCategories.length > 0 &&
+    hasPlan &&
     hasCity &&
     hasBaseLocation &&
     hasAgreedToTerms;
@@ -147,6 +156,9 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
   } else if (submittableCategories.length === 0) {
     nextStep = "/specialist/onboarding/portfolio";
     currentStepId = "portfolio";
+  } else if (!hasPlan) {
+    nextStep = "/specialist/onboarding/subscription";
+    currentStepId = "subscription";
   } else if (!hasCity || !hasBaseLocation) {
     nextStep = "/specialist/onboarding/details";
     currentStepId = "details";
@@ -164,6 +176,7 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     hasCity,
     hasBaseLocation,
     hasAgreedToTerms,
+    hasPlan,
     incompleteCategories,
     submittableCategories,
     qualifiedCategories,

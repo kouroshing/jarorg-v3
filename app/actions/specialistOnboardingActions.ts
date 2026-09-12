@@ -1,9 +1,11 @@
 "use server";
 
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { promises as fs } from "fs";
+import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
+import { resolveUploadDiskPath } from "@/lib/storage/uploads";
 import {
   evaluateEligibility,
   specialistLandingPath,
@@ -12,6 +14,10 @@ import {
 import { notifyAdminsOfSpecialistSubmission, missingRequirementLabels } from "@/lib/specialists/review";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import { normalizeJalaliBirthDate, verifySpecialistKycWithZohal } from "@/lib/kyc/zohal";
+import {
+  parseEquipmentTags,
+  serializeEquipmentTags,
+} from "@/lib/equipment/catalog";
 
 const profileBasicsSchema = z.object({
   displayName: z.string().trim().min(2, "نام الزامی است."),
@@ -23,6 +29,7 @@ export async function saveSpecialistProfileBasicsAction(input: {
   avatarUrl: string;
 }): Promise<{ success: boolean; error?: string; redirect?: string }> {
   try {
+    await ensurePrismaSchemaReady();
     const session = await getSession();
     if (!session?.userId) {
       return { success: false, error: "لطفاً ابتدا وارد شوید." };
@@ -37,11 +44,56 @@ export async function saveSpecialistProfileBasicsAction(input: {
       return { success: false, error: "نام نباید شامل عدد باشد." };
     }
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { role: true },
+    });
+    if (!user) {
+      return { success: false, error: "کاربر یافت نشد." };
+    }
+
+    const avatarUrl = parsed.data.avatarUrl;
+    const avatarPrefix = `/uploads/avatars/avatar_${session.userId.slice(0, 8)}_`;
+    if (!avatarUrl.startsWith(avatarPrefix)) {
+      return {
+        success: false,
+        error: "عکس پروفایل معتبر نیست. لطفاً دوباره آپلود کنید.",
+      };
+    }
+
+    // Reject path tricks and non-image extensions
+    if (
+      avatarUrl.includes("..") ||
+      avatarUrl.includes("%") ||
+      !/\.(jpe?g|png|webp)$/i.test(avatarUrl)
+    ) {
+      return {
+        success: false,
+        error: "فرمت عکس پروفایل نامعتبر است. فقط JPG، PNG یا WEBP.",
+      };
+    }
+
+    const diskPath = resolveUploadDiskPath(avatarUrl);
+    if (!diskPath) {
+      return {
+        success: false,
+        error: "مسیر عکس پروفایل نامعتبر است. دوباره آپلود کنید.",
+      };
+    }
+    try {
+      await fs.access(diskPath);
+    } catch {
+      return {
+        success: false,
+        error: "فایل عکس روی سرور پیدا نشد. لطفاً دوباره آپلود کنید.",
+      };
+    }
+
     await prisma.user.update({
       where: { id: session.userId },
       data: {
         displayName: parsed.data.displayName,
-        role: "SPECIALIST",
+        role: user.role === "USER" ? "SPECIALIST" : user.role,
       },
     });
 
@@ -49,11 +101,11 @@ export async function saveSpecialistProfileBasicsAction(input: {
       where: { userId: session.userId },
       create: {
         userId: session.userId,
-        avatarUrl: parsed.data.avatarUrl,
+        avatarUrl,
         status: "INCOMPLETE",
       },
       update: {
-        avatarUrl: parsed.data.avatarUrl,
+        avatarUrl,
       },
     });
 
@@ -67,14 +119,15 @@ export async function saveSpecialistProfileBasicsAction(input: {
   }
 }
 
+
 const detailsSchema = z.object({
   city: z.string().trim().min(2, "نام شهر الزامی است."),
   baseLat: z.number().min(24).max(40, "موقعیت باید داخل ایران باشد."),
   baseLng: z.number().min(43).max(64, "موقعیت باید داخل ایران باشد."),
   baseAddress: z.string().trim().max(300).optional().nullable(),
-  workArea: z.string().trim().max(300).optional().nullable(),
-  bio: z.string().trim().max(1000).optional().nullable(),
-  equipmentSummary: z.string().trim().max(500).optional().nullable(),
+  workArea: z.string().trim().min(1, "محدوده کاری الزامی است.").max(300),
+  equipmentSummary: z.string().trim().min(1, "لیست تجهیزات الزامی است.").max(4000),
+  isMobileGrapher: z.boolean().optional(),
   returnTo: z.string().optional(),
 });
 
@@ -86,6 +139,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
   redirect?: string;
 }> {
   try {
+    await ensurePrismaSchemaReady();
     const session = await getSession();
     if (!session || !session.userId) {
       return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
@@ -99,13 +153,23 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
     const {
       city,
       workArea,
-      bio,
-      equipmentSummary,
+      equipmentSummary: equipmentRaw,
+      isMobileGrapher = false,
       baseLat,
       baseLng,
       baseAddress,
       returnTo,
     } = parsed.data;
+
+    const equipmentSummary = serializeEquipmentTags(parseEquipmentTags(equipmentRaw));
+    if (!equipmentSummary) {
+      return {
+        success: false,
+        error: isMobileGrapher
+          ? "مدل گوشی و تجهیزات موبایل‌گرافی الزامی است."
+          : "لیست تجهیزات الزامی است. تمام تجهیزات اصلی خود را اضافه کنید.",
+      };
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
@@ -135,6 +199,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       displayName: user.displayName,
       portfolioItems: user.specialistProfile?.portfolioItems || [],
       selectedCategories: user.specialistProfile?.selectedCategories,
+      hasPlan: Boolean(user.planId),
     });
 
     const currentStatus = user.specialistProfile?.status;
@@ -151,8 +216,8 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
         userId: session.userId,
         city,
         workArea: workArea || null,
-        bio: bio || null,
-        equipmentSummary: equipmentSummary || null,
+        equipmentSummary,
+        isMobileGrapher,
         baseLat,
         baseLng,
         baseAddress: baseAddress || null,
@@ -162,8 +227,8 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       update: {
         city,
         workArea: workArea || null,
-        bio: bio || null,
-        equipmentSummary: equipmentSummary || null,
+        equipmentSummary,
+        isMobileGrapher,
         baseLat,
         baseLng,
         baseAddress: baseAddress || null,
@@ -171,11 +236,22 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
       },
     });
 
+    const studioRow = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: { studioName: true, studioLat: true, studioLng: true },
+    });
+    const hasRealStudio = Boolean(
+      studioRow?.studioName &&
+        typeof studioRow.studioLat === "number" &&
+        typeof studioRow.studioLng === "number"
+    );
+
     await prisma.user.update({
       where: { id: session.userId },
       data: {
         city,
-        equipment: equipmentSummary || undefined,
+        equipment: equipmentSummary,
+        hasStudio: hasRealStudio,
         role: user.role === "USER" ? "SPECIALIST" : user.role,
       },
     });
@@ -250,6 +326,7 @@ export async function acceptSpecialistTermsAction(): Promise<{
       displayName: user.displayName,
       portfolioItems: profile.portfolioItems,
       selectedCategories: profile.selectedCategories,
+      hasPlan: Boolean(user.planId),
     });
 
     if (!eligibility.isSubmittable) {
@@ -523,16 +600,23 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   hasCategories?: boolean;
   hasDisplayName?: boolean;
   hasEligiblePortfolio?: boolean;
+  hasPlan?: boolean;
   maxPortfolioInCategory?: number;
   totalPortfolioItems?: number;
   city?: string | null;
   workArea?: string | null;
   bio?: string | null;
   equipmentSummary?: string | null;
+  isMobileGrapher?: boolean;
+  hasStudio?: boolean;
   agreedToTerms?: boolean;
   baseLat?: number | null;
   baseLng?: number | null;
   baseAddress?: string | null;
+  studioName?: string | null;
+  studioLat?: number | null;
+  studioLng?: number | null;
+  studioAddress?: string | null;
   avatarUrl?: string | null;
   displayName?: string | null;
   phoneDisplay?: string;
@@ -548,6 +632,8 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   if (!session || !session.userId) {
     return { isLoggedIn: false, nextStep: "/join" };
   }
+
+  await ensurePrismaSchemaReady();
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
@@ -595,6 +681,7 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     displayName: user.displayName,
     portfolioItems: items,
     selectedCategories: profile.selectedCategories,
+    hasPlan: Boolean(user.planId),
   });
 
   const countByCategory: Record<string, number> = {};
@@ -633,16 +720,27 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     hasCategories: eligibility.hasCategories,
     hasDisplayName: eligibility.hasDisplayName,
     hasEligiblePortfolio: eligibility.submittableCategories.length > 0,
+    hasPlan: eligibility.hasPlan,
     maxPortfolioInCategory,
     totalPortfolioItems: items.length,
     city: profile.city,
     workArea: profile.workArea,
     bio: profile.bio,
     equipmentSummary: profile.equipmentSummary,
+    isMobileGrapher: Boolean(profile.isMobileGrapher),
+    hasStudio: Boolean(
+      profile.studioName &&
+        typeof profile.studioLat === "number" &&
+        typeof profile.studioLng === "number"
+    ),
     agreedToTerms: profile.agreedToTerms,
     baseLat: profile.baseLat,
     baseLng: profile.baseLng,
     baseAddress: profile.baseAddress,
+    studioName: profile.studioName,
+    studioLat: profile.studioLat,
+    studioLng: profile.studioLng,
+    studioAddress: profile.studioAddress,
     avatarUrl: profile.avatarUrl,
     displayName: user.displayName,
     phoneDisplay: phoneToLocalDisplay(user.phone),
@@ -654,4 +752,87 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     nextStep,
     currentStepId: eligibility.currentStepId,
   };
+}
+
+const studioSchema = z.object({
+  studioName: z.string().trim().max(120).optional(),
+  studioLat: z.number().min(24).max(40).optional(),
+  studioLng: z.number().min(43).max(64).optional(),
+  studioAddress: z.string().trim().max(300).optional().nullable(),
+  clear: z.boolean().optional(),
+});
+
+export type SaveSpecialistStudioInput = z.infer<typeof studioSchema>;
+
+/** Separate from travel-base: registers the specialist's fixed studio / space. */
+export async function saveSpecialistStudioAction(
+  input: SaveSpecialistStudioInput
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await ensurePrismaSchemaReady();
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً ابتدا وارد شوید." };
+    }
+
+    const parsed = studioSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message || "اطلاعات نامعتبر است." };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      include: { specialistProfile: true },
+    });
+    if (!user?.specialistProfile) {
+      return { success: false, error: "پروفایل متخصص یافت نشد." };
+    }
+
+    const { studioName, studioLat, studioLng, studioAddress, clear } = parsed.data;
+
+    if (clear) {
+      await prisma.specialistProfile.update({
+        where: { userId: session.userId },
+        data: {
+          studioName: null,
+          studioLat: null,
+          studioLng: null,
+          studioAddress: null,
+        },
+      });
+      await prisma.user.update({
+        where: { id: session.userId },
+        data: { hasStudio: false },
+      });
+    } else {
+      const name = (studioName || "").trim();
+      if (name.length < 2) {
+        return { success: false, error: "نام استودیو الزامی است." };
+      }
+      if (typeof studioLat !== "number" || typeof studioLng !== "number") {
+        return { success: false, error: "لوکیشن استودیو را روی نقشه مشخص کنید." };
+      }
+      await prisma.specialistProfile.update({
+        where: { userId: session.userId },
+        data: {
+          studioName: name,
+          studioLat,
+          studioLng,
+          studioAddress: studioAddress || null,
+        },
+      });
+      await prisma.user.update({
+        where: { id: session.userId },
+        data: { hasStudio: true },
+      });
+    }
+
+    revalidatePath("/specialist/studio");
+    revalidatePath("/specialist/profile");
+    revalidatePath(`/s/${session.userId}`);
+    return { success: true };
+  } catch (err) {
+    console.error("saveSpecialistStudioAction:", err);
+    return { success: false, error: "خطا در ذخیره استودیو." };
+  }
 }

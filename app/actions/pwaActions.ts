@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 import { prisma } from "@/lib/prisma";
 import { getUploadRoot } from "@/lib/storage/uploads";
 import { mkdir, writeFile } from "fs/promises";
@@ -52,8 +52,10 @@ export async function getPwaSettings(): Promise<PwaSettingsResult> {
 export async function updatePwaSettings(formData: FormData): Promise<PwaSettingsResult> {
   try {
     const session = await getSession();
-    if (!session || !isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. فقط مدیر کل پلتفرم مجاز به انجام این عملیات است." };
+    try {
+      await requireAdminPermission(session, "settings_manage");
+    } catch {
+      return { success: false, error: "Unauthorized" };
     }
 
     const shortName = xss(formData.get("shortName") as string).trim();

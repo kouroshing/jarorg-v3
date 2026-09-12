@@ -3,8 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
-import { ArrowRight, MapPin, Camera, CheckCircle2 } from "lucide-react";
+import { ArrowRight, MapPin, Camera, CheckCircle2, Smartphone } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import EquipmentTagsDisplay from "@/components/specialist/EquipmentTagsDisplay";
+import { parseEquipmentTags } from "@/lib/equipment/catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +40,12 @@ export default async function PublicSpecialistPage({ params }: PageProps) {
         select: {
           status: true,
           city: true,
-          bio: true,
           equipmentSummary: true,
+          isMobileGrapher: true,
+          studioName: true,
+          studioLat: true,
+          studioLng: true,
+          studioAddress: true,
           portfolioItems: {
             where: { reviewStatus: "APPROVED" },
             orderBy: { createdAt: "desc" },
@@ -63,8 +69,8 @@ export default async function PublicSpecialistPage({ params }: PageProps) {
   const profile = user.specialistProfile;
   const name = user.displayName || "متخصص جار";
   const city = profile.city || user.city || "—";
-  const bio = profile.bio;
-  const equipment = profile.equipmentSummary || user.equipment;
+  const equipmentRaw = profile.equipmentSummary || user.equipment;
+  const equipmentTags = parseEquipmentTags(equipmentRaw);
 
   return (
     <main className="min-h-dvh bg-jar-canvas text-jar-primary py-10 px-4" dir="rtl">
@@ -91,23 +97,36 @@ export default async function PublicSpecialistPage({ params }: PageProps) {
                     تاییدشده
                   </span>
                 )}
+                {profile.isMobileGrapher && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-jar-logo/10 text-jar-logo text-[10px] font-bold border border-jar-logo/25">
+                    <Smartphone className="h-3 w-3" />
+                    موبایل‌گرافر
+                  </span>
+                )}
               </div>
               <p className="text-xs text-jar-muted font-medium flex items-center gap-1">
                 <MapPin className="h-3.5 w-3.5" />
                 {city}
-                {user.hasStudio ? " · دارای استودیو" : ""}
+                {profile.studioName &&
+                typeof profile.studioLat === "number" &&
+                typeof profile.studioLng === "number"
+                  ? ` · ${profile.studioName}`
+                  : ""}
               </p>
+              {profile.studioAddress && (
+                <p className="text-[11px] text-jar-muted font-medium mt-1">
+                  استودیو: {profile.studioAddress}
+                </p>
+              )}
             </div>
           </div>
 
-          {bio && (
-            <p className="text-sm text-jar-primary/90 leading-relaxed font-medium">{bio}</p>
-          )}
-
-          {equipment && (
-            <div className="rounded-2xl border border-jar-border bg-jar-canvas px-3.5 py-3 text-xs text-jar-muted">
-              <span className="font-bold text-jar-primary">تجهیزات: </span>
-              {equipment}
+          {equipmentTags.length > 0 && (
+            <div className="rounded-2xl border border-jar-border bg-jar-canvas px-3.5 py-3 space-y-2">
+              <span className="text-xs font-bold text-jar-primary">
+                {profile.isMobileGrapher ? "گوشی و تجهیزات موبایل‌گرافی" : "تجهیزات"}
+              </span>
+              <EquipmentTagsDisplay value={equipmentRaw} />
             </div>
           )}
         </section>

@@ -23,6 +23,9 @@ export default async function OnboardingTermsStepPage() {
   if (!state.hasEligiblePortfolio) {
     redirect("/specialist/onboarding/portfolio");
   }
+  if (!state.hasPlan) {
+    redirect("/specialist/onboarding/subscription");
+  }
   if (!state.hasCity || !state.baseLat || !state.baseLng) {
     redirect("/specialist/onboarding/details");
   }

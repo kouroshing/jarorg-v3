@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 import { prisma } from "@/lib/prisma";
 import xss from "xss";
 
@@ -43,29 +43,35 @@ const DEFAULT_PLANS = [
 ];
 
 /**
- * Gets the list of all plans from the database.
- * If no plans exist, seeds the default plans automatically.
+ * One-time / empty-DB seed. Does not overwrite admin-edited prices.
+ * Prefer calling from admin bootstrap; getPlansList only seeds when table is empty.
+ */
+export async function seedDefaultPlansIfEmpty() {
+  const count = await prisma.plan.count();
+  if (count > 0) return { seeded: false as const };
+
+  await prisma.plan.createMany({
+    data: DEFAULT_PLANS,
+  });
+  return { seeded: true as const };
+}
+
+/**
+ * Gets the list of all plans from the database (read-only).
+ * Seeds defaults only when the plans table is completely empty.
  */
 export async function getPlansList() {
   try {
-    for (const def of DEFAULT_PLANS) {
-      await prisma.plan.upsert({
-        where: { key: def.key },
-        create: def,
-        update: {
-          nameFa: def.nameFa,
-          price3Months: def.price3Months,
-          price12Months: def.price12Months,
-          features: def.features,
-          maxStorage: def.maxStorage,
-          monthlyTokens: def.monthlyTokens,
-        },
-      });
-    }
-
-    const plans = await prisma.plan.findMany({
+    let plans = await prisma.plan.findMany({
       orderBy: { price3Months: "asc" },
     });
+
+    if (plans.length === 0) {
+      await seedDefaultPlansIfEmpty();
+      plans = await prisma.plan.findMany({
+        orderBy: { price3Months: "asc" },
+      });
+    }
 
     return { success: true, data: plans };
   } catch (error) {
@@ -87,8 +93,10 @@ export async function updatePlan(
 ): Promise<PlanUpdateResult> {
   try {
     const session = await getSession();
-    if (!session || !isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. فقط مدیر کل پلتفرم مجاز به انجام این عملیات است." };
+    try {
+      await requireAdminPermission(session, "settings_manage");
+    } catch {
+      return { success: false, error: "Unauthorized" };
     }
 
     const sanitizedName = xss(nameFa).trim();
@@ -147,7 +155,7 @@ export async function activateBasicPlan(): Promise<PlanUpdateResult> {
     });
 
     if (user?.planId === basicPlan.id && !user.planExpiresAt) {
-      return { success: false, error: "پلن جار بیسیک از قبل برای شما فعال است." };
+      return { success: true };
     }
 
     await prisma.user.update({
@@ -161,6 +169,9 @@ export async function activateBasicPlan(): Promise<PlanUpdateResult> {
 
     revalidatePath("/profile");
     revalidatePath("/profile/upgrade");
+    revalidatePath("/specialist/onboarding/subscription");
+    revalidatePath("/specialist/onboarding/details");
+    revalidatePath("/specialist/onboarding");
 
     return { success: true };
   } catch (error) {

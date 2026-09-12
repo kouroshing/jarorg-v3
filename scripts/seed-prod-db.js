@@ -14,14 +14,12 @@ async function main() {
   console.log("=== Inspecting Database Tables ===");
   const userCount = await prisma.user.count();
   const projectCount = await prisma.project.count();
-  const expertCount = await prisma.expert.count();
   const purchaseCount = await prisma.purchase.count();
   const courseCount = await prisma.course.count();
   const pwaCount = await prisma.pwaSettings.count();
 
   console.log(`Users count: ${userCount}`);
   console.log(`Projects count: ${projectCount}`);
-  console.log(`Experts count: ${expertCount}`);
   console.log(`Purchases count: ${purchaseCount}`);
   console.log(`Courses count: ${courseCount}`);
   console.log(`PwaSettings count: ${pwaCount}`);

@@ -13,6 +13,11 @@ import {
 } from "lucide-react";
 import { LocationType } from "@/components/order/steps/StepLocation";
 import { getFastIranLocation } from "@/lib/geo/reverseGeocode";
+import {
+  DEFAULT_SERVICE_CITY,
+  SERVICE_CITIES,
+  matchServiceCity,
+} from "@/lib/geo/serviceCities";
 
 export interface Coordinates {
   lat: number;
@@ -33,6 +38,13 @@ export interface LocationMapPickerProps {
    */
   onChangeCoords?: (coords: Coordinates) => void;
   initialCoords?: Coordinates;
+  /**
+   * `embedded` = compact picker inside forms (specialist onboarding).
+   * Skips body scroll lock and order-only location-type chrome.
+   */
+  variant?: "fullscreen" | "embedded";
+  /** Override the floating pin status label (defaults differ by variant). */
+  pinLabel?: string;
 }
 
 const DEFAULT_CENTER: Coordinates = { lat: 35.6892, lng: 51.3890 }; // Tehran Center [35.6892, 51.3890]
@@ -46,7 +58,12 @@ export default function LocationMapPicker({
   onChangeAddress,
   onChangeCoords,
   initialCoords = DEFAULT_CENTER,
+  variant = "fullscreen",
+  pinLabel,
 }: LocationMapPickerProps) {
+  const isEmbedded = variant === "embedded";
+  const resolvedPinLabel =
+    pinLabel || (isEmbedded ? "محل شروع حرکت" : "محل دقیق عکاسی");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -84,8 +101,9 @@ export default function LocationMapPicker({
 
   const isLocationDefault = locationType === "SPECIALIST_ADVICE";
 
-  // Lock body scroll and pull-to-refresh while full-screen map is active
+  // Lock body scroll only for the full-screen order map
   useEffect(() => {
+    if (isEmbedded) return;
     const prevOverflow = document.body.style.overflow;
     const prevOverscroll = document.body.style.overscrollBehavior;
     document.body.style.overflow = "hidden";
@@ -95,7 +113,7 @@ export default function LocationMapPicker({
       document.body.style.overflow = prevOverflow;
       document.body.style.overscrollBehavior = prevOverscroll;
     };
-  }, []);
+  }, [isEmbedded]);
 
   // Reverse-geocoding: instant 0ms offline lookup + progressive server enrichment
   const reverseGeocodeTimerRef = useRef<any>(null);
@@ -251,6 +269,11 @@ export default function LocationMapPicker({
 
       mapInstanceRef.current = map;
 
+      // Publish initial point so parent forms (e.g. specialist base location) get coords
+      if (locationTypeRef.current === "CLIENT_LOCATION") {
+        updateLocationFromCoords(centerLat, centerLng, true);
+      }
+
       // Invalidate size after animation / mount to guarantee center alignment
       requestAnimationFrame(() => {
         try {
@@ -262,6 +285,13 @@ export default function LocationMapPicker({
           map.invalidateSize();
         } catch {}
       }, 250);
+      if (isEmbedded) {
+        setTimeout(() => {
+          try {
+            map.invalidateSize();
+          } catch {}
+        }, 600);
+      }
 
       // Handle resize events (e.g. window resize or container morphing)
       if (mapContainerRef.current && typeof ResizeObserver !== "undefined") {
@@ -444,7 +474,12 @@ export default function LocationMapPicker({
   };
 
   return (
-    <div className="absolute inset-0 w-full h-full overflow-hidden select-none bg-[#FAF9F5]" dir="rtl">
+    <div
+      className={`${
+        isEmbedded ? "relative" : "absolute inset-0"
+      } w-full h-full overflow-hidden select-none bg-[#FAF9F5]`}
+      dir="rtl"
+    >
       {/* Dynamic Location Notification Toast */}
       <AnimatePresence>
         {toastMessage && (
@@ -453,7 +488,9 @@ export default function LocationMapPicker({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.22 }}
-            className="absolute top-20 sm:top-24 inset-x-4 max-w-md mx-auto z-40 pointer-events-none"
+            className={`absolute inset-x-4 max-w-md mx-auto z-40 pointer-events-none ${
+              isEmbedded ? "top-3" : "top-20 sm:top-24"
+            }`}
           >
             <div className="bg-[#141413]/95 text-white text-xs font-medium py-2.5 px-4 rounded-2xl shadow-[0_12px_32px_rgba(20,20,19,0.2)] border border-[#E5E0D8]/20 text-center backdrop-blur-xl flex items-center justify-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-[#CC785C] animate-ping shrink-0" />
@@ -547,7 +584,7 @@ export default function LocationMapPicker({
                       }`}
                     />
                     <span>
-                      {isDragging ? "در حال تنظیم موقعیت..." : "محل دقیق عکاسی"}
+                      {isDragging ? "در حال تنظیم موقعیت..." : resolvedPinLabel}
                     </span>
                   </div>
                 </div>
@@ -600,7 +637,8 @@ export default function LocationMapPicker({
         )}
       </AnimatePresence>
 
-      {/* 3. SOFT POPUP AT THE TOP ("پاپ آپ نرم بالا") */}
+      {/* 3. SOFT POPUP AT THE TOP — order flow only (location type picker) */}
+      {!isEmbedded && (
       <div className="absolute top-[68px] sm:top-[76px] inset-x-3 sm:inset-x-6 max-w-lg mx-auto z-30 pointer-events-auto">
         <motion.div
           layout
@@ -625,6 +663,11 @@ export default function LocationMapPicker({
                 }
               } else {
                 onChangeLocationType?.("SPECIALIST_ADVICE");
+                const city =
+                  matchServiceCity(districtRef.current) || DEFAULT_SERVICE_CITY;
+                onChangeDistrictRef.current(city);
+                onChangeAddressRef.current("");
+                setLocationBadge(city);
               }
             }}
             onKeyDown={(e) => {
@@ -640,6 +683,11 @@ export default function LocationMapPicker({
                   }
                 } else {
                   onChangeLocationType?.("SPECIALIST_ADVICE");
+                  const city =
+                    matchServiceCity(districtRef.current) || DEFAULT_SERVICE_CITY;
+                  onChangeDistrictRef.current(city);
+                  onChangeAddressRef.current("");
+                  setLocationBadge(city);
                 }
               }
             }}
@@ -747,7 +795,14 @@ export default function LocationMapPicker({
                   {/* Option 2: استودیوهای همکار جار */}
                   <button
                     type="button"
-                    onClick={() => onChangeLocationType?.("JAR_STUDIO")}
+                    onClick={() => {
+                      onChangeLocationType?.("JAR_STUDIO");
+                      const city =
+                        matchServiceCity(districtRef.current) || DEFAULT_SERVICE_CITY;
+                      onChangeDistrict(city);
+                      onChangeAddress("");
+                      setLocationBadge(city);
+                    }}
                     className={`p-2.5 sm:p-3 rounded-xl border text-right transition-all cursor-pointer flex items-center gap-2 sm:gap-2.5 ${
                       locationType === "JAR_STUDIO"
                         ? "border-2 border-jar-primary bg-jar-surface text-jar-primary shadow-xs"
@@ -792,8 +847,52 @@ export default function LocationMapPicker({
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* City is always required when map pin is not used */}
+          {(locationType === "SPECIALIST_ADVICE" || locationType === "JAR_STUDIO") && (
+            <div className="pt-2 border-t border-jar-border space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[11px] font-black text-jar-primary">
+                  شهر پروژه <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[10px] text-jar-muted font-medium">
+                  برای معرفی متخصصین همان شهر
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SERVICE_CITIES.map((city) => {
+                  const selected =
+                    matchServiceCity(district) === city || district.trim() === city;
+                  return (
+                    <button
+                      key={city}
+                      type="button"
+                      onClick={() => {
+                        onChangeDistrict(city);
+                        onChangeAddress("");
+                        setLocationBadge(city);
+                      }}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                        selected
+                          ? "bg-jar-primary text-white border-jar-primary"
+                          : "bg-jar-canvas text-jar-muted border-jar-border hover:border-jar-primary/40 hover:text-jar-primary"
+                      }`}
+                    >
+                      {city}
+                    </button>
+                  );
+                })}
+              </div>
+              {!matchServiceCity(district) && district.trim().length > 0 && (
+                <p className="text-[10px] text-amber-700 font-medium">
+                  شهر انتخاب‌شده: {district.trim()}
+                </p>
+              )}
+            </div>
+          )}
         </motion.div>
       </div>
+      )}
 
       {/* 4. FLOATING BOTTOM BAR WITH ADDRESS & GPS (Only for Client Location) */}
       <AnimatePresence>
@@ -804,7 +903,9 @@ export default function LocationMapPicker({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 15 }}
             transition={{ duration: 0.28, ease: "easeOut" }}
-            className="absolute bottom-20 sm:bottom-24 inset-x-3 sm:inset-x-6 max-w-xl md:max-w-2xl lg:max-w-3xl mx-auto z-30"
+            className={`absolute inset-x-3 sm:inset-x-6 max-w-xl md:max-w-2xl lg:max-w-3xl mx-auto z-30 ${
+              isEmbedded ? "bottom-3" : "bottom-20 sm:bottom-24"
+            }`}
           >
             <div className="rounded-2xl border border-jar-border bg-jar-surface/95 backdrop-blur-xl p-3 sm:p-4 shadow-sm space-y-2 text-right">
               
@@ -876,7 +977,11 @@ export default function LocationMapPicker({
       </AnimatePresence>
 
       {/* 5. FLOATING ZOOM CONTROLS (Corner) */}
-      <div className="absolute top-28 left-3 sm:left-5 z-30 hidden sm:flex flex-col rounded-xl bg-jar-surface/90 backdrop-blur-md border border-jar-border shadow-sm overflow-hidden">
+      <div
+        className={`absolute left-3 sm:left-5 z-30 hidden sm:flex flex-col rounded-xl bg-jar-surface/90 backdrop-blur-md border border-jar-border shadow-sm overflow-hidden ${
+          isEmbedded ? "top-3" : "top-28"
+        }`}
+      >
         <button
           type="button"
           onClick={handleZoomIn}

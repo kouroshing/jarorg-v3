@@ -61,7 +61,7 @@ export default async function OrderPage({ searchParams }: OrderPageProps) {
 
   return (
     <div
-      className="jar-theme relative min-h-dvh w-full overflow-x-clip selection:bg-jar-primary/10 bg-jar-canvas text-jar-primary"
+      className="jar-theme relative min-h-dvh w-full overflow-x-clip selection:bg-neutral-900/10 bg-white text-neutral-900"
       dir="rtl"
     >
       <Suspense

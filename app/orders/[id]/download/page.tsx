@@ -83,7 +83,6 @@ export default async function OrderDownloadPage({ params }: PageProps) {
     // Database Flow
     project = await prisma.project.findUnique({
       where: { id: params.id },
-      include: { expert: true }
     });
 
     if (!project) {

@@ -33,7 +33,6 @@ export default function ApproveOrderDialog({
       }
       onClose?.();
       router.refresh();
-      window.location.reload();
     } catch (err: any) {
       setError(err.message || "خطای سرور");
       setLoading(false);

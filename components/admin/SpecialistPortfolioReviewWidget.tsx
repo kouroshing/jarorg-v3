@@ -72,7 +72,7 @@ export default function SpecialistPortfolioReviewWidget({ item, mode }: CustomIn
     setNotificationMsg(null);
     try {
       const res = await approvePortfolioAction([itemId]);
-      if (res.type === "success") {
+      if (res.type === "success" || res.type === "info") {
         setItems((prev) =>
           prev.map((it) =>
             it.id === itemId
@@ -80,12 +80,18 @@ export default function SpecialistPortfolioReviewWidget({ item, mode }: CustomIn
               : it
           )
         );
-        setNotificationMsg({ type: "success", text: "نمونه‌کار با موفقیت تایید شد." });
+        setNotificationMsg({ type: "success", text: res.message || "تایید شد." });
       } else {
-        setNotificationMsg({ type: "error", text: res.message || "خطا در تایید نمونه‌کار" });
+        setNotificationMsg({
+          type: "error",
+          text: res.message || "تایید انجام نشد.",
+        });
       }
     } catch (err: any) {
-      setNotificationMsg({ type: "error", text: err.message || "خطای غیرمنتظره در سرور" });
+      setNotificationMsg({
+        type: "error",
+        text: err?.message || "خطا در تایید نمونه‌کار.",
+      });
     } finally {
       setActionLoading((prev) => ({ ...prev, [itemId]: false }));
     }

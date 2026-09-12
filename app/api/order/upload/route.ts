@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { getSession } from "@/lib/auth/session";
+import { getUploadRoot } from "@/lib/storage/uploads";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +32,8 @@ export async function POST(request: Request) {
     }
 
     const ext = path.extname(file.name) || ".jpg";
-    const filename = `moodboard_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "moodboards");
+    const filename = `moodboard_${session.userId.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+    const uploadDir = path.join(getUploadRoot(), "moodboards");
 
     await fs.mkdir(uploadDir, { recursive: true });
 

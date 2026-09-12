@@ -67,6 +67,7 @@ import {
   MAX_VIDEO_RAW_SIZE_BYTES,
 } from "@/lib/clientImageCompression";
 import { MIN_SELECTED_CATEGORIES } from "@/lib/specialists/eligibility";
+import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   Heart,
@@ -104,16 +105,22 @@ function getCategoryIcon(iconName?: string) {
 interface Props {
   initialSelectedCategories: string[];
   initialPortfolioItems: PortfolioItemData[];
+  /** Onboarding: continue to details. Manage: hide submit-for-review CTA. */
+  mode?: "onboarding" | "manage";
+  continueHref?: string;
 }
 
 export default function SpecialistPortfolioManager({
   initialSelectedCategories,
   initialPortfolioItems,
+  mode = "onboarding",
+  continueHref = "/specialist/onboarding/subscription",
 }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<CategoryType>("PERSONAL");
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(initialSelectedCategories);
   const [isSaving, startSaveTransition] = useTransition();
+  const [saveToastOpen, setSaveToastOpen] = useState(false);
   const [requirementWarning, setRequirementWarning] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -141,10 +148,11 @@ export default function SpecialistPortfolioManager({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Group portfolio items by category slug
+  // Group portfolio items by category slug (rejected files do not count toward the 10).
   const itemsByCategory = useMemo(() => {
     const map: Record<string, PortfolioItemData[]> = {};
     for (const item of portfolioItems) {
+      if (item.reviewStatus === "REJECTED") continue;
       if (!map[item.categorySlug]) {
         map[item.categorySlug] = [];
       }
@@ -153,7 +161,16 @@ export default function SpecialistPortfolioManager({
     return map;
   }, [portfolioItems]);
 
-  const totalContent = portfolioItems.length;
+  const rejectedByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const item of portfolioItems) {
+      if (item.reviewStatus !== "REJECTED") continue;
+      map[item.categorySlug] = (map[item.categorySlug] || 0) + 1;
+    }
+    return map;
+  }, [portfolioItems]);
+
+  const totalContent = portfolioItems.filter((i) => i.reviewStatus !== "REJECTED").length;
 
   // Validation: Every selected category must have at least 10 items
   const incompleteCategories = useMemo(() => {
@@ -219,11 +236,13 @@ export default function SpecialistPortfolioManager({
         setSelectedSlugs(selectedSlugs);
         setRequirementWarning(res.error || "خطا در ذخیره دسته‌بندی‌ها");
         setTimeout(() => setRequirementWarning(null), 5000);
+      } else {
+        setSaveToastOpen(true);
       }
     });
   };
 
-  // Final confirmation and publish handler
+  // Continue onboarding or (manage mode) re-submit for review.
   const handleFinalPublish = async () => {
     if (!hasMinSelectedCategories) {
       setRequirementWarning(
@@ -239,9 +258,16 @@ export default function SpecialistPortfolioManager({
         .join("، ");
 
       setRequirementWarning(
-        `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
+        `برای ادامه باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار (غیرردشده) کامل داشته باشید. وضعیت فعلی: ${details}`
       );
       setTimeout(() => setRequirementWarning(null), 7000);
+      return;
+    }
+
+    // Onboarding: go to location/details — do not submit for admin review here.
+    if (mode === "onboarding") {
+      router.push(continueHref);
+      router.refresh();
       return;
     }
 
@@ -260,7 +286,7 @@ export default function SpecialistPortfolioManager({
         router.push(res.redirect);
         router.refresh();
       } else {
-        setRequirementWarning(res.error || "خطا در ادامه ثبت‌نام.");
+        setRequirementWarning(res.error || "خطا در ارسال پرونده.");
         setTimeout(() => setRequirementWarning(null), 7000);
       }
     } catch (err: any) {
@@ -390,11 +416,15 @@ export default function SpecialistPortfolioManager({
   }, [selectedSlugs]);
 
   const activeCategory = CATEGORIES_BY_SLUG[activeCategorySlug] || selectedCategoriesList[0];
-  const activeItems = activeCategorySlug ? itemsByCategory[activeCategorySlug] || [] : [];
-  const activeCount = activeItems.length;
+  const countingItems = activeCategorySlug ? itemsByCategory[activeCategorySlug] || [] : [];
+  const activeItems = activeCategorySlug
+    ? portfolioItems.filter((i) => i.categorySlug === activeCategorySlug)
+    : [];
+  const activeCount = countingItems.length;
   const isActiveFulfilled = activeCount >= MIN_ITEMS_PER_CATEGORY;
   const activeRemaining = Math.max(0, MIN_ITEMS_PER_CATEGORY - activeCount);
   const activePercent = Math.min(100, Math.round((activeCount / MIN_ITEMS_PER_CATEGORY) * 100));
+  const rejectedInActive = rejectedByCategory[activeCategorySlug] || 0;
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300 pb-20" dir="rtl">
@@ -416,7 +446,7 @@ export default function SpecialistPortfolioManager({
               <span className="text-xs font-bold text-jar-primary truncate">
                 {isEveryCategoryFulfilled ? (
                   <>
-                    پرونده آماده ارسال برای بررسی است
+                    {mode === "onboarding" ? "آماده رفتن به محل فعالیت" : "پرونده آماده ارسال برای بررسی است"}
                     <span className="hidden sm:inline text-emerald-700 font-bold mr-1.5">
                       ({fulfilledCategories.length} شاخه کامل)
                     </span>
@@ -450,7 +480,8 @@ export default function SpecialistPortfolioManager({
             </div>
           </div>
 
-          {/* Action Button */}
+          {/* Action Button — onboarding continues; manage mode has no publish CTA here */}
+          {mode === "onboarding" && (
           <button
             type="button"
             onClick={handleFinalPublish}
@@ -458,7 +489,7 @@ export default function SpecialistPortfolioManager({
             title={
               !isReadyToSubmit
                 ? "برای ادامه، حداقل ۳ شاخه و ۱۰ نمونه‌کار در یک شاخه لازم است."
-                : "ادامه به گام‌های محل فعالیت و تعهدنامه"
+                : "ادامه به گام محل فعالیت"
             }
             className={`w-full sm:w-auto inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 text-xs font-medium transition-colors cursor-pointer ${
               isReadyToSubmit
@@ -474,7 +505,7 @@ export default function SpecialistPortfolioManager({
             ) : isReadyToSubmit ? (
               <>
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>ادامه ثبت‌نام</span>
+                <span>ادامه به محل فعالیت</span>
               </>
             ) : (
               <>
@@ -483,6 +514,7 @@ export default function SpecialistPortfolioManager({
               </>
             )}
           </button>
+          )}
 
         </div>
       </div>
@@ -807,7 +839,11 @@ export default function SpecialistPortfolioManager({
                 <div className="space-y-3 pt-2">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-black text-slate-700">
-                      نمونه‌کارهای این تخصص ({activeItems.length})
+                      نمونه‌کارهای این تخصص ({activeCount}
+                      {rejectedInActive > 0
+                        ? ` معتبر · ${rejectedInActive.toLocaleString("fa-IR")} ردشده`
+                        : ""}
+                      )
                     </h4>
                     {activeCount < MIN_ITEMS_PER_CATEGORY && (
                       <span className="text-[11px] font-bold text-amber-600">
@@ -830,6 +866,16 @@ export default function SpecialistPortfolioManager({
                           key={item.id}
                           className="group relative aspect-square overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-900 shadow-2xs"
                         >
+                          {item.reviewStatus === "REJECTED" && (
+                            <span className="absolute top-1.5 right-1.5 z-10 rounded-md bg-rose-600 px-1.5 py-0.5 text-[8px] font-bold text-white">
+                              رد شده
+                            </span>
+                          )}
+                          {item.reviewStatus === "APPROVED" && (
+                            <span className="absolute top-1.5 right-1.5 z-10 rounded-md bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold text-white">
+                              تایید
+                            </span>
+                          )}
                           {item.mediaType === "VIDEO" ? (
                             <div className="relative h-full w-full bg-slate-950 flex items-center justify-center">
                               <video
@@ -978,6 +1024,11 @@ export default function SpecialistPortfolioManager({
         </div>
       )}
 
+      <SaveFeedbackToast
+        open={saveToastOpen}
+        message="ذخیره شد — شاخه‌های تخصصی به‌روز شد"
+        onClose={() => setSaveToastOpen(false)}
+      />
     </div>
   );
 }

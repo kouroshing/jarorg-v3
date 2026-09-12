@@ -1,19 +1,39 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Home } from "lucide-react";
 import BrandLogo from "@/components/BrandLogo";
 import JarBillowBackground from "@/components/home/JarBillowBackground";
 import JoinForm from "./JoinForm";
+import { getSession } from "@/lib/auth/session";
+import {
+  getSpecialistAccess,
+  repairOrphanSpecialistRole,
+} from "@/lib/specialists/access";
 
 export const metadata: Metadata = {
-  title: "ثبت‌نام متخصصین و عکاسان | جار",
-  description: "ثبت‌نام رایگان عکاسان، فیلمبرداران و متخصصین در پلتفرم جار",
+  title: "ورود و ثبت‌نام متخصصین | جار",
+  description: "ورود با شماره موبایل برای عکاسان، فیلمبرداران و متخصصین جار",
 };
 
-export default function JoinPage() {
+export const dynamic = "force-dynamic";
+
+export default async function JoinPage() {
+  const session = await getSession();
+  if (session?.userId) {
+    await repairOrphanSpecialistRole(session.userId);
+    const access = await getSpecialistAccess(session.userId);
+    // Already a specialist (any stage) → resume their path.
+    // Pure customers who open /join intentionally start onboarding.
+    if (access.kind === "active" || access.kind === "pending" || access.kind === "onboarding") {
+      redirect(access.landingPath);
+    }
+    redirect("/specialist/onboarding/profile");
+  }
+
   return (
     <div
-      className="jar-theme relative min-h-screen bg-jar-canvas text-jar-primary overflow-x-hidden flex flex-col justify-between selection:bg-jar-primary/10"
+      className="jar-theme relative isolate min-h-screen bg-jar-canvas text-jar-primary overflow-x-hidden flex flex-col justify-between selection:bg-jar-primary/10"
       dir="rtl"
     >
       <JarBillowBackground />
@@ -21,8 +41,6 @@ export default function JoinPage() {
       <header className="fixed inset-x-0 top-3 z-50 px-4 md:px-6">
         <div className="mx-auto flex h-14 w-full max-w-4xl items-center justify-between rounded-full border border-jar-border bg-jar-surface/80 px-4 sm:px-6 backdrop-blur-xl shadow-xs">
           <Link href="/" className="flex items-center gap-2.5 group">
-            {/* BrandLogo is a link to "/" on its own; nesting it here produces
-                an <a> inside an <a> and a hydration error on load. */}
             <BrandLogo linked={false} />
           </Link>
 
@@ -36,15 +54,15 @@ export default function JoinPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center px-4 pt-28 pb-12">
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 pt-28 pb-12">
         <div className="w-full max-w-3xl mx-auto">
           <div className="relative max-w-lg mx-auto rounded-[32px] border border-jar-border bg-jar-surface/90 p-8 sm:p-10 backdrop-blur-2xl shadow-xs">
             <div className="text-center mb-7">
               <h1 className="text-xl sm:text-2xl font-black text-jar-primary tracking-tight leading-snug">
-                ثبت‌نام رایگان متخصصین
+                ورود متخصصین جار
               </h1>
               <p className="mt-2.5 text-sm font-medium text-jar-muted leading-relaxed">
-                پورتفولیو بسازید، پروژه‌های آماده دریافت کنید و درآمد را در کیف پول جار تسویه کنید.
+                با شماره موبایل وارد شوید؛ نام و پروفایل را فقط یک‌بار در اطلاعات پایه می‌گیریم.
               </p>
             </div>
 
@@ -53,9 +71,9 @@ export default function JoinPage() {
 
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 text-right">
             {[
-              { n: "۱", t: "ورود", d: "نام و موبایل. متن تعهدنامه در صفحه جداست و پذیرش نهایی‌اش بعداً الزامی است." },
-              { n: "۲", t: "صلاحیت", d: "حداقل ۳ دسته، ۱۰ نمونه‌کار در یک شاخه، شهر، مبدأ حرکت روی نقشه، تجهیزات." },
-              { n: "۳", t: "کارتابل", d: "بعد از تایید ادمین و احراز هویت بانکی برای تسویه، پروژه‌های باز را می‌بینید." },
+              { n: "۱", t: "ورود با موبایل", d: "فقط OTP. اگر قبلاً آمده‌اید مستقیم وارد می‌شوید." },
+              { n: "۲", t: "اطلاعات پایه", d: "نام، عکس و بقیهٔ مراحل فقط اگر هنوز کامل نکرده باشید." },
+              { n: "۳", t: "کارتابل", d: "بعد از تایید ادمین، پروژه‌های باز را می‌بینید و می‌توانید سفارش هم ثبت کنید." },
             ].map((step) => (
               <div key={step.n} className="rounded-2xl border border-jar-border bg-jar-surface/80 p-4">
                 <span className="text-[10px] font-bold text-jar-logo">{step.n}</span>
@@ -67,7 +85,7 @@ export default function JoinPage() {
         </div>
       </main>
 
-      <footer className="py-4 text-center text-xs text-jar-muted font-medium">
+      <footer className="relative z-10 py-4 text-center text-xs text-jar-muted font-medium">
         © پلتفرم عکاسی و آموزش تخصصی جار
       </footer>
     </div>

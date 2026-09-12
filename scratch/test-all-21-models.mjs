@@ -21,7 +21,6 @@ async function testAllModels() {
     "User",
     "SpecialistProfile",
     "PortfolioItem",
-    "Expert",
     "Transaction",
     "WithdrawalRequest",
     "Plan",

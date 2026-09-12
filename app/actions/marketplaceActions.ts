@@ -155,6 +155,7 @@ export interface ApplicantSpecialistView {
     bio: string | null;
     equipment: string | null;
     hasStudio: boolean;
+    isMobileGrapher: boolean;
     isBlueTick: boolean;
     portfolioItems: {
       id: string;
@@ -707,8 +708,15 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
                 bio: true,
                 equipmentSummary: true,
                 workArea: true,
+                studioName: true,
+                studioLat: true,
+                studioLng: true,
+                isMobileGrapher: true,
                 portfolioItems: {
-                  where: { categorySlug: order.categorySlug },
+                  where: {
+                    categorySlug: order.categorySlug,
+                    reviewStatus: "APPROVED",
+                  },
                   take: 6,
                   select: {
                     id: true,
@@ -751,7 +759,12 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
         equipment:
           item.specialist.specialistProfile?.equipmentSummary ??
           item.specialist.equipment,
-        hasStudio: item.specialist.hasStudio,
+        hasStudio: Boolean(
+          item.specialist.specialistProfile?.studioName &&
+            typeof item.specialist.specialistProfile.studioLat === "number" &&
+            typeof item.specialist.specialistProfile.studioLng === "number"
+        ),
+        isMobileGrapher: Boolean(item.specialist.specialistProfile?.isMobileGrapher),
         isBlueTick: item.specialist.requestedBlueTick,
         portfolioItems: item.specialist.specialistProfile?.portfolioItems || [],
       },
@@ -1242,6 +1255,7 @@ export async function cancelOrderByClientAction(
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/order");
+    revalidatePath("/profile");
     revalidatePath("/specialist/projects");
     revalidatePath("/specialist/mine");
     revalidatePath("/admin");

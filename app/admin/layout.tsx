@@ -1,7 +1,9 @@
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { resolveAdminAccess } from "@/lib/auth/adminAccess";
+import type { AdminPermission } from "@/lib/auth/adminPermissions";
+import AdminOpsBar from "@/components/admin/AdminOpsBar";
 
 export const dynamic = "force-dynamic";
 
@@ -10,40 +12,41 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   if (!session) {
     redirect("/login?redirect=/admin");
   }
-  if (!isAdminSession(session)) {
+
+  // Authoritative DB check — JWT role alone is not enough (revoked staff).
+  const access = await resolveAdminAccess(session);
+  if (!access) {
     redirect("/");
   }
 
+  const permissions = Array.from(access.permissions) as AdminPermission[];
+
   return (
     <div className="w-full max-w-full overflow-x-hidden min-h-screen bg-slate-50 text-slate-900 font-sans" dir="rtl">
+      <AdminOpsBar
+        permissions={permissions}
+        isSuper={access.isSuper}
+        label={access.label}
+      />
       <style
         dangerouslySetInnerHTML={{
           __html: `
-        /* Always Force Light Mode */
         html, body, .next-admin__root {
           color-scheme: light !important;
         }
-
-        /* NextAdmin RTL Overrides */
         [dir=rtl] .next-admin__root {
           direction: rtl;
           text-align: right;
         }
-
-        /* Desktop Fixed Sidebar on the Right */
         [dir=rtl] .next-admin__root .lg\\:fixed.lg\\:w-72 {
           right: 0 !important;
           left: auto !important;
         }
-
-        /* Switch sidebar border from right to left */
         [dir=rtl] .next-admin__root .lg\\:fixed.lg\\:w-72 .border-r {
           border-right-width: 0 !important;
           border-left-width: 1px !important;
           border-left-color: var(--next-admin-border-default, #e2e8f0) !important;
         }
-
-        /* Main content padding in RTL (right padding for 72 = 18rem sidebar) */
         [dir=rtl] .next-admin__root main.lg\\:pl-72,
         [dir=rtl] .next-admin__root main {
           max-width: 100%;
@@ -52,7 +55,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           padding-right: 18rem !important;
           text-align: right;
         }
-
         @media (max-width: 1023px) {
           [dir=rtl] .next-admin__root main.lg\\:pl-72,
           [dir=rtl] .next-admin__root main {
@@ -60,8 +62,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             padding-left: 0 !important;
           }
         }
-
-        /* Mobile drawer adjustments in RTL */
         [dir=rtl] .next-admin__root [role=dialog] .relative.mr-16 {
           margin-right: 0 !important;
           margin-left: 4rem !important;
@@ -70,8 +70,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           left: auto !important;
           right: 100% !important;
         }
-
-        /* Table headers and cell alignment & comfortable padding */
         [dir=rtl] .next-admin__root table th,
         [dir=rtl] .next-admin__root table td {
           text-align: right !important;
@@ -79,19 +77,13 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           padding-bottom: 0.85rem !important;
           vertical-align: middle;
         }
-
-        /* Subtle row hover */
         [dir=rtl] .next-admin__root table tbody tr:hover {
           background-color: #f8fafc !important;
         }
-
-        /* Group menu sub-list margin offset */
         [dir=rtl] .next-admin__root nav ul .-ml-2 {
           margin-left: 0 !important;
           margin-right: -0.5rem !important;
         }
-
-        /* Inputs and labels right-aligned */
         [dir=rtl] .next-admin__root input,
         [dir=rtl] .next-admin__root select,
         [dir=rtl] .next-admin__root textarea,

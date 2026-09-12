@@ -198,6 +198,9 @@ export default function OrderApplicantsList({
                   <MapPin className="h-3 w-3 text-[#66605B]" />
                   <span>{selectedApplicant.specialist.city}</span>
                   {selectedApplicant.specialist.hasStudio && <span> • دارای استودیو</span>}
+                  {selectedApplicant.specialist.isMobileGrapher && (
+                    <span> • موبایل‌گرافر</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -265,6 +268,9 @@ export default function OrderApplicantsList({
                   <MapPin className="h-3 w-3 text-emerald-600" />
                   <span>{selectedApplicant.specialist.city}</span>
                   {selectedApplicant.specialist.hasStudio && <span> • دارای استودیو</span>}
+                  {selectedApplicant.specialist.isMobileGrapher && (
+                    <span> • موبایل‌گرافر</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -363,6 +369,7 @@ export default function OrderApplicantsList({
                             <MapPin className="h-3 w-3 shrink-0" />
                             {applicant.specialist.city}
                             {applicant.specialist.hasStudio ? " · استودیو" : ""}
+                            {applicant.specialist.isMobileGrapher ? " · موبایل‌گرافر" : ""}
                           </p>
                         </div>
                       </div>

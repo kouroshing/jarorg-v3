@@ -6,7 +6,10 @@ import { getAvailableOrdersForSpecialistAction } from "@/app/actions/marketplace
 import SpecialistProjectFeed from "@/components/specialist/SpecialistProjectFeed";
 import SpecialistAppShell from "@/components/specialist/SpecialistAppShell";
 import { countSpecialistMineOrders } from "@/lib/orders/specialist-feed";
-import { SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
+import {
+  getSpecialistAccess,
+  repairOrphanSpecialistRole,
+} from "@/lib/specialists/access";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +24,24 @@ export default async function SpecialistProjectsFeedPage() {
     redirect(encodeURI("/login?redirect=/specialist/projects"));
   }
 
+  await repairOrphanSpecialistRole(session.userId);
+  const access = await getSpecialistAccess(session.userId);
+
+  // Pure customers must not see the specialist shell at all.
+  if (access.kind === "none") {
+    redirect("/profile");
+  }
+
+  // Incomplete / pending → hard redirect to the right onboarding step
+  // instead of rendering an empty shell with an error card.
+  if (access.kind !== "active") {
+    redirect(access.landingPath);
+  }
+
   const result = await getAvailableOrdersForSpecialistAction();
 
-  // Someone still in the review queue gets the waiting room, not an error box
-  // inside a panel they are not allowed to use.
-  if (!result.success && result.redirectTo === SPECIALIST_REVIEW_PATH) {
-    redirect(SPECIALIST_REVIEW_PATH);
+  if (!result.success && result.redirectTo) {
+    redirect(result.redirectTo);
   }
 
   const orders = result.success && result.orders ? result.orders : [];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { Phone, ArrowLeft, Loader2, User, ChevronRight } from "lucide-react";
+import { Phone, ArrowLeft, Loader2, ChevronRight } from "lucide-react";
 import { sendOtpCode, verifyOtpCode } from "@/app/actions/authActions";
 import { isValidIranMobileLocal, sanitizeIranMobileInput } from "@/lib/auth/phone";
 import { isValidOtpCode, OTP_TTL_MS } from "@/lib/auth/otp";
@@ -14,7 +14,10 @@ const inputClasses =
 
 const RESEND_SECONDS = OTP_TTL_MS / 1000;
 
-type Step = "info" | "otp";
+/** After OTP, onboarding hub routes: new → basics, incomplete → resume, ACTIVE → panel. */
+const AFTER_LOGIN_PATH = "/specialist/onboarding";
+
+type Step = "phone" | "otp";
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -23,8 +26,7 @@ function formatTimer(seconds: number): string {
 }
 
 export default function JoinForm() {
-  const [step, setStep] = useState<Step>("info");
-  const [name, setName] = useState("");
+  const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -45,19 +47,9 @@ export default function JoinForm() {
     setError(null);
   };
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setName(e.target.value);
-    setError(null);
-  };
-
   const handleSendOtp = (e?: React.FormEvent) => {
     e?.preventDefault();
     setError(null);
-
-    if (name.trim().length < 2) {
-      setError("لطفاً نام و نام خانوادگی خود را به درستی وارد کنید.");
-      return;
-    }
 
     if (!isValidIranMobileLocal(phone)) {
       setError("شماره موبایل معتبر نیست. فرمت صحیح: ۰۹۱۲۳۴۵۶۷۸۹");
@@ -65,7 +57,7 @@ export default function JoinForm() {
     }
 
     if (!agreedToTerms) {
-      setError("برای ثبت‌نام متخصص، پذیرش قوانین کاری و تعهدنامه حفظ محرمانگی الزامی است.");
+      setError("برای ورود به مسیر متخصص، آگاهی از تعهدنامه الزامی است.");
       return;
     }
 
@@ -96,15 +88,17 @@ export default function JoinForm() {
     }
 
     startTransition(async () => {
-      const result = await verifyOtpCode(phone, otp, "/specialist/onboarding", "SPECIALIST", name.trim());
+      // Phone-only: name/avatar collected on onboarding basics.
+      // Role SPECIALIST is set when basics are saved — not at OTP.
+      const result = await verifyOtpCode(phone, otp, AFTER_LOGIN_PATH);
       if (result && !result.success) {
         setError(result.error ?? "خطای ناشناخته در ورود");
       }
     });
   };
 
-  const goBackToInfo = useCallback(() => {
-    setStep("info");
+  const goBackToPhone = useCallback(() => {
+    setStep("phone");
     setOtp("");
     setError(null);
   }, []);
@@ -117,40 +111,29 @@ export default function JoinForm() {
         </div>
       )}
 
-      {step === "info" ? (
-        <form key="info-step" onSubmit={handleSendOtp} className="space-y-4 animate-in slide-in-from-bottom-4">
-          <div className="space-y-4">
-            <div className="relative">
-              <User className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={name}
-                onChange={handleNameChange}
-                placeholder="نام و نام خانوادگی"
-                autoFocus
-                required
-                className={`${inputClasses} pr-12`}
-              />
-            </div>
-            
-            <div className="relative">
-              <Phone className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="tel"
-                inputMode="tel"
-                dir="ltr"
-                value={phone}
-                onChange={handlePhoneChange}
-                placeholder="09123456789"
-                required
-                maxLength={11}
-                className={`${inputClasses} pr-12 text-left placeholder:text-left`}
-              />
-            </div>
+      {step === "phone" ? (
+        <form key="phone-step" onSubmit={handleSendOtp} className="space-y-4 animate-in slide-in-from-bottom-4">
+          <div className="relative">
+            <Phone className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="tel"
+              inputMode="tel"
+              dir="ltr"
+              value={phone}
+              onChange={handlePhoneChange}
+              placeholder="09123456789"
+              autoFocus
+              required
+              maxLength={11}
+              className={`${inputClasses} pr-12 text-left placeholder:text-left`}
+            />
           </div>
 
-          {/* Acknowledgement — full NDA is accepted later on /specialist/onboarding/terms */}
-          <div className="flex items-start gap-2.5 pt-2 text-right">
+          <p className="text-[11px] text-jar-muted leading-relaxed text-right">
+            فقط با شماره وارد شوید. اگر قبلاً ثبت‌نام کرده‌اید مستقیم به پنل می‌روید؛ اگر نیمه‌کاره مانده، از همان مرحله ادامه می‌دهید؛ اگر تازه‌اید، نام و عکس را در گام بعد می‌گیریم.
+          </p>
+
+          <div className="flex items-start gap-2.5 pt-1 text-right">
             <input
               id="join-nda-checkbox"
               type="checkbox"
@@ -173,15 +156,15 @@ export default function JoinForm() {
                 className="text-jar-logo underline hover:text-jar-primary font-bold"
                 onClick={(e) => e.stopPropagation()}
               >
-                تعهدنامه حسن انجام کار، محرمانگی و شرایط عضویت متخصصین جار
+                تعهدنامه و شرایط عضویت متخصصین جار
               </Link>{" "}
-              آگاه هستم و می‌دانم پذیرش کامل آن در مراحل بعدی ثبت‌نام الزامی است.
+              آگاه هستم؛ پذیرش کامل در مراحل ثبت‌نام انجام می‌شود.
             </label>
           </div>
 
           <button
             type="submit"
-            disabled={isPending || !isValidIranMobileLocal(phone) || name.trim().length < 2 || !agreedToTerms}
+            disabled={isPending || !isValidIranMobileLocal(phone) || !agreedToTerms}
             className="group mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-jar-primary px-7 py-3.5 text-sm font-medium text-white shadow-none transition-colors duration-200 hover:bg-jar-primaryHover disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
           >
             {isPending ? (
@@ -191,11 +174,18 @@ export default function JoinForm() {
               </>
             ) : (
               <>
-                <span>ثبت‌نام رایگان به عنوان متخصص</span>
+                <span>دریافت کد ورود</span>
                 <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
               </>
             )}
           </button>
+
+          <p className="text-center text-[11px] text-jar-muted pt-1">
+            کارفرما هستید؟{" "}
+            <Link href="/login" className="font-bold text-jar-primary underline-offset-2 hover:underline">
+              ورود مشتری
+            </Link>
+          </p>
         </form>
       ) : (
         <form key="otp-step" onSubmit={handleVerify} className="space-y-6 animate-in slide-in-from-bottom-4">
@@ -226,7 +216,7 @@ export default function JoinForm() {
               </>
             ) : (
               <>
-                <span>تایید و تکمیل پروفایل</span>
+                <span>تأیید و ورود</span>
                 <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
               </>
             )}
@@ -253,12 +243,12 @@ export default function JoinForm() {
 
             <button
               type="button"
-              onClick={goBackToInfo}
+              onClick={goBackToPhone}
               disabled={isPending}
               className="flex items-center gap-1 text-jar-muted transition hover:text-jar-primary cursor-pointer"
             >
               <ChevronRight className="h-3.5 w-3.5" />
-              ویرایش مشخصات و شماره موبایل
+              ویرایش شماره موبایل
             </button>
           </div>
         </form>

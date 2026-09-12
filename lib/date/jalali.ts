@@ -79,13 +79,115 @@ export function jalaliToGregorian(jy: number, jm: number, jd: number) {
   return d2g(jdn);
 }
 
+/** True when Jalali year has 366 days (Esfand has 30). */
+export function isLeapJalaliYear(jy: number): boolean {
+  const a = jalCal(jy);
+  const b = jalCal(jy + 1);
+  return g2d(b.gy, 3, b.march) - g2d(a.gy, 3, a.march) === 366;
+}
+
+/** Gregorian → Jalali (inverse of jalaliToGregorian). */
+export function gregorianToJalali(
+  gy: number,
+  gm: number,
+  gd: number
+): { jy: number; jm: number; jd: number } {
+  const jdn = g2d(gy, gm, gd);
+  let jy = d2g(jdn).gy - 621;
+  const r = jalCal(jy);
+  const jdn1f = g2d(r.gy, 3, r.march);
+  let k = jdn - jdn1f;
+
+  if (k >= 0) {
+    if (k <= 185) {
+      return { jy, jm: 1 + div(k, 31), jd: mod(k, 31) + 1 };
+    }
+    k -= 186;
+  } else {
+    jy -= 1;
+    k += 179;
+    if (isLeapJalaliYear(jy)) k += 1;
+  }
+
+  return { jy, jm: 7 + div(k, 30), jd: mod(k, 30) + 1 };
+}
+
+export function jalaliMonthLength(jy: number, jm: number): number {
+  if (jm <= 6) return 31;
+  if (jm <= 11) return 30;
+  return isLeapJalaliYear(jy) ? 30 : 29;
+}
+
+export const JALALI_MONTHS_FA = [
+  "فروردین",
+  "اردیبهشت",
+  "خرداد",
+  "تیر",
+  "مرداد",
+  "شهریور",
+  "مهر",
+  "آبان",
+  "آذر",
+  "دی",
+  "بهمن",
+  "اسفند",
+] as const;
+
 const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+
+/** Format as English digits yyyy/mm/dd for APIs (Zohal). */
+export function formatJalaliYmd(jy: number, jm: number, jd: number): string {
+  return `${jy}/${String(jm).padStart(2, "0")}/${String(jd).padStart(2, "0")}`;
+}
 
 export function toEnglishDigits(input: string): string {
   return input
     .replace(/[۰-۹]/g, (d) => String(PERSIAN_DIGITS.indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String(ARABIC_DIGITS.indexOf(d)));
+}
+
+export function toPersianDigits(input: string | number): string {
+  return String(input).replace(/\d/g, (d) => PERSIAN_DIGITS[Number(d)] ?? d);
+}
+
+export function parseJalaliYmd(
+  raw: string
+): { jy: number; jm: number; jd: number } | null {
+  const en = toEnglishDigits(raw).trim().replace(/[-.]/g, "/");
+  const m = en.match(/^(\d{3,4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!m) return null;
+  const jy = Number(m[1]);
+  const jm = Number(m[2]);
+  const jd = Number(m[3]);
+  if (!Number.isFinite(jy) || jm < 1 || jm > 12 || jd < 1) return null;
+  try {
+    if (jd > jalaliMonthLength(jy, jm)) return null;
+  } catch {
+    return null;
+  }
+  return { jy, jm, jd };
+}
+
+/** Formats an English/Persian ymd as fa display. */
+export function formatJalaliYmdFa(raw: string): string {
+  const parsed = parseJalaliYmd(raw);
+  if (!parsed) return raw;
+  return toPersianDigits(formatJalaliYmd(parsed.jy, parsed.jm, parsed.jd));
+}
+
+/** Today in Jalali (Tehran calendar day). */
+export function todayJalali(): { jy: number; jm: number; jd: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(new Date());
+  const gy = Number(parts.find((p) => p.type === "year")?.value);
+  const gm = Number(parts.find((p) => p.type === "month")?.value);
+  const gd = Number(parts.find((p) => p.type === "day")?.value);
+  return gregorianToJalali(gy, gm, gd);
 }
 
 /** Iran has had a constant +03:30 offset since daylight saving was dropped in 2022. */
@@ -145,4 +247,31 @@ export function formatJalaliDate(date: Date): string {
     day: "2-digit",
     timeZone: "Asia/Tehran",
   }).format(date);
+}
+
+/** Jalali date + time for admin lists (Tehran). */
+export function formatJalaliDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("fa-IR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Tehran",
+  }).format(date);
+}
+
+/** Short Jalali day label for charts, e.g. ۶/۲۱ */
+export function formatJalaliChartDay(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const gy = Number(parts.find((p) => p.type === "year")?.value);
+  const gm = Number(parts.find((p) => p.type === "month")?.value);
+  const gd = Number(parts.find((p) => p.type === "day")?.value);
+  const { jm, jd } = gregorianToJalali(gy, gm, gd);
+  return toPersianDigits(`${jm}/${jd}`);
 }

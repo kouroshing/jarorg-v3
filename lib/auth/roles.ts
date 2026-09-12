@@ -1,4 +1,4 @@
-import { isAdminPhone } from "@/lib/auth/admin";
+import { isSuperAdminPhone } from "@/lib/auth/admin";
 
 /**
  * Single source of truth for roles.
@@ -6,6 +6,9 @@ import { isAdminPhone } from "@/lib/auth/admin";
  * Two vocabularies, deliberately: the session carries only what the middleware
  * needs to gate a route, while the database records what a person actually is.
  * They are not interchangeable — a SPECIALIST has the "user" session role.
+ *
+ * Staff admins (AdminStaff) get session role "admin" at login via
+ * resolveAdminAccessByPhone — not via isSuperAdminPhone alone.
  */
 export type SessionRole = "user" | "admin";
 
@@ -26,10 +29,11 @@ export function isSpecialistRole(value: string | null | undefined): boolean {
   return parseDbUserRole(value) === "SPECIALIST";
 }
 
+/** Super-admin phone only (sync). Staff admins are resolved async at login. */
 export function sessionRoleFromPhone(phoneDigits: string): SessionRole {
-  return isAdminPhone(phoneDigits) ? "admin" : "user";
+  return isSuperAdminPhone(phoneDigits) ? "admin" : "user";
 }
 
 export function dbRoleFromPhone(phoneDigits: string): DbUserRole {
-  return isAdminPhone(phoneDigits) ? "ADMIN" : "USER";
+  return isSuperAdminPhone(phoneDigits) ? "ADMIN" : "USER";
 }

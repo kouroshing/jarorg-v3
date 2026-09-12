@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { normalizePhoneDigits } from "@/lib/auth/phone";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 import { ADMIN_STATUSES } from "@/lib/projects/status";
 import { sendProjectCreatedSmsNotifications } from "@/lib/sms/project-created";
 import { PROJECT_BUDGET_IDS } from "@/lib/projects/budget";
@@ -46,7 +46,6 @@ const projectInputSchema = z
     phone: z.string().trim().min(10, "شماره تماس معتبر نیست.").max(32),
     callTime: z.enum(["morning", "noon", "evening"]),
     budget: z.enum(PROJECT_BUDGET_IDS),
-    expertId: z.string().uuid().optional(),
   })
   .superRefine((data, ctx) => {
     const offering = getOfferingById(data.serviceOfferingId);
@@ -80,7 +79,6 @@ export type AdminProjectRecord = {
   referenceLink: string | null;
   status: string;
   adminNotes: string | null;
-  expert: { name: string } | null;
 };
 
 function revalidateAdminProjectPaths() {
@@ -121,21 +119,6 @@ export async function submitProjectRequest(
 
     const serviceDetails = buildOfferingServiceDetailsJson(offering, null);
 
-    let expertId: string | null = null;
-    if (data.expertId) {
-      const expert = await prisma.expert.findFirst({
-        where: { id: data.expertId, isActive: true },
-        select: { id: true },
-      });
-      if (!expert) {
-        return {
-          success: false,
-          error: "متخصص انتخاب‌شده در دسترس نیست.",
-        };
-      }
-      expertId = expert.id;
-    }
-
     const project = await prisma.project.create({
       data: {
         serviceType: offering.serviceType,
@@ -147,7 +130,6 @@ export async function submitProjectRequest(
         contactPhone,
         preferredCallTime: data.callTime,
         budget: data.budget,
-        expertId,
         bookingRoute: "meeting_request",
         status: "PENDING",
         userId: session?.userId ?? null,
@@ -204,7 +186,9 @@ export async function updateProjectLead(
   input: UpdateProjectLeadInput
 ): Promise<UpdateProjectLeadResult> {
   const session = await getSession();
-  if (!session || !isAdminSession(session)) {
+  try {
+    await requireAdminPermission(session, "settings_manage");
+  } catch {
     return { success: false, error: "دسترسی غیرمجاز." };
   }
 
@@ -278,7 +262,9 @@ export async function getAdminProjects(
   params: GetAdminProjectsParams = {}
 ): Promise<GetAdminProjectsResult> {
   const session = await getSession();
-  if (!session || !isAdminSession(session)) {
+  try {
+    await requireAdminPermission(session, "settings_manage");
+  } catch {
     return { success: false, error: "دسترسی غیرمجاز." };
   }
 
@@ -336,7 +322,6 @@ export async function getAdminProjects(
           referenceLink: true,
           status: true,
           adminNotes: true,
-          expert: { select: { name: true } },
         },
       }),
       prisma.project.count({ where }),
@@ -360,7 +345,9 @@ export async function manuallyApprovePurchase(input: {
   purchaseId: string;
 }): Promise<{ success: boolean; error?: string }> {
   const session = await getSession();
-  if (!session || !isAdminSession(session)) {
+  try {
+    await requireAdminPermission(session, "settings_manage");
+  } catch {
     return { success: false, error: "دسترسی غیرمجاز." };
   }
 

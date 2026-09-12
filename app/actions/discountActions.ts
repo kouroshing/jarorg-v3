@@ -2,15 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 import { prisma } from "@/lib/prisma";
 import xss from "xss";
 
 export async function createDiscount(formData: FormData) {
   try {
     const session = await getSession();
-    if (!session || !isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. فقط مدیر کل امکان ثبت کد تخفیف را دارد." };
+    try {
+      await requireAdminPermission(session, "settings_manage");
+    } catch {
+      return { success: false, error: "Unauthorized" };
     }
 
     const code = xss(formData.get("code") as string)?.toUpperCase()?.trim();
@@ -75,7 +77,9 @@ export async function createDiscount(formData: FormData) {
 export async function getAllDiscounts() {
   try {
     const session = await getSession();
-    if (!session || !isAdminSession(session)) {
+    try {
+      await requireAdminPermission(session, "settings_manage");
+    } catch {
       throw new Error("Unauthorized");
     }
 
@@ -93,8 +97,10 @@ export async function getAllDiscounts() {
 export async function toggleDiscountStatus(id: string, currentStatus: boolean) {
   try {
     const session = await getSession();
-    if (!session || !isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز" };
+    try {
+      await requireAdminPermission(session, "settings_manage");
+    } catch {
+      return { success: false, error: "Unauthorized" };
     }
 
     await prisma.discountCode.update({

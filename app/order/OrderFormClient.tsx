@@ -24,6 +24,10 @@ import StepFinalize, {
   isValidPersonName,
   sanitizePersonName,
 } from "@/components/order/steps/StepFinalize";
+import {
+  getGoldenIndex,
+  resolveHourlyRate,
+} from "@/lib/pricing/budgetStops";
 
 interface OrderFormClientProps {
   initialContactName?: string;
@@ -41,9 +45,6 @@ function getDefaultTomorrowDate() {
     day: "2-digit",
   }).format(tomorrow);
 }
-
-/** Baseline rate kept server-side; client no longer picks budget on step 4. */
-const DEFAULT_HOURLY_RATE = 3_600_000;
 
 const STEP_TITLES: Record<number, string> = {
   1: "انتخاب خدمت",
@@ -91,6 +92,7 @@ export default function OrderFormClient({
   const [projectDescription, setProjectDescription] = useState("");
   const [referenceLink, setReferenceLink] = useState("");
   const [moodboardUrls, setMoodboardUrls] = useState<string[]>([]);
+  const [selectedBudgetIndex, setSelectedBudgetIndex] = useState(() => getGoldenIndex());
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitingAfterSubmit, setWaitingAfterSubmit] = useState(false);
@@ -104,9 +106,13 @@ export default function OrderFormClient({
       return districtOrCity ? `محل شما (${districtOrCity})` : "محل کارفرما";
     }
     if (locationType === "SPECIALIST_ADVICE") {
-      return "با مشورت و پیشنهاد عکاس (پیشنهادی جار)";
+      return districtOrCity
+        ? `با مشورت عکاس — ${districtOrCity}`
+        : "با مشورت و پیشنهاد عکاس";
     }
-    return "لوکیشن‌ها و استودیوهای همکار جار";
+    return districtOrCity
+      ? `استودیوهای همکار جار — ${districtOrCity}`
+      : "لوکیشن‌ها و استودیوهای همکار جار";
   }, [locationType, districtOrCity]);
 
   // Validation Logic per step
@@ -115,10 +121,8 @@ export default function OrderFormClient({
       case 1:
         return Boolean(categorySlug);
       case 2:
-        return (
-          Boolean(locationType) &&
-          (locationType !== "CLIENT_LOCATION" || districtOrCity.trim().length > 0)
-        );
+        // Every mode needs a city: map pin, studio, or “photographer suggests”.
+        return Boolean(locationType) && districtOrCity.trim().length >= 2;
       case 3:
         return (
           durationHours >= 1 &&
@@ -209,8 +213,8 @@ export default function OrderFormClient({
         referenceLink: referenceLink.trim(),
         moodboardUrls,
         projectDescription: projectDescription.trim(),
-        isAutoPriced: true,
-        hourlyRate: DEFAULT_HOURLY_RATE,
+        isAutoPriced: selectedBudgetIndex === getGoldenIndex(),
+        hourlyRate: resolveHourlyRate(selectedBudgetIndex),
         contactName: contactName.trim(),
         contactPhone: initialContactPhone,
       });
@@ -253,15 +257,14 @@ export default function OrderFormClient({
   };
 
   return (
-    <div className="min-h-dvh w-full overflow-x-clip bg-jar-canvas text-jar-primary flex flex-col selection:bg-jar-primary/10 relative z-[2]" dir="rtl">
+    <div className="min-h-dvh w-full overflow-x-clip bg-white text-neutral-900 flex flex-col selection:bg-neutral-900/10 relative z-[2]" dir="rtl">
 
-      {/* 1. FIXED STANDARD WIZARD HEADER - Claude Warm Editorial Style */}
-      <header className="sticky top-0 inset-x-0 z-40 w-full bg-jar-canvas/90 backdrop-blur-md border-b border-jar-border pt-[env(safe-area-inset-top,0px)] shadow-none">
+      {/* 1. FIXED STANDARD WIZARD HEADER */}
+      <header className="sticky top-0 inset-x-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-neutral-200 pt-[env(safe-area-inset-top,0px)] shadow-none">
         
-        {/* Solid Editorial Black Progress Bar */}
-        <div className="w-full h-1 bg-jar-border relative overflow-hidden">
+        <div className="w-full h-1 bg-neutral-100 relative overflow-hidden">
           <div
-            className="h-full bg-jar-primary transition-all duration-350 ease-out rounded-r-full"
+            className="h-full bg-neutral-900 transition-all duration-350 ease-out rounded-r-full"
             style={{ width: `${(currentStep / 4) * 100}%` }}
           />
         </div>
@@ -273,7 +276,7 @@ export default function OrderFormClient({
               <button
                 type="button"
                 onClick={handlePrev}
-                className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-jar-border bg-jar-surface text-jar-muted hover:bg-jar-soft hover:text-jar-primary transition-colors shadow-none active:scale-95 cursor-pointer"
+                className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-none active:scale-95 cursor-pointer"
                 aria-label="مرحله قبلی"
               >
                 <ArrowRight className="h-4.5 w-4.5 sm:h-5 sm:w-5 stroke-[2.2]" />
@@ -283,11 +286,11 @@ export default function OrderFormClient({
 
           {/* Step Indicator Counter & Prominent Step Title */}
           <div className="text-center flex flex-col items-center justify-center gap-0.5 sm:gap-1">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-jar-surface border border-jar-border text-[10px] sm:text-xs font-bold text-jar-muted">
-              <span className="h-1.5 w-1.5 rounded-full bg-jar-primary" />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-neutral-50 border border-neutral-200 text-[10px] sm:text-xs font-bold text-neutral-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
               مرحله {currentStep} از ۴
             </span>
-            <span className="text-xs sm:text-sm font-bold text-jar-primary block tracking-tight">
+            <span className="text-xs sm:text-sm font-bold text-neutral-900 block tracking-tight">
               {STEP_TITLES[currentStep]}
             </span>
           </div>
@@ -296,7 +299,7 @@ export default function OrderFormClient({
           <div className="w-9 sm:w-11 flex justify-end">
             <Link
               href="/"
-              className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-jar-border bg-jar-surface text-jar-muted hover:bg-jar-soft hover:text-jar-primary transition-colors shadow-none active:scale-95 cursor-pointer"
+              className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-none active:scale-95 cursor-pointer"
               aria-label="خروج از فرم"
             >
               <X className="h-4.5 w-4.5 sm:h-5 sm:w-5 stroke-[2.2]" />
@@ -380,36 +383,36 @@ export default function OrderFormClient({
                 onChangeReferenceLink={setReferenceLink}
                 moodboardUrls={moodboardUrls}
                 onChangeMoodboardUrls={setMoodboardUrls}
+                selectedBudgetIndex={selectedBudgetIndex}
+                onChangeBudgetIndex={setSelectedBudgetIndex}
               />
             )}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {/* 3. STICKY BOTTOM ACTION BAR WITH CLAUDE LIGHT WARM FROSTED GLASS */}
-      <footer className="fixed bottom-0 inset-x-0 w-full bg-jar-canvas/90 backdrop-blur-md border-t border-jar-border py-2.5 sm:py-3 px-3 sm:px-6 z-50 shadow-none pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+      {/* 3. STICKY BOTTOM ACTION BAR */}
+      <footer className="fixed bottom-0 inset-x-0 w-full bg-white/95 backdrop-blur-md border-t border-neutral-200 py-2.5 sm:py-3 px-3 sm:px-6 z-50 shadow-none pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
         <div className="max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-3 w-full">
           
-          {/* Secondary "قبلی" Button on Right (RTL) */}
           {currentStep > 1 && (
             <button
               type="button"
               onClick={handlePrev}
-              className="h-11 sm:h-12 px-4 sm:px-6 shrink-0 rounded-full border border-jar-border text-jar-primary text-xs sm:text-sm font-medium hover:bg-jar-soft transition-colors cursor-pointer shadow-none bg-jar-surface"
+              className="h-11 sm:h-12 px-4 sm:px-6 shrink-0 rounded-xl border border-neutral-200 text-neutral-900 text-xs sm:text-sm font-medium hover:bg-neutral-50 transition-colors cursor-pointer shadow-none bg-white"
             >
               قبلی
             </button>
           )}
 
-          {/* Primary Action Button: Solid Jet-Black #141413 */}
           <button
             type="button"
             disabled={!isStepValid || isSubmitting || waitingAfterSubmit}
             onClick={handleNext}
-            className={`h-11 sm:h-12 px-5 sm:px-8 flex-1 min-w-0 rounded-full font-medium text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-none ${
+            className={`h-11 sm:h-12 px-5 sm:px-8 flex-1 min-w-0 rounded-xl font-medium text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-none ${
               !isStepValid
-                ? "bg-jar-border/60 text-[#A8A29A] border border-jar-border cursor-not-allowed"
-                : "bg-jar-primary hover:bg-jar-primaryHover active:bg-[#1f1e1d] text-white"
+                ? "bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed"
+                : "bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-950 text-white"
             }`}
           >
             {isSubmitting ? (

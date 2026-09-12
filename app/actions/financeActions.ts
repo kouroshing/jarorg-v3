@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
+import {
+  adminAuthFailure,
+  requireAdminPermission,
+} from "@/lib/auth/adminAccess";
 import { prisma } from "@/lib/prisma";
 
 export interface FinanceActionResult {
@@ -248,9 +252,11 @@ export async function getWithdrawalRequests(): Promise<FinanceActionResult> {
  */
 export async function getAllWithdrawalRequests(): Promise<FinanceActionResult> {
   try {
-    const session = await getSession();
-    if (!session || (session.role as string) !== "admin") {
-      return { success: false, error: "دسترسی ادمین الزامی است." };
+    try {
+      const session = await getSession();
+      await requireAdminPermission(session, "finance_manage");
+    } catch (error) {
+      return adminAuthFailure(error);
     }
 
     const requests = await prisma.withdrawalRequest.findMany({
@@ -282,9 +288,11 @@ export async function updateWithdrawalStatus(
   trackingCode?: string
 ): Promise<FinanceActionResult> {
   try {
-    const session = await getSession();
-    if (!session || (session.role as string) !== "admin") {
-      return { success: false, error: "دسترسی ادمین الزامی است." };
+    try {
+      const session = await getSession();
+      await requireAdminPermission(session, "finance_manage");
+    } catch (error) {
+      return adminAuthFailure(error);
     }
 
     const res = await prisma.$transaction(async (tx) => {
@@ -337,7 +345,9 @@ export async function updateWithdrawalStatus(
     });
 
     if (res.success) {
-      revalidatePath("/admin/discounts");
+      revalidatePath("/admin");
+      revalidatePath("/admin/WithdrawalRequest");
+      revalidatePath("/dashboard/wallet");
     }
 
     return res;

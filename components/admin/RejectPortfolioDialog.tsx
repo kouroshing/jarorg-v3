@@ -45,7 +45,6 @@ export default function RejectPortfolioDialog({
       }
       if (onClose) onClose();
       router.refresh();
-      window.location.reload();
     } catch (err: any) {
       setError(err.message || "خطای غیرمنتظره در ارتباط با سرور");
       setLoading(false);

@@ -26,6 +26,11 @@ import {
 } from "@/app/actions/adminActionHandlers";
 import type { SpecialistReviewCard } from "@/lib/specialists/review";
 import Image from "next/image";
+import EquipmentTagsDisplay from "@/components/specialist/EquipmentTagsDisplay";
+import {
+  SPECIALIST_PROFILE_REJECTION_REASONS,
+  buildSpecialistRejectionMessage,
+} from "@/lib/specialists/rejectionReasons";
 
 const STATUS_LABEL: Record<string, { text: string; className: string }> = {
   PENDING_REVIEW: {
@@ -75,12 +80,31 @@ export default function SpecialistReviewBoard({
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [rejecting, setRejecting] = useState<SpecialistReviewCard | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
+  const [rejectReasonIds, setRejectReasonIds] = useState<string[]>([]);
+  const [rejectExtraNote, setRejectExtraNote] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
+  const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
+  const [confirmActivate, setConfirmActivate] = useState<{
+    card: SpecialistReviewCard;
+    approveAllPending: boolean;
+  } | null>(null);
+  const [exceptionPhrase, setExceptionPhrase] = useState("");
+  const [rejectItem, setRejectItem] = useState<{
+    card: SpecialistReviewCard;
+    itemId: string;
+  } | null>(null);
+  const [rejectItemReason, setRejectItemReason] = useState("");
+  const [rejectKyc, setRejectKyc] = useState<SpecialistReviewCard | null>(null);
+  const [rejectKycReason, setRejectKycReason] = useState("");
+  const [localCards, setLocalCards] = useState(cards);
+
+  React.useEffect(() => {
+    setLocalCards(cards);
+  }, [cards]);
 
   const pendingCount = useMemo(
-    () => cards.filter((c) => c.status === "PENDING_REVIEW").length,
-    [cards]
+    () => localCards.filter((c) => c.status === "PENDING_REVIEW").length,
+    [localCards]
   );
 
   const refresh = () => startTransition(() => router.refresh());
@@ -90,12 +114,32 @@ export default function SpecialistReviewBoard({
     setTimeout(() => setToast(null), 6000);
   };
 
-  const handleApprove = async (card: SpecialistReviewCard, approveAllPending: boolean) => {
+  const requestApprove = (
+    card: SpecialistReviewCard,
+    approveAllPending: boolean
+  ) => {
+    setActionsMenuId(null);
+    if (card.belowPortfolioMinimum) {
+      setConfirmActivate({ card, approveAllPending });
+      setExceptionPhrase("");
+      return;
+    }
+    void runApprove(card, approveAllPending);
+  };
+
+  const runApprove = async (
+    card: SpecialistReviewCard,
+    approveAllPending: boolean
+  ) => {
+    const underMinimum = card.belowPortfolioMinimum;
     setBusy(card.profileId);
+    setConfirmActivate(null);
+    setExceptionPhrase("");
     try {
       const res = await approveSpecialistAction({
         specialistId: card.profileId,
         approveAllPending,
+        allowUnderMinimum: underMinimum,
       });
       if (res.success) {
         announce("success", res.message || "متخصص تایید شد.");
@@ -110,23 +154,41 @@ export default function SpecialistReviewBoard({
     }
   };
 
+  const openRejectDialog = (card: SpecialistReviewCard) => {
+    setRejecting(card);
+    setRejectReasonIds([]);
+    setRejectExtraNote("");
+  };
+
+  const toggleRejectReason = (id: string) => {
+    setRejectReasonIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const handleReject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejecting) return;
-    if (!rejectReason.trim()) {
-      announce("error", "نوشتن دلیل بازگرداندن پرونده الزامی است.");
+    if (rejectReasonIds.length === 0 && !rejectExtraNote.trim()) {
+      announce("error", "حداقل یک علت را تیک بزنید یا توضیح بنویسید.");
+      return;
+    }
+    const reason = buildSpecialistRejectionMessage(rejectReasonIds, rejectExtraNote);
+    if (!reason.trim()) {
+      announce("error", "دلیل بازگرداندن پرونده الزامی است.");
       return;
     }
     setBusy(rejecting.profileId);
     try {
       const res = await rejectSpecialistAction({
         specialistId: rejecting.profileId,
-        reason: rejectReason.trim(),
+        reason,
       });
       if (res.success) {
         announce("success", res.message || "پرونده بازگردانده شد.");
         setRejecting(null);
-        setRejectReason("");
+        setRejectReasonIds([]);
+        setRejectExtraNote("");
         refresh();
       } else {
         announce("error", res.error);
@@ -141,23 +203,100 @@ export default function SpecialistReviewBoard({
   const handleItemDecision = async (
     card: SpecialistReviewCard,
     itemId: string,
-    decision: "APPROVE" | "REJECT"
+    decision: "APPROVE" | "REJECT",
+    reason?: string
   ) => {
+    if (decision === "REJECT" && !reason) {
+      setRejectItem({ card, itemId });
+      setRejectItemReason("");
+      return;
+    }
     setBusy(itemId);
     try {
       if (decision === "APPROVE") {
-        await approvePortfolioAction([itemId]);
-        announce("success", "نمونه‌کار تایید شد.");
+        const res = await approvePortfolioAction([itemId]);
+        if (res.type === "error") {
+          announce("error", res.message || "تایید انجام نشد.");
+          return;
+        }
+        setLocalCards((prev) =>
+          prev.map((c) => {
+            if (c.profileId !== card.profileId) return c;
+            const items = c.items.map((it) =>
+              it.id === itemId
+                ? { ...it, reviewStatus: "APPROVED", rejectionReason: null }
+                : it
+            );
+            const approved = items.filter((i) => i.reviewStatus === "APPROVED").length;
+            const pending = items.filter((i) => i.reviewStatus === "PENDING").length;
+            const rejected = items.filter((i) => i.reviewStatus === "REJECTED").length;
+            return {
+              ...c,
+              items,
+              counts: { ...c.counts, approved, pending, rejected, total: items.length },
+            };
+          })
+        );
+        announce("success", res.message || "نمونه‌کار تایید شد.");
       } else {
-        const reason = window.prompt("علت رد این نمونه‌کار چیست؟");
-        if (!reason || !reason.trim()) return;
-        const res = await rejectPortfolioAction({ portfolioItemId: itemId, reason: reason.trim() });
+        const res = await rejectPortfolioAction({
+          portfolioItemId: itemId,
+          reason: (reason || "").trim(),
+        });
         if (!res.success) {
           announce("error", res.error);
           return;
         }
+        setLocalCards((prev) =>
+          prev.map((c) => {
+            if (c.profileId !== card.profileId) return c;
+            const items = c.items.map((it) =>
+              it.id === itemId
+                ? {
+                    ...it,
+                    reviewStatus: "REJECTED",
+                    rejectionReason: (reason || "").trim(),
+                  }
+                : it
+            );
+            const approved = items.filter((i) => i.reviewStatus === "APPROVED").length;
+            const pending = items.filter((i) => i.reviewStatus === "PENDING").length;
+            const rejected = items.filter((i) => i.reviewStatus === "REJECTED").length;
+            return {
+              ...c,
+              items,
+              counts: { ...c.counts, approved, pending, rejected, total: items.length },
+            };
+          })
+        );
         announce("success", "نمونه‌کار رد شد و به متخصص اطلاع داده شد.");
+        setRejectItem(null);
+        setRejectItemReason("");
       }
+      refresh();
+    } catch (err: any) {
+      announce("error", err?.message || "خطای غیرمنتظره در سرور.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitKycReject = async () => {
+    if (!rejectKyc || !rejectKycReason.trim()) {
+      announce("error", "علت رد احراز هویت الزامی است.");
+      return;
+    }
+    setBusy(rejectKyc.profileId);
+    try {
+      const res = await setSpecialistKycStatusAction({
+        specialistId: rejectKyc.profileId,
+        status: "FAILED",
+        reason: rejectKycReason.trim(),
+      });
+      if (res.success) announce("success", res.message || "KYC رد شد");
+      else announce("error", res.error);
+      setRejectKyc(null);
+      setRejectKycReason("");
       refresh();
     } catch (err: any) {
       announce("error", err?.message || "خطای غیرمنتظره در سرور.");
@@ -216,6 +355,8 @@ export default function SpecialistReviewBoard({
 
       {toast && (
         <div
+          role="status"
+          aria-live="polite"
           className={`p-3 rounded-xl text-xs font-medium border ${
             toast.type === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-800"
@@ -226,7 +367,7 @@ export default function SpecialistReviewBoard({
         </div>
       )}
 
-      {cards.length === 0 ? (
+      {localCards.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
           <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
           <p className="text-sm font-bold text-slate-700">صف بررسی خالی است</p>
@@ -236,7 +377,7 @@ export default function SpecialistReviewBoard({
         </div>
       ) : (
         <div className="space-y-4">
-          {cards.map((card) => {
+          {localCards.map((card) => {
             const isOpen = expanded === card.profileId;
             const status = STATUS_LABEL[card.status] || STATUS_LABEL.INCOMPLETE;
             const isBusy = busy === card.profileId || isPending;
@@ -244,18 +385,16 @@ export default function SpecialistReviewBoard({
               !card.eligibility.hasDisplayName && "نام",
               !card.eligibility.hasAvatar && "عکس پروفایل",
               !card.eligibility.hasCategories && "دسته‌بندی",
-              card.eligibility.submittableCategories.length === 0 && "۱۰ نمونه‌کار در یک شاخه",
+              card.eligibility.submittableCategories.length === 0 &&
+                !card.canActivateCore &&
+                "۱۰ نمونه‌کار در یک شاخه",
               !card.eligibility.hasCity && "شهر",
               !card.eligibility.hasBaseLocation && "مبدأ روی نقشه",
               !card.eligibility.hasAgreedToTerms && "تعهدنامه",
             ].filter(Boolean) as string[];
 
-            const activationBlocked = [
-              card.eligibility.submittableCategories.length === 0,
-              !card.eligibility.hasCity,
-              !card.eligibility.hasBaseLocation,
-              !card.eligibility.hasAgreedToTerms,
-            ].some(Boolean);
+            const activationBlocked = !card.canActivateCore;
+            const underMinimum = card.belowPortfolioMinimum;
 
             return (
               <div
@@ -343,105 +482,120 @@ export default function SpecialistReviewBoard({
                     />
                   </button>
 
-                  {/* Decision buttons */}
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {/* Decision buttons — primary + secondary menu */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 relative">
+                    {underMinimum && card.status !== "ACTIVE" && (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-100 text-amber-950 border border-amber-300">
+                        نمونه‌کارها کمتر از ۱۰ عدد — تایید سخت‌گیرانه
+                      </span>
+                    )}
                     {card.status !== "ACTIVE" && (
                       <button
                         type="button"
-                        onClick={() => handleApprove(card, true)}
+                        onClick={() => requestApprove(card, true)}
                         disabled={isBusy || activationBlocked}
                         title={
                           activationBlocked
                             ? `پرونده ناقص است: ${missing.join("، ")}`
-                            : "تمام آثار در انتظار را تایید و متخصص را فعال کن"
+                            : underMinimum
+                              ? "تایید استثنایی: نمونه‌کارها کمتر از ۱۰ عدد است"
+                              : "تمام آثار در انتظار را تایید و متخصص را فعال کن"
                         }
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                          underMinimum
+                            ? "bg-amber-700 hover:bg-amber-800"
+                            : "bg-jar-primary hover:bg-jar-primaryHover"
+                        }`}
                       >
                         {isBusy ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <Sparkles className="w-3.5 h-3.5" />
                         )}
-                        تایید همه و فعال‌سازی
+                        {underMinimum ? "تایید استثنایی و فعال‌سازی" : "تایید همه و فعال‌سازی"}
                       </button>
                     )}
 
-                    {card.status !== "ACTIVE" && card.canActivate && (
+                    <div className="relative">
                       <button
                         type="button"
-                        onClick={() => handleApprove(card, false)}
+                        onClick={() =>
+                          setActionsMenuId(
+                            actionsMenuId === card.profileId ? null : card.profileId
+                          )
+                        }
                         disabled={isBusy}
-                        title="فقط پروفایل را فعال کن؛ آثار در انتظار دست‌نخورده می‌مانند"
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-40"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-40"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        فقط فعال‌سازی
+                        سایر اقدامات
+                        <ChevronDown className="w-3.5 h-3.5" />
                       </button>
-                    )}
-
-                    {card.kycStatus === "PENDING" && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => {
-                            setBusy(card.profileId);
-                            setSpecialistKycStatusAction({
-                              specialistId: card.profileId,
-                              status: "VERIFIED",
-                            })
-                              .then((res) => {
-                                if (res.success) announce("success", res.message || "KYC تایید شد");
-                                else announce("error", res.error);
-                                refresh();
-                              })
-                              .finally(() => setBusy(null));
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          تایید KYC
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => {
-                            const reason = window.prompt("علت رد احراز هویت؟") || "";
-                            if (!reason.trim()) return;
-                            setBusy(card.profileId);
-                            setSpecialistKycStatusAction({
-                              specialistId: card.profileId,
-                              status: "FAILED",
-                              reason,
-                            })
-                              .then((res) => {
-                                if (res.success) announce("success", res.message || "KYC رد شد");
-                                else announce("error", res.error);
-                                refresh();
-                              })
-                              .finally(() => setBusy(null));
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 disabled:opacity-40"
-                        >
-                          رد KYC
-                        </button>
-                      </>
-                    )}
-
-                    {card.status !== "INCOMPLETE" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRejecting(card);
-                          setRejectReason("");
-                        }}
-                        disabled={isBusy}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-40"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        بازگرداندن پرونده
-                      </button>
-                    )}
+                      {actionsMenuId === card.profileId && (
+                        <div className="absolute left-0 top-full mt-1 z-20 min-w-[200px] rounded-xl border border-slate-200 bg-white shadow-lg p-1.5 space-y-0.5">
+                          {card.status !== "ACTIVE" && (card.canActivate || underMinimum) && (
+                            <button
+                              type="button"
+                              onClick={() => requestApprove(card, false)}
+                              disabled={isBusy || activationBlocked}
+                              className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-40"
+                            >
+                              {underMinimum ? "فعال‌سازی استثنایی (بدون تایید آثار)" : "فقط فعال‌سازی"}
+                            </button>
+                          )}
+                          {card.kycStatus === "PENDING" && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  setBusy(card.profileId);
+                                  setSpecialistKycStatusAction({
+                                    specialistId: card.profileId,
+                                    status: "VERIFIED",
+                                  })
+                                    .then((res) => {
+                                      if (res.success)
+                                        announce("success", res.message || "KYC تایید شد");
+                                      else announce("error", res.error);
+                                      refresh();
+                                    })
+                                    .finally(() => setBusy(null));
+                                }}
+                                className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-sky-800 hover:bg-sky-50 disabled:opacity-40"
+                              >
+                                تایید KYC
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  setRejectKyc(card);
+                                  setRejectKycReason("");
+                                }}
+                                className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                              >
+                                رد KYC
+                              </button>
+                            </>
+                          )}
+                          {card.status !== "INCOMPLETE" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActionsMenuId(null);
+                                openRejectDialog(card);
+                              }}
+                              disabled={isBusy}
+                              className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                            >
+                              بازگرداندن پرونده
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -459,7 +613,7 @@ export default function SpecialistReviewBoard({
                 )}
 
                 {card.reviewNote && (
-                  <div className="mx-4 sm:mx-5 mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700">
+                  <div className="mx-4 sm:mx-5 mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700 whitespace-pre-wrap">
                     <span className="font-bold">آخرین یادداشت بررسی: </span>
                     {card.reviewNote}
                   </div>
@@ -475,13 +629,16 @@ export default function SpecialistReviewBoard({
                         </span>
                         <span className="text-xs text-slate-800">{card.workArea || "—"}</span>
                       </div>
-                      <div className="rounded-xl bg-white border border-slate-200 p-3">
+                      <div className="rounded-xl bg-white border border-slate-200 p-3 md:col-span-1">
                         <span className="block text-[10px] font-bold text-slate-400 mb-1">
-                          تجهیزات
+                          {card.isMobileGrapher ? "تجهیزات موبایل‌گرافی" : "تجهیزات"}
                         </span>
-                        <span className="text-xs text-slate-800">
-                          {card.equipmentSummary || "—"}
-                        </span>
+                        {card.isMobileGrapher && (
+                          <span className="mb-2 inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                            موبایل‌گرافر
+                          </span>
+                        )}
+                        <EquipmentTagsDisplay value={card.equipmentSummary} />
                       </div>
                       <div className="rounded-xl bg-white border border-slate-200 p-3">
                         <span className="block text-[10px] font-bold text-slate-400 mb-1">
@@ -494,7 +651,7 @@ export default function SpecialistReviewBoard({
                     {card.bio && (
                       <div className="rounded-xl bg-white border border-slate-200 p-3">
                         <span className="block text-[10px] font-bold text-slate-400 mb-1">
-                          بیوگرافی
+                          بیوگرافی (فقط ادمین)
                         </span>
                         <p className="text-xs text-slate-800 leading-relaxed">{card.bio}</p>
                       </div>
@@ -591,12 +748,16 @@ export default function SpecialistReviewBoard({
                             </div>
 
                             <div className="p-1.5 flex items-center gap-1">
-                              {item.reviewStatus !== "APPROVED" && (
+                              {item.reviewStatus === "PENDING" && (
                                 <button
                                   type="button"
-                                  onClick={() => handleItemDecision(card, item.id, "APPROVE")}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    void handleItemDecision(card, item.id, "APPROVE");
+                                  }}
                                   disabled={busy === item.id}
-                                  className="flex-1 inline-flex items-center justify-center py-1 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                  className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
                                 >
                                   {busy === item.id ? (
                                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -605,7 +766,21 @@ export default function SpecialistReviewBoard({
                                   )}
                                 </button>
                               )}
-                              {item.reviewStatus !== "REJECTED" && (
+                              {item.reviewStatus === "PENDING" && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    void handleItemDecision(card, item.id, "REJECT");
+                                  }}
+                                  disabled={busy === item.id}
+                                  className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                >
+                                  رد
+                                </button>
+                              )}
+                              {item.reviewStatus === "APPROVED" && (
                                 <button
                                   type="button"
                                   onClick={() => handleItemDecision(card, item.id, "REJECT")}
@@ -614,6 +789,11 @@ export default function SpecialistReviewBoard({
                                 >
                                   رد
                                 </button>
+                              )}
+                              {item.reviewStatus === "REJECTED" && (
+                                <span className="flex-1 text-center text-[9px] font-bold text-rose-700 py-1">
+                                  رد شده — غیرقابل تایید مجدد
+                                </span>
                               )}
                             </div>
 
@@ -639,7 +819,7 @@ export default function SpecialistReviewBoard({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
           <form
             onSubmit={handleReject}
-            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-right"
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-right"
           >
             <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
               <div className="p-2 rounded-xl bg-rose-50 text-rose-600">
@@ -650,35 +830,233 @@ export default function SpecialistReviewBoard({
                   بازگرداندن پرونده «{rejecting.displayName}»
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  متخصص به وضعیت ناقص برمی‌گردد و می‌تواند پرونده را اصلاح و دوباره ارسال کند.
+                  علت‌های مربوط را تیک بزنید؛ متن کامل برای متخصص ارسال می‌شود.
                 </p>
               </div>
             </div>
 
-            <textarea
-              rows={3}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              required
-              placeholder="مثال: کیفیت نورپردازی نمونه‌کارها پایین است و مبدأ حرکت روی نقشه دقیق نیست."
-              className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 focus:outline-none"
-            />
+            <fieldset className="space-y-2">
+              <legend className="text-[11px] font-bold text-slate-600 mb-1">
+                علت‌های آماده (می‌توانید چند مورد انتخاب کنید)
+              </legend>
+              <div className="space-y-1.5 max-h-[42vh] overflow-y-auto rounded-xl border border-slate-200 p-2 bg-slate-50/80">
+                {SPECIALIST_PROFILE_REJECTION_REASONS.map((reason) => {
+                  const checked = rejectReasonIds.includes(reason.id);
+                  return (
+                    <label
+                      key={reason.id}
+                      className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors ${
+                        checked
+                          ? "border-rose-300 bg-rose-50"
+                          : "border-transparent bg-white hover:border-slate-200"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleRejectReason(reason.id)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-bold text-slate-900">
+                          {reason.label}
+                        </span>
+                        <span className="block text-[10px] text-slate-500 leading-relaxed mt-0.5">
+                          {reason.detail}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-slate-600">
+                توضیح اضافه (اختیاری)
+              </label>
+              <textarea
+                rows={2}
+                value={rejectExtraNote}
+                onChange={(e) => setRejectExtraNote(e.target.value)}
+                placeholder="اگر نکته خاصی دارید اینجا بنویسید…"
+                className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 focus:outline-none"
+              />
+            </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setRejecting(null)}
+                onClick={() => {
+                  setRejecting(null);
+                  setRejectReasonIds([]);
+                  setRejectExtraNote("");
+                }}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
               >
                 انصراف
               </button>
               <button
                 type="submit"
-                disabled={busy === rejecting.profileId}
+                disabled={
+                  busy === rejecting.profileId ||
+                  (rejectReasonIds.length === 0 && !rejectExtraNote.trim())
+                }
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
               >
                 {busy === rejecting.profileId && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 ارسال دلیل و بازگرداندن
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Exceptional activate dialog */}
+      {confirmActivate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exception-activate-title"
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-amber-200 p-6 space-y-4 text-right"
+          >
+            <h4 id="exception-activate-title" className="text-sm font-bold text-slate-900">
+              تایید استثنایی «{confirmActivate.card.displayName}»
+            </h4>
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 leading-relaxed">
+              نمونه‌کارهای تاییدشده کمتر از ۱۰ عدد است. فقط وقتی ادامه دهید که کیفیت کار
+              را شخصاً تایید کرده‌اید.
+            </p>
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-slate-600">
+                برای ادامه دقیقاً بنویسید: تایید استثنایی
+              </label>
+              <input
+                value={exceptionPhrase}
+                onChange={(e) => setExceptionPhrase(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 focus:outline-none"
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmActivate(null);
+                  setExceptionPhrase("");
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                disabled={exceptionPhrase.trim() !== "تایید استثنایی"}
+                onClick={() =>
+                  void runApprove(
+                    confirmActivate.card,
+                    confirmActivate.approveAllPending
+                  )
+                }
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-700 hover:bg-amber-800 disabled:opacity-50"
+              >
+                تایید و فعال‌سازی
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Portfolio item reject dialog */}
+      {rejectItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!rejectItemReason.trim()) {
+                announce("error", "علت رد نمونه‌کار الزامی است.");
+                return;
+              }
+              void handleItemDecision(
+                rejectItem.card,
+                rejectItem.itemId,
+                "REJECT",
+                rejectItemReason
+              );
+            }}
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-right"
+          >
+            <h4 className="text-sm font-bold text-slate-900">رد نمونه‌کار</h4>
+            <textarea
+              rows={3}
+              value={rejectItemReason}
+              onChange={(e) => setRejectItemReason(e.target.value)}
+              placeholder="علت رد این نمونه‌کار را بنویسید…"
+              className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 focus:outline-none"
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectItem(null);
+                  setRejectItemReason("");
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
+              >
+                انصراف
+              </button>
+              <button
+                type="submit"
+                disabled={!rejectItemReason.trim() || busy === rejectItem.itemId}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+              >
+                رد نمونه‌کار
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* KYC reject dialog */}
+      {rejectKyc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitKycReject();
+            }}
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-right"
+          >
+            <h4 className="text-sm font-bold text-slate-900">
+              رد احراز هویت «{rejectKyc.displayName}»
+            </h4>
+            <textarea
+              rows={3}
+              value={rejectKycReason}
+              onChange={(e) => setRejectKycReason(e.target.value)}
+              placeholder="علت رد احراز هویت…"
+              className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 focus:outline-none"
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectKyc(null);
+                  setRejectKycReason("");
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
+              >
+                انصراف
+              </button>
+              <button
+                type="submit"
+                disabled={!rejectKycReason.trim() || busy === rejectKyc.profileId}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+              >
+                رد KYC
               </button>
             </div>
           </form>

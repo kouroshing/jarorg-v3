@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import { requireAdminPermission } from "@/lib/auth/adminAccess";
 import { prisma } from "@/lib/prisma";
 import { parseTemplate } from "@/lib/jarchiUtils";
 import xss from "xss";
@@ -142,9 +142,10 @@ export async function createTestNotification(): Promise<JarchiActionResult> {
   try {
     const session = await requireSession();
 
-    // Verify phone is the admin phone
-    if (!isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. این عملیات فقط مخصوص مدیریت است." };
+    try {
+      await requireAdminPermission(session, "messages_send");
+    } catch {
+      return { success: false, error: "دسترسی غیرمجاز." };
     }
 
     const titles = [
@@ -209,7 +210,9 @@ const DEFAULT_TEMPLATES = [
 export async function getTemplates(): Promise<JarchiActionResult> {
   try {
     const session = await requireSession();
-    if (!isAdminSession(session)) {
+    try {
+      await requireAdminPermission(session, "messages_send");
+    } catch {
       return { success: false, error: "دسترسی غیرمجاز." };
     }
 
@@ -243,8 +246,10 @@ export async function updateTemplate(
 ): Promise<JarchiActionResult> {
   try {
     const session = await requireSession();
-    if (!isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. فقط مدیر ارشد مجاز به ویرایش است." };
+    try {
+      await requireAdminPermission(session, "messages_send");
+    } catch {
+      return { success: false, error: "دسترسی غیرمجاز." };
     }
 
     const sanitizedTitle = xss(title).trim();
@@ -282,8 +287,10 @@ export async function sendBulkNotifications(
 ): Promise<JarchiActionResult<{ count: number }>> {
   try {
     const session = await requireSession();
-    if (!isAdminSession(session)) {
-      return { success: false, error: "دسترسی غیرمجاز. فقط مدیر ارشد مجاز به ارسال است." };
+    try {
+      await requireAdminPermission(session, "messages_send");
+    } catch {
+      return { success: false, error: "دسترسی غیرمجاز." };
     }
 
     // 1. Resolve target users

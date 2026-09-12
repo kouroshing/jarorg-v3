@@ -63,7 +63,7 @@ npx prisma migrate deploy
 
 ```bash
 cp .env.example .env
-mkdir -p public/uploads/experts
+mkdir -p public/uploads/portfolio public/uploads/avatars
 npm install
 npx prisma migrate dev
 npm run dev

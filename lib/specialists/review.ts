@@ -22,6 +22,7 @@ export type SpecialistReviewCard = {
   workArea: string | null;
   bio: string | null;
   equipmentSummary: string | null;
+  isMobileGrapher: boolean;
   status: string;
   kycStatus: string;
   kycNationalIdMask: string | null;
@@ -45,6 +46,13 @@ export type SpecialistReviewCard = {
   counts: { total: number; approved: number; pending: number; rejected: number };
   /** True once enough APPROVED work exists to switch the profile to ACTIVE. */
   canActivate: boolean;
+  /**
+   * Core profile fields ready (city/base/NDA/avatar/name) even if approved
+   * portfolio is still under the usual 10-item bar.
+   */
+  canActivateCore: boolean;
+  /** True when core is ready but no category has ≥10 approved items. */
+  belowPortfolioMinimum: boolean;
   eligibility: EligibilityResult;
 };
 
@@ -114,6 +122,7 @@ export async function getSpecialistReviewCards(
       workArea: profile.workArea,
       bio: profile.bio,
       equipmentSummary: profile.equipmentSummary,
+      isMobileGrapher: Boolean(profile.isMobileGrapher),
       status: profile.status,
       kycStatus: profile.kycStatus,
       kycNationalIdMask: profile.kycNationalIdMask,
@@ -147,6 +156,19 @@ export async function getSpecialistReviewCards(
         eligibility.hasAgreedToTerms &&
         eligibility.hasAvatar &&
         eligibility.hasDisplayName,
+      canActivateCore:
+        eligibility.hasCity &&
+        eligibility.hasBaseLocation &&
+        eligibility.hasAgreedToTerms &&
+        eligibility.hasAvatar &&
+        eligibility.hasDisplayName,
+      belowPortfolioMinimum:
+        eligibility.hasCity &&
+        eligibility.hasBaseLocation &&
+        eligibility.hasAgreedToTerms &&
+        eligibility.hasAvatar &&
+        eligibility.hasDisplayName &&
+        eligibility.qualifiedCategories.length === 0,
       eligibility,
     };
   });
@@ -202,6 +224,7 @@ export function missingRequirementLabels(eligibility: EligibilityResult): string
   }
   if (!eligibility.hasCity) missing.push("شهر محل فعالیت");
   if (!eligibility.hasBaseLocation) missing.push("مبدأ حرکت روی نقشه");
+  if (!eligibility.hasPlan) missing.push("انتخاب اشتراک");
   if (!eligibility.hasAgreedToTerms) missing.push("پذیرش تعهدنامه");
   return missing;
 }

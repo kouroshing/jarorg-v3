@@ -3,17 +3,38 @@ import { NextAdmin } from "@premieroctet/next-admin/adapters/next";
 import { prisma } from "@/lib/prisma";
 import { options } from "@/lib/admin/options";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import {
+  canAccessNextAdminModel,
+  hasAdminPermission,
+  resolveAdminAccess,
+} from "@/lib/auth/adminAccess";
+import type { AdminPermission } from "@/lib/auth/adminPermissions";
 import { redirect } from "next/navigation";
 import OrderStatusSelect from "@/components/admin/OrderStatusSelect";
 import SpecialistPortfolioReviewWidget from "@/components/admin/SpecialistPortfolioReviewWidget";
+import OrderApplicantsAdminWidget from "@/components/admin/OrderApplicantsAdminWidget";
 import AdminDashboard, { DashboardData } from "@/components/admin/AdminDashboard";
 import AdminBrandHeader from "@/components/admin/AdminBrandHeader";
 import { persianTranslations } from "@/lib/admin/translations";
-import {
-  NEEDS_ADMIN_ACTION_STATUSES,
-  storedValuesFor,
-} from "@/lib/orders/status";
+import { storedValuesFor } from "@/lib/orders/status";
+import type { NextAdminOptions } from "@premieroctet/next-admin";
+
+function filterOptionsForAccess(
+  base: NextAdminOptions,
+  canModel: (model: string) => boolean
+): NextAdminOptions {
+  const groups = (base.sidebar?.groups || [])
+    .map((g) => ({
+      ...g,
+      models: (g.models || []).filter((m) => canModel(String(m))),
+    }))
+    .filter((g) => g.models.length > 0);
+
+  return {
+    ...base,
+    sidebar: { ...base.sidebar, groups },
+  };
+}
 
 export default async function AdminPage({
   params,
@@ -23,9 +44,20 @@ export default async function AdminPage({
   searchParams: { [key: string]: string | string[] | undefined };
 }) {
   const session = await getSession();
-  if (!isAdminSession(session)) {
+  const access = await resolveAdminAccess(session);
+  if (!access) {
     redirect("/login?redirect=/admin");
   }
+
+  const segments = params.nextadmin || [];
+  const modelSegment = segments[0];
+  if (modelSegment && !canAccessNextAdminModel(access, modelSegment)) {
+    redirect("/admin");
+  }
+
+  const scopedOptions = filterOptionsForAccess(options, (model) =>
+    canAccessNextAdminModel(access, model)
+  );
 
   const props = await getNextAdminProps({
     params: params.nextadmin,
@@ -33,127 +65,161 @@ export default async function AdminPage({
     basePath: "/admin",
     apiBasePath: "/api/admin",
     prisma,
-    options,
+    options: scopedOptions,
   });
 
-  const isDashboardRoute = !params.nextadmin || params.nextadmin.length === 0;
+  const isDashboardRoute = segments.length === 0;
   let dashboardElement: React.ReactNode = undefined;
 
   if (isDashboardRoute) {
-    const now = new Date();
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-    const [
-      ordersNeedingActionCount,
-      ordersTodayCount,
-      pendingPortfolioCount,
-      pendingSpecialistCount,
-      revenueResult,
-      ordersLast30Days,
-      recentOrdersRaw,
-    ] = await Promise.all([
-      prisma.order.count({
-        where: {
-          status: { in: storedValuesFor(...NEEDS_ADMIN_ACTION_STATUSES) },
-          OR: [
-            { createdAt: { lt: twentyFourHoursAgo } },
-            { selectedSpecialistId: null },
-          ],
-        },
-      }),
-      prisma.order.count({
-        where: {
-          createdAt: { gte: startOfToday },
-        },
-      }),
-      prisma.portfolioItem.count({
-        where: {
-          reviewStatus: "PENDING",
-        },
-      }),
-      prisma.specialistProfile.count({
-        where: { status: "PENDING_REVIEW" },
-      }),
-      prisma.purchase.aggregate({
-        _sum: { amount: true },
-        where: {
-          status: "SUCCESS",
-          createdAt: { gte: thirtyDaysAgo },
-        },
-      }),
-      prisma.order.findMany({
-        where: {
-          createdAt: { gte: thirtyDaysAgo },
-        },
-        select: {
-          createdAt: true,
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
-      }),
-      prisma.order.findMany({
-        where: {
-          status: { in: storedValuesFor(...NEEDS_ADMIN_ACTION_STATUSES) },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 5,
-        select: {
-          id: true,
-          categoryTitle: true,
-          status: true,
-          totalEstimatedPrice: true,
-          createdAt: true,
-          contactName: true,
-          contactPhone: true,
-        },
-      }),
-    ]);
-
-    // Group orders by day for 30-day trend chart
-    const dailyMap = new Map<string, number>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const key = `${d.getMonth() + 1}/${d.getDate()}`;
-      dailyMap.set(key, 0);
+    if (!hasAdminPermission(access, "dashboard")) {
+      // Land on first allowed custom page
+      if (hasAdminPermission(access, "specialists_review")) redirect("/admin/review");
+      if (hasAdminPermission(access, "messages_send")) redirect("/admin/message");
+      if (hasAdminPermission(access, "finance_manage")) redirect("/admin/WithdrawalRequest");
+      if (hasAdminPermission(access, "stats_view")) redirect("/admin/stats");
+      if (hasAdminPermission(access, "admins_manage")) redirect("/admin/staff");
+      redirect("/");
     }
 
-    ordersLast30Days.forEach((o) => {
-      const d = new Date(o.createdAt);
-      const key = `${d.getMonth() + 1}/${d.getDate()}`;
-      if (dailyMap.has(key)) {
-        dailyMap.set(key, (dailyMap.get(key) || 0) + 1);
-      }
-    });
+    const now = new Date();
+    const fortyEightHoursAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const canOrders = hasAdminPermission(access, "orders_manage");
+    const canReview = hasAdminPermission(access, "specialists_review");
+    const canFinance = hasAdminPermission(access, "finance_manage");
 
-    const chartData = Array.from(dailyMap.entries()).map(([date, count]) => ({
-      date,
-      "تعداد سفارش‌ها": count,
-    }));
-
-    const kpiData: DashboardData = {
-      ordersNeedingActionCount,
-      ordersTodayCount,
+    const [
+      pendingReviewCount,
+      matchingStuckCount,
+      awaitingPaymentCount,
       pendingPortfolioCount,
       pendingSpecialistCount,
-      jaramoozMonthlyRevenue: revenueResult._sum.amount || 0,
-      chartData,
-      recentPendingOrders: recentOrdersRaw.map((o) => ({
-        id: o.id,
-        categoryTitle: o.categoryTitle,
-        status: o.status,
-        totalEstimatedPrice: o.totalEstimatedPrice,
-        createdAt: o.createdAt.toISOString(),
-        contactName: o.contactName,
-        contactPhone: o.contactPhone,
+      pendingWithdrawalCount,
+      triageRaw,
+      matchingRaw,
+      withdrawalsRaw,
+    ] = await Promise.all([
+      canOrders
+        ? prisma.order.count({
+            where: {
+              status: { in: storedValuesFor("PENDING_REVIEW", "NEEDS_CLIENT_EDIT") },
+            },
+          })
+        : Promise.resolve(0),
+      canOrders
+        ? prisma.order.count({
+            where: {
+              status: { in: storedValuesFor("MATCHING", "HAS_APPLICANTS") },
+              OR: [
+                { createdAt: { lt: fortyEightHoursAgo } },
+                { interests: { none: {} } },
+              ],
+            },
+          })
+        : Promise.resolve(0),
+      canOrders
+        ? prisma.order.count({
+            where: { status: { in: storedValuesFor("AWAITING_PAYMENT") } },
+          })
+        : Promise.resolve(0),
+      canReview
+        ? prisma.portfolioItem.count({ where: { reviewStatus: "PENDING" } })
+        : Promise.resolve(0),
+      canReview
+        ? prisma.specialistProfile.count({ where: { status: "PENDING_REVIEW" } })
+        : Promise.resolve(0),
+      canFinance
+        ? prisma.withdrawalRequest.count({ where: { status: "PENDING" } })
+        : Promise.resolve(0),
+      canOrders
+        ? prisma.order.findMany({
+            where: {
+              status: { in: storedValuesFor("PENDING_REVIEW", "NEEDS_CLIENT_EDIT") },
+            },
+            orderBy: { createdAt: "asc" },
+            take: 12,
+            select: {
+              id: true,
+              categoryTitle: true,
+              status: true,
+              totalEstimatedPrice: true,
+              createdAt: true,
+              contactName: true,
+              contactPhone: true,
+              _count: { select: { interests: true } },
+            },
+          })
+        : Promise.resolve([]),
+      canOrders
+        ? prisma.order.findMany({
+            where: {
+              status: { in: storedValuesFor("MATCHING", "HAS_APPLICANTS") },
+              OR: [
+                { createdAt: { lt: fortyEightHoursAgo } },
+                { interests: { none: {} } },
+              ],
+            },
+            orderBy: { createdAt: "asc" },
+            take: 8,
+            select: {
+              id: true,
+              categoryTitle: true,
+              status: true,
+              totalEstimatedPrice: true,
+              createdAt: true,
+              contactName: true,
+              contactPhone: true,
+              _count: { select: { interests: true } },
+            },
+          })
+        : Promise.resolve([]),
+      canFinance
+        ? prisma.withdrawalRequest.findMany({
+            where: { status: "PENDING" },
+            orderBy: { createdAt: "asc" },
+            take: 10,
+            include: {
+              user: { select: { displayName: true, phone: true } },
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const mapOrder = (o: (typeof triageRaw)[number]) => ({
+      id: o.id,
+      categoryTitle: o.categoryTitle,
+      status: o.status,
+      totalEstimatedPrice: o.totalEstimatedPrice,
+      createdAt: o.createdAt.toISOString(),
+      contactName: o.contactName,
+      contactPhone: o.contactPhone,
+      applicantCount: o._count.interests,
+    });
+
+    const permissions = Array.from(access.permissions) as AdminPermission[];
+
+    const kpiData: DashboardData = {
+      pendingReviewCount,
+      matchingStuckCount,
+      awaitingPaymentCount,
+      pendingPortfolioCount,
+      pendingSpecialistCount,
+      pendingWithdrawalCount,
+      triageOrders: triageRaw.map(mapOrder),
+      matchingOrders: matchingRaw.map(mapOrder),
+      withdrawals: withdrawalsRaw.map((w) => ({
+        id: w.id,
+        amount: w.amount,
+        shabaNumber: w.shabaNumber,
+        createdAt: w.createdAt.toISOString(),
+        displayName: w.user.displayName,
+        phone: w.user.phone,
       })),
     };
 
-    dashboardElement = <AdminDashboard data={kpiData} />;
+    dashboardElement = (
+      <AdminDashboard data={kpiData} permissions={permissions} isSuper={access.isSuper} />
+    );
   }
 
   return (
@@ -165,8 +231,8 @@ export default async function AdminPage({
       customInputs={{
         status: <OrderStatusSelect />,
         portfolioReview: <SpecialistPortfolioReviewWidget />,
+        orderApplicants: <OrderApplicantsAdminWidget />,
       }}
     />
   );
 }
-

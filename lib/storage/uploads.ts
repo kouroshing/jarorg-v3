@@ -14,11 +14,22 @@ export function getUploadRoot(): string {
   return path.join(cwd, "public", "uploads");
 }
 
-export function getExpertUploadDir(): string {
-  return path.join(getUploadRoot(), "experts");
-}
+/**
+ * Map a public `/uploads/...` URL to an absolute disk path under getUploadRoot().
+ * Returns null for unsafe / non-upload paths.
+ */
+export function resolveUploadDiskPath(publicUrl: string): string | null {
+  if (!publicUrl.startsWith("/uploads/")) return null;
+  const relative = publicUrl.slice("/uploads/".length);
+  const parts = relative.split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.some((p) => p === ".." || p.includes("\0") || path.isAbsolute(p))) {
+    return null;
+  }
+  if (parts[0] === "gallery") return null;
 
-/** Public URL path for an expert avatar filename. */
-export function expertAvatarPublicUrl(filename: string): string {
-  return `/uploads/experts/${filename}`;
+  const root = path.resolve(getUploadRoot());
+  const full = path.resolve(root, ...parts);
+  if (!full.startsWith(root + path.sep) && full !== root) return null;
+  return full;
 }

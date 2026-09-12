@@ -6,7 +6,10 @@ import { getAvailableOrdersForSpecialistAction } from "@/app/actions/marketplace
 import SpecialistProjectFeed from "@/components/specialist/SpecialistProjectFeed";
 import SpecialistAppShell from "@/components/specialist/SpecialistAppShell";
 import { countSpecialistMineOrders } from "@/lib/orders/specialist-feed";
-import { SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
+import {
+  getSpecialistAccess,
+  repairOrphanSpecialistRole,
+} from "@/lib/specialists/access";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +24,19 @@ export default async function SpecialistMinePage() {
     redirect(encodeURI("/login?redirect=/specialist/mine"));
   }
 
+  await repairOrphanSpecialistRole(session.userId);
+  const access = await getSpecialistAccess(session.userId);
+  if (access.kind === "none") {
+    redirect("/profile");
+  }
+  if (access.kind !== "active") {
+    redirect(access.landingPath);
+  }
+
   const result = await getAvailableOrdersForSpecialistAction();
 
-  if (!result.success && result.redirectTo === SPECIALIST_REVIEW_PATH) {
-    redirect(SPECIALIST_REVIEW_PATH);
+  if (!result.success && result.redirectTo) {
+    redirect(result.redirectTo);
   }
 
   const orders = result.success && result.orders ? result.orders : [];

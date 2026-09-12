@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { parseEquipmentTags } from "@/lib/equipment/catalog";
+import { isSpecialistRole } from "@/lib/auth/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -10,22 +12,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Check role: must be specialist or admin
-  const isSpecialist =
-    (session.role as string) === "specialist" ||
-    (session.role as string) === "ADMIN" ||
-    (session.role as string) === "admin";
-  if (!isSpecialist) {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
-
   try {
-    // No more hardcoded VIP checks based on phone number
-    const isVIP = false;
-
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
       select: {
+        role: true,
         usedStorage: true,
         storageLimit: true,
         onboardingStatus: true,
@@ -37,6 +28,9 @@ export async function GET() {
         equipment: true,
         pricingGenres: true,
         has100DaysMasterclass: true,
+        specialistProfile: {
+          select: { studioName: true, studioLat: true, studioLng: true },
+        },
       },
     });
 
@@ -44,17 +38,23 @@ export async function GET() {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    const isAdmin = (session.role || "").toLowerCase() === "admin";
+    if (!isAdmin && !isSpecialistRole(user.role) && !user.specialistProfile) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const hasRealStudio = Boolean(
+      user.specialistProfile?.studioName &&
+        typeof user.specialistProfile.studioLat === "number" &&
+        typeof user.specialistProfile.studioLng === "number"
+    );
+
     let storageLimit = user.storageLimit;
     let usedStorage = user.usedStorage;
     let tier = "PRO";
-    let onboardingStatus = user.onboardingStatus;
+    const onboardingStatus = user.onboardingStatus;
 
-    if (isVIP) {
-      // 999 Terabytes (in bytes)
-      storageLimit = 999 * 1024 * 1024 * 1024 * 1024;
-      tier = "ULTRA";
-      onboardingStatus = "approved"; // VIP bypasses onboarding
-    } else if (storageLimit === 0) {
+    if (storageLimit === 0) {
       tier = "BASIC";
     } else if (storageLimit > 2147483648) {
       tier = "ULTRA";
@@ -67,11 +67,11 @@ export async function GET() {
       tier,
       onboardingStatus,
       specialistRoles: user.specialistRoles ? JSON.parse(user.specialistRoles) : [],
-      hasStudio: user.hasStudio,
+      hasStudio: hasRealStudio,
       studioImages: user.studioImages ? JSON.parse(user.studioImages) : [],
       city: user.city,
       locationTypes: user.locationTypes ? JSON.parse(user.locationTypes) : [],
-      equipment: user.equipment ? JSON.parse(user.equipment) : [],
+      equipment: parseEquipmentTags(user.equipment),
       pricingGenres: user.pricingGenres ? JSON.parse(user.pricingGenres) : [],
       has100DaysMasterclass: user.has100DaysMasterclass,
     });

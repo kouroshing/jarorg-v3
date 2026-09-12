@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import {
   generateOtpCode,
@@ -14,6 +14,8 @@ import {
 import { otpCodesMatch } from "@/lib/auth/otp-compare";
 import { createSession, clearSession } from "@/lib/auth/session";
 import { dbRoleFromPhone, sessionRoleFromPhone } from "@/lib/auth/roles";
+import { resolveAdminAccessByPhone } from "@/lib/auth/adminAccess";
+import { isSuperAdminPhone } from "@/lib/auth/admin";
 import {
   checkOtpSendRateLimit,
   recordOtpSend,
@@ -26,14 +28,25 @@ export type AuthActionResult =
   | { success: false; error: string };
 
 async function establishSessionForPhone(phoneDigits: string, defaultRole?: string, displayName?: string): Promise<void> {
-  const dbRole = dbRoleFromPhone(phoneDigits); // ADMIN or USER based on phone
-  const sessionRole = sessionRoleFromPhone(phoneDigits);
+  await ensurePrismaSchemaReady();
+  const staffAccess = await resolveAdminAccessByPhone(phoneDigits);
+  const isStaffAdmin = Boolean(staffAccess?.isAdmin);
+  const dbRole = isStaffAdmin ? "ADMIN" : dbRoleFromPhone(phoneDigits);
+  const sessionRole = isStaffAdmin ? "admin" : sessionRoleFromPhone(phoneDigits);
 
-  // If user already exists, we shouldn't downgrade SPECIALIST to USER.
-  // We only upgrade to ADMIN if dbRole is ADMIN.
-  let user = await prisma.user.findUnique({ where: { phone: phoneDigits } });
+  // SPECIALIST is only upgraded when explicitly requested (e.g. first onboarding
+  // save). Join OTP must not stamp it — that trapped unfinished joiners in the
+  // specialist panel after a later customer login.
+  let user = await prisma.user.findUnique({
+    where: { phone: phoneDigits },
+    include: { specialistProfile: { select: { id: true } } },
+  });
   
-  const createData: any = {
+  const createData: {
+    phone: string;
+    role: string;
+    displayName?: string;
+  } = {
     phone: phoneDigits,
     role: defaultRole === "SPECIALIST" ? "SPECIALIST" : dbRole,
   };
@@ -41,27 +54,44 @@ async function establishSessionForPhone(phoneDigits: string, defaultRole?: strin
 
   if (!user) {
     user = await prisma.user.create({
-      data: createData
+      data: createData,
+      include: { specialistProfile: { select: { id: true } } },
     });
   } else {
-    let updateData: any = {};
+    const updateData: { displayName?: string; role?: string } = {};
     if (displayName && !user.displayName) updateData.displayName = displayName;
     
-    // If it's an admin phone, enforce ADMIN. Otherwise, keep existing role (which might be SPECIALIST).
     if (dbRole === "ADMIN" && user.role !== "ADMIN") {
       updateData.role = "ADMIN";
+    } else if (
+      // Revoked staff: demote ADMIN → USER unless specialist / env super.
+      !isStaffAdmin &&
+      user.role === "ADMIN" &&
+      !isSuperAdminPhone(phoneDigits)
+    ) {
+      updateData.role = user.specialistProfile ? "SPECIALIST" : "USER";
     } else if (
       defaultRole === "SPECIALIST" &&
       user.role !== "SPECIALIST" &&
       user.role !== "ADMIN"
     ) {
       updateData.role = "SPECIALIST";
+    } else if (
+      // Customer login / join without specialist intent: clear orphan SPECIALIST
+      // roles that never created a profile (abandoned /join OTP).
+      defaultRole !== "SPECIALIST" &&
+      user.role === "SPECIALIST" &&
+      !user.specialistProfile &&
+      dbRole !== "ADMIN"
+    ) {
+      updateData.role = "USER";
     }
 
     if (Object.keys(updateData).length > 0) {
       user = await prisma.user.update({
         where: { phone: phoneDigits },
-        data: updateData
+        data: updateData,
+        include: { specialistProfile: { select: { id: true } } },
       });
     }
   }

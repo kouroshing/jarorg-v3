@@ -9,4 +9,18 @@ yarn-error.log*
 /public/uploads/
 # the database lives on the `data` persistent disk — never upload the local one
 /data/
+/prisma/*.db
+/prisma/*.db-*
 package-lock.json
+# local-only / non-app artifacts (kept out of Liara archive)
+android/
+.chrome-profile-data/
+.chrome-user-data/
+project.zip
+*.keystore
+tsconfig.tsbuildinfo
+build.log
+scratch/
+# only root-level storage — never ignore lib/storage
+/storage/
+.agents/

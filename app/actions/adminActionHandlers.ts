@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
-import { isAdminSession } from "@/lib/auth/admin";
+import {
+  adminAuthFailure,
+  requireAdminPermission,
+} from "@/lib/auth/adminAccess";
+import type { AdminPermission } from "@/lib/auth/adminPermissions";
 import {
   evaluateEligibility,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
@@ -17,6 +21,21 @@ export type AdminActionResult =
   | { success: true; message?: string }
   | { success: false; error: string };
 
+async function requirePerm(
+  permission: AdminPermission
+): Promise<
+  | { ok: true; actorId: string }
+  | { ok: false; error: { success: false; error: string } }
+> {
+  try {
+    const session = await getSession();
+    const access = await requireAdminPermission(session, permission);
+    return { ok: true, actorId: access.phone || access.userId || "admin" };
+  } catch (error) {
+    return { ok: false, error: adminAuthFailure(error) };
+  }
+}
+
 /**
  * Cancels an order and stores the administrative cancellation reason/note.
  * Strictly internal record keeping; no external payment gateway calls.
@@ -28,10 +47,9 @@ export async function cancelOrderAction({
   orderId: string;
   reason: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("orders_manage");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   if (!orderId || !reason.trim()) {
     return { success: false, error: "شناسه سفارش و دلیل لغو الزامی است." };
@@ -63,7 +81,7 @@ export async function cancelOrderAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "ORDER_CANCELLED",
       targetModel: "Order",
       targetId: orderId,
@@ -87,10 +105,9 @@ export async function approveOrderAction({
 }: {
   orderId: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("orders_manage");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   if (!orderId) {
     return { success: false, error: "شناسه سفارش الزامی است." };
@@ -133,7 +150,7 @@ export async function approveOrderAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "ORDER_APPROVED",
       targetModel: "Order",
       targetId: orderId,
@@ -159,10 +176,9 @@ export async function requestOrderEditAction({
   orderId: string;
   note: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("orders_manage");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   if (!orderId || !note.trim()) {
     return { success: false, error: "شناسه سفارش و پیام ویرایش الزامی است." };
@@ -213,7 +229,7 @@ export async function requestOrderEditAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "ORDER_EDIT_REQUESTED",
       targetModel: "Order",
       targetId: orderId,
@@ -239,10 +255,9 @@ export async function rejectPortfolioAction({
   portfolioItemId: string;
   reason: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   if (!portfolioItemId || !reason.trim()) {
     return { success: false, error: "شناسه نمونه‌کار و علت رد اثر الزامی است." };
@@ -306,13 +321,17 @@ export async function rejectPortfolioAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "PORTFOLIO_REJECTED",
       targetModel: "PortfolioItem",
       targetId: portfolioItemId,
       note: `علت رد: ${reason.trim()}`,
     },
   });
+
+  revalidateSpecialistSurfaces();
+  revalidatePath("/admin");
+  revalidatePath("/admin/PortfolioItem");
 
   return { success: true, message: "نمونه‌کار با موفقیت رد شد و اعلان راهنما برای متخصص ارسال گردید." };
 }
@@ -321,17 +340,54 @@ export async function rejectPortfolioAction({
  * Server action to approve one or multiple portfolio items directly.
  */
 export async function approvePortfolioAction(ids: (string | number)[]) {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    throw new Error("دسترسی غیرمجاز");
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) {
+    return {
+      type: "error" as const,
+      message: gate.error.error,
+    };
+  }
+  const actorId = gate.actorId;
+
+  const stringIds = [...new Set(ids.map(String).map((id) => id.trim()).filter(Boolean))];
+  if (stringIds.length === 0) {
+    return { type: "info" as const, message: "هیچ رکوردی انتخاب نشده است." };
   }
 
-  const stringIds = ids.map(String);
-  if (stringIds.length === 0) return { type: "info" as const, message: "هیچ رکوردی انتخاب نشده است." };
+  const existing = await prisma.portfolioItem.findMany({
+    where: { id: { in: stringIds } },
+    select: { id: true, reviewStatus: true },
+  });
 
-  await prisma.portfolioItem.updateMany({
+  if (existing.length === 0) {
+    return { type: "error" as const, message: "نمونه‌کار مورد نظر یافت نشد." };
+  }
+
+  const rejected = existing.filter((i) => i.reviewStatus === "REJECTED");
+  if (rejected.length > 0) {
+    return {
+      type: "error" as const,
+      message: "نمونه‌کار ردشده قابل تایید مجدد نیست.",
+    };
+  }
+
+  const alreadyApproved = existing.filter((i) => i.reviewStatus === "APPROVED");
+  const toApprove = existing.filter((i) => i.reviewStatus === "PENDING");
+
+  if (toApprove.length === 0) {
+    return {
+      type: alreadyApproved.length > 0 ? ("success" as const) : ("info" as const),
+      message:
+        alreadyApproved.length > 0
+          ? "این نمونه‌کار از قبل تایید شده است."
+          : "نمونه‌کاری برای تایید باقی نمانده است.",
+    };
+  }
+
+  const result = await prisma.portfolioItem.updateMany({
     where: {
-      id: { in: stringIds },
+      id: { in: toApprove.map((i) => i.id) },
+      reviewStatus: "PENDING",
     },
     data: {
       reviewStatus: "APPROVED",
@@ -339,23 +395,34 @@ export async function approvePortfolioAction(ids: (string | number)[]) {
     },
   });
 
+  if (result.count === 0) {
+    return {
+      type: "error" as const,
+      message: "تایید انجام نشد. وضعیت نمونه‌کار تغییر کرده؛ صفحه را تازه کنید.",
+    };
+  }
+
   await Promise.all(
-    stringIds.map((id) =>
+    toApprove.map((item) =>
       prisma.auditLog.create({
         data: {
-          actorId: session.phone || session.userId || "admin",
+          actorId: actorId,
           action: "PORTFOLIO_APPROVED",
           targetModel: "PortfolioItem",
-          targetId: id,
+          targetId: item.id,
           note: "تایید نمونه‌کار توسط ادمین",
         },
       })
     )
   );
 
+  revalidateSpecialistSurfaces();
+  revalidatePath("/admin");
+  revalidatePath("/admin/PortfolioItem");
+
   return {
     type: "success" as const,
-    message: `${stringIds.length} نمونه‌کار با موفقیت تایید شد.`,
+    message: `${result.count.toLocaleString("fa-IR")} نمونه‌کار با موفقیت تایید شد.`,
   };
 }
 
@@ -388,16 +455,18 @@ async function loadProfileForReview(specialistId: string) {
 export async function approveSpecialistAction({
   specialistId,
   approveAllPending = false,
+  allowUnderMinimum = false,
   note,
 }: {
   specialistId: string;
   approveAllPending?: boolean;
+  /** Explicit admin override when approved portfolio is under the usual 10-item bar. */
+  allowUnderMinimum?: boolean;
   note?: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   const profile = await loadProfileForReview(specialistId);
   if (!profile) {
@@ -428,27 +497,27 @@ export async function approveSpecialistAction({
     selectedCategories: profile.selectedCategories,
   });
 
-  // Activation needs approved portfolio + location/NDA/avatar — same bar as the board.
-  const activationReady =
-    eligibility.qualifiedCategories.length > 0 &&
+  const coreReady =
     eligibility.hasCity &&
     eligibility.hasBaseLocation &&
     eligibility.hasAgreedToTerms &&
     eligibility.hasAvatar &&
     eligibility.hasDisplayName;
 
+  const hasMinApproved = eligibility.qualifiedCategories.length > 0;
+  const activationReady = coreReady && (hasMinApproved || allowUnderMinimum);
+
   if (!activationReady) {
     const missing = missingRequirementLabels({
       ...eligibility,
-      // Surface approved-portfolio gap when uploads exist but none are approved yet.
       submittableCategories:
         eligibility.qualifiedCategories.length > 0
           ? eligibility.submittableCategories
           : [],
     });
-    if (eligibility.qualifiedCategories.length === 0) {
+    if (!hasMinApproved && !allowUnderMinimum) {
       missing.push(
-        `حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده`
+        `حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده (یا تایید استثنایی)`
       );
     }
     return {
@@ -459,13 +528,18 @@ export async function approveSpecialistAction({
     };
   }
 
+  const underMinimumNote = !hasMinApproved
+    ? `تایید استثنایی با کمتر از ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده`
+    : null;
+  const reviewNote = [note?.trim(), underMinimumNote].filter(Boolean).join(" · ") || null;
+
   await prisma.specialistProfile.update({
     where: { id: specialistId },
     data: {
       status: "ACTIVE",
       reviewedAt: new Date(),
-      reviewedBy: session.phone || session.userId || "admin",
-      reviewNote: note?.trim() || null,
+      reviewedBy: actorId,
+      reviewNote,
     },
   });
 
@@ -482,11 +556,11 @@ export async function approveSpecialistAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "SPECIALIST_APPROVED",
       targetModel: "SpecialistProfile",
       targetId: specialistId,
-      note: note?.trim() || "تایید و فعال‌سازی متخصص",
+      note: reviewNote || "تایید و فعال‌سازی متخصص",
     },
   });
 
@@ -494,7 +568,9 @@ export async function approveSpecialistAction({
 
   return {
     success: true,
-    message: `«${profile.user?.displayName || "متخصص"}» تایید شد و کارتابل او باز است.`,
+    message: !hasMinApproved
+      ? `«${profile.user?.displayName || "متخصص"}» با تایید استثنایی (کمتر از ۱۰ نمونه‌کار) فعال شد.`
+      : `«${profile.user?.displayName || "متخصص"}» تایید شد و کارتابل او باز است.`,
   };
 }
 
@@ -509,10 +585,9 @@ export async function rejectSpecialistAction({
   specialistId: string;
   reason: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز. فقط مدیران سیستم مجاز هستند." };
-  }
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   if (!reason.trim()) {
     return { success: false, error: "نوشتن دلیل بازگرداندن پرونده الزامی است." };
@@ -528,7 +603,7 @@ export async function rejectSpecialistAction({
     data: {
       status: "INCOMPLETE",
       reviewedAt: new Date(),
-      reviewedBy: session.phone || session.userId || "admin",
+      reviewedBy: actorId,
       reviewNote: reason.trim(),
       submittedForReviewAt: null,
     },
@@ -546,7 +621,7 @@ export async function rejectSpecialistAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: "SPECIALIST_REJECTED",
       targetModel: "SpecialistProfile",
       targetId: specialistId,
@@ -563,9 +638,9 @@ export async function rejectSpecialistAction({
  * Server action to fetch all portfolio items for a specific specialist profile.
  */
 export async function getSpecialistPortfolioItems(specialistId: string) {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز", items: [] };
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) {
+    return { success: false, error: gate.error.error, items: [] };
   }
 
   if (!specialistId) {
@@ -596,10 +671,9 @@ export async function setSpecialistKycStatusAction({
   status: "VERIFIED" | "FAILED" | "NONE";
   reason?: string;
 }): Promise<AdminActionResult> {
-  const session = await getSession();
-  if (!isAdminSession(session)) {
-    return { success: false, error: "دسترسی غیرمجاز." };
-  }
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
 
   const profile = await prisma.specialistProfile.findUnique({
     where: { id: specialistId },
@@ -642,7 +716,7 @@ export async function setSpecialistKycStatusAction({
 
   await prisma.auditLog.create({
     data: {
-      actorId: session.phone || session.userId || "admin",
+      actorId: actorId,
       action: `SPECIALIST_KYC_${status}`,
       targetModel: "SpecialistProfile",
       targetId: specialistId,
@@ -662,5 +736,144 @@ export async function setSpecialistKycStatusAction({
         : status === "FAILED"
           ? "احراز هویت رد شد."
           : "وضعیت احراز هویت بازنشانی شد.",
+  };
+}
+
+/** Interests for an order — used by admin order edit widget. */
+export async function getOrderInterestsForAdmin(orderId: string) {
+  const gate = await requirePerm("orders_manage");
+  if (!gate.ok) {
+    return { success: false as const, error: gate.error.error };
+  }
+
+  const interests = await prisma.projectInterest.findMany({
+    where: { orderId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      specialist: {
+        select: {
+          id: true,
+          displayName: true,
+          phone: true,
+          city: true,
+        },
+      },
+    },
+  });
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { selectedSpecialistId: true, status: true },
+  });
+
+  return {
+    success: true as const,
+    selectedSpecialistId: order?.selectedSpecialistId ?? null,
+    orderStatus: order?.status ?? null,
+    interests: interests.map((i) => ({
+      id: i.id,
+      status: i.status,
+      proposedPrice: i.proposedPrice,
+      travelFee: i.travelFeeOverride ?? i.travelFee,
+      message: i.message,
+      createdAt: i.createdAt.toISOString(),
+      specialist: i.specialist,
+    })),
+  };
+}
+
+/**
+ * Admin picks an applicant for an order (same outcome as client selection,
+ * without requiring client session).
+ */
+export async function adminSelectInterestAction({
+  orderId,
+  interestId,
+}: {
+  orderId: string;
+  interestId: string;
+}): Promise<AdminActionResult> {
+  const gate = await requirePerm("orders_manage");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
+
+  const interest = await prisma.projectInterest.findFirst({
+    where: { id: interestId, orderId },
+    include: {
+      specialist: { select: { id: true, displayName: true } },
+    },
+  });
+  if (!interest) {
+    return { success: false, error: "پیشنهاد یافت نشد." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, userId: true, categoryTitle: true },
+  });
+  if (!order) {
+    return { success: false, error: "سفارش یافت نشد." };
+  }
+
+  const travel = interest.travelFeeOverride ?? interest.travelFee ?? 0;
+  const base = interest.proposedPrice ?? 0;
+  const total = base + travel;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        selectedSpecialistId: interest.specialistId,
+        status: "AWAITING_PAYMENT",
+        agreedBasePrice: base,
+        agreedTravelFee: travel,
+        agreedTotalPrice: total,
+      },
+    });
+
+    await tx.projectInterest.update({
+      where: { id: interestId },
+      data: { status: "SELECTED" },
+    });
+
+    await tx.projectInterest.updateMany({
+      where: {
+        orderId,
+        id: { not: interestId },
+        status: { in: ["PENDING", "SELECTED"] },
+      },
+      data: { status: "REJECTED" },
+    });
+  });
+
+  if (order.userId) {
+    void createNotification({
+      userId: order.userId,
+      title: "متخصص توسط جار انتخاب شد",
+      message: `برای «${order.categoryTitle || "پروژه"}» متخصص انتخاب شد. لطفاً پرداخت را تکمیل کنید.`,
+      type: "SUCCESS",
+      link: `/order/${orderId}`,
+    });
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: actorId,
+      action: "ORDER_SPECIALIST_ASSIGNED_BY_ADMIN",
+      targetModel: "Order",
+      targetId: orderId,
+      note: `interest=${interestId}; specialist=${interest.specialistId}`,
+    },
+  });
+
+  revalidatePath(`/order/${orderId}`);
+  revalidatePath("/admin");
+  revalidatePath(`/admin/Order/${orderId}`);
+  revalidatePath("/specialist/projects");
+  revalidatePath("/specialist/mine");
+
+  return {
+    success: true,
+    message: `متخصص «${interest.specialist.displayName || "انتخاب‌شده"}» ثبت شد؛ سفارش در انتظار پرداخت است.`,
   };
 }

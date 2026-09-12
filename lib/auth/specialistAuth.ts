@@ -100,7 +100,7 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
       isSpecialist: false,
       error: "دسترسی غیرمجاز. این بخش فقط مخصوص متخصصان و عکاسان پلتفرم جار است.",
       errorCode: "UNAUTHORIZED",
-      redirectTo: "/join",
+      redirectTo: "/profile",
     };
   }
 

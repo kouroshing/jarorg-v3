@@ -2,86 +2,34 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
-import { isSpecialistRole } from "@/lib/auth/roles";
 import type { ProfileUser } from "@/lib/profile/types";
 import { ProfileDashboard } from "./ProfileDashboard";
+import ProfileAppShell, {
+  type SpecialistGate,
+} from "@/components/profile/ProfileAppShell";
+import {
+  getSpecialistAccess,
+  repairOrphanSpecialistRole,
+} from "@/lib/specialists/access";
 
 export const dynamic = "force-dynamic";
 
-async function getProjectThumbnails(folderId: string | null): Promise<string[]> {
+async function getProjectThumbnails(_folderId: string | null): Promise<string[]> {
   return [];
 }
 
-const MOCK_PROJECTS = [
-  {
-    id: "mock-active-1",
-    createdAt: new Date().toISOString(),
-    serviceType: "عکاسی پرتره",
-    serviceDetails: "آفیش عکاسی پرتره - فردا ساعت ۱۶:۰۰",
-    brief: "تهران، جردن، خیابان گلفام، پلاک ۴",
-    contactName: "محسن عصار",
-    status: "PENDING",
-    googleDriveFolderId: null,
-    budget: "۳,۵۰۰,۰۰۰",
-    city: "تهران، جردن",
-    preferredCallTime: "فردا ساعت ۱۶:۰۰",
-    thumbnails: [],
-    isMock: true,
-    expert: {
-      id: "mock-expert-1",
-      name: "محسن عصار",
-      imageUrl: "/images/kourosh.jpg",
-    }
-  },
-  {
-    id: "mock-history-1",
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    serviceType: "عکاسی آتلیه‌ای",
-    serviceDetails: "تحویل داده شده - تیر ۱۴۰۵",
-    brief: "تحویل با موفقیت انجام شد",
-    contactName: "امیر آرتی",
-    status: "delivered",
-    googleDriveFolderId: "mock-folder-1",
-    budget: "۵,۲۰۰,۰۰۰",
-    city: "تهران",
-    preferredCallTime: null,
-    thumbnails: [
-      "/images/hero-bg.jpg",
-      "/images/kourosh.jpg",
-      "/images/hero-bg.jpg"
-    ],
-    isMock: true,
-    expert: {
-      id: "mock-expert-2",
-      name: "امیر آرتی",
-      imageUrl: "/images/kourosh.jpg",
-    }
-  },
-  {
-    id: "mock-history-2",
-    createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
-    serviceType: "عکاسی فضای باز",
-    serviceDetails: "تکمیل شده - خرداد ۱۴۰۵",
-    brief: "تحویل به موقع فایل‌ها",
-    contactName: "استودیو یونیک",
-    status: "delivered",
-    googleDriveFolderId: "mock-folder-2",
-    budget: "۱,۸۰۰,۰۰۰",
-    city: "تهران",
-    preferredCallTime: null,
-    thumbnails: [
-      "/images/hero-bg.jpg",
-      "/images/kourosh.jpg",
-      "/images/hero-bg.jpg"
-    ],
-    isMock: true,
-    expert: {
-      id: "mock-expert-3",
-      name: "استودیو یونیک",
-      imageUrl: "/images/kourosh.jpg",
-    }
+function buildSpecialistGate(
+  access: Awaited<ReturnType<typeof getSpecialistAccess>>
+): SpecialistGate {
+  if (access.kind === "active") {
+    return { state: "open", href: "/specialist/projects" };
   }
-];
+  if (access.kind === "onboarding" || access.kind === "pending") {
+    return { state: "open", href: access.landingPath };
+  }
+  // Pure customer: locked switch → start specialist verification / onboarding
+  return { state: "locked", href: "/specialist/onboarding/profile" };
+}
 
 export default async function ProfilePage({
   searchParams,
@@ -106,17 +54,16 @@ export default async function ProfilePage({
       where: {
         OR: [{ userId: session.userId }, { contactPhone: session.phone }],
       },
-      include: {
-        expert: true,
-      },
       orderBy: { createdAt: "desc" },
     });
 
-    // Resolve thumbnails in parallel for completed/delivered projects
     projects = await Promise.all(
       rows.map(async (p) => {
-        const isCompleted = p.status === "COMPLETED" || p.status === "delivered" || !!p.googleDriveFolderId;
-        const thumbnails = isCompleted ? await getProjectThumbnails(p.googleDriveFolderId) : [];
+        const isCompleted =
+          p.status === "COMPLETED" || p.status === "delivered" || !!p.googleDriveFolderId;
+        const thumbnails = isCompleted
+          ? await getProjectThumbnails(p.googleDriveFolderId)
+          : [];
 
         return {
           id: p.id,
@@ -125,24 +72,17 @@ export default async function ProfilePage({
           serviceDetails: p.serviceDetails,
           brief: p.brief,
           contactName: p.contactName,
-          status: p.status, // Pass original status
+          status: p.status,
           googleDriveFolderId: p.googleDriveFolderId,
           budget: p.budget || "توافقی",
           city: p.city || "تهران",
           preferredCallTime: p.preferredCallTime,
           thumbnails,
-          expert: p.expert
-            ? {
-                id: p.expert.id,
-                name: p.expert.name,
-                imageUrl: p.expert.imageUrl,
-              }
-            : null,
+          expert: null,
         };
       })
     );
 
-    // Fetch new marketplace orders submitted via /order
     const orderRows = await prisma.order.findMany({
       where: {
         OR: [
@@ -176,17 +116,13 @@ export default async function ProfilePage({
         ? {
             id: o.selectedSpecialist.id,
             name: o.selectedSpecialist.displayName || "متخصص انتخابی شما",
-            imageUrl: "/images/kourosh.jpg",
+            imageUrl: null as string | null,
+            profileHref: `/s/${o.selectedSpecialist.id}`,
           }
         : null,
     }));
 
-    if (mappedOrders.length > 0 || projects.length > 0) {
-      projects = [...mappedOrders, ...projects];
-    } else {
-      projects = MOCK_PROJECTS;
-    }
-
+    projects = [...mappedOrders, ...projects];
     serializedPurchases = [];
   } catch (error) {
     console.error("Error fetching profile dashboard details:", error);
@@ -205,24 +141,38 @@ export default async function ProfilePage({
     memberSince,
   };
 
-  // The session role is only "user" or "admin" — a specialist is identified by
-  // the database role. The previous check also compared session.role against
-  // "specialist", which can never match, and hard-coded one phone number.
-  const isSpecialistUser = isSpecialistRole(user?.role);
-
+  await repairOrphanSpecialistRole(session.userId);
+  const access = await getSpecialistAccess(session.userId);
   const forceCustomer = searchParams?.role === "customer";
-  const isSpecialist = isSpecialistUser && !forceCustomer;
+  const specialistGate = buildSpecialistGate(access);
 
-  if (isSpecialist) {
-    redirect("/specialist/projects");
+  // Active specialists default into specialist panel; ?role=customer keeps customer view.
+  if (access.preferSpecialistHome && !forceCustomer) {
+    redirect(access.landingPath || "/specialist/projects");
   }
 
   return (
-    <ProfileDashboard
-      user={profileUser}
-      projects={projects}
-      purchases={serializedPurchases}
-      isSpecialistUser={isSpecialistUser}
-    />
+    <ProfileAppShell
+      panel="customer"
+      phone={session.phone}
+      displayName={profileUser.displayName}
+      specialistGate={specialistGate}
+      customerActive="orders"
+    >
+      <ProfileDashboard
+        user={profileUser}
+        projects={projects}
+        purchases={serializedPurchases}
+        isSpecialistUser={access.kind === "active"}
+        specialistContinueHref={
+          access.kind === "onboarding" || access.kind === "pending"
+            ? access.landingPath
+            : access.kind === "active"
+              ? "/specialist/projects"
+              : null
+        }
+        showPanelSwitcherHint={!forceCustomer && access.kind === "none"}
+      />
+    </ProfileAppShell>
   );
 }

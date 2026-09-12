@@ -35,6 +35,7 @@ import {
 import SpecialistInterestModal from "./SpecialistInterestModal";
 import { formatPrice } from "@/components/order/BudgetSlider";
 import { classifySpecialistOrder, type SpecialistFeedBucket } from "@/lib/orders/specialist-feed";
+import { citiesMatch, normalizeCityLabel } from "@/lib/geo/serviceCities";
 
 type FeedTabId = SpecialistFeedBucket;
 
@@ -83,14 +84,14 @@ export default function SpecialistProjectFeed({
   const uniqueCities = Array.from(
     new Set(
       pool
-        .map((o) => o.districtOrCity)
+        .map((o) => normalizeCityLabel(o.districtOrCity))
         .filter((c): c is string => !!c && c.trim().length > 0)
     )
-  );
+  ).sort((a, b) => a.localeCompare(b, "fa"));
 
   const cityFiltered = pool.filter((o) => {
     if (selectedCity === "ALL") return true;
-    return o.districtOrCity === selectedCity;
+    return citiesMatch(o.districtOrCity, selectedCity);
   });
 
   const counts = useMemo(() => {
@@ -326,26 +327,21 @@ export default function SpecialistProjectFeed({
 
   return (
     <div className="space-y-6" dir="rtl">
-      <div className="flex flex-col gap-4 rounded-3xl border border-jar-border bg-jar-surface p-4 sm:p-5 backdrop-blur-xl shadow-xs">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-jar-canvas text-jar-logo border border-jar-border">
-              <Briefcase className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-jar-primary">
-                {isMine ? "پروژه‌های من" : "پروژه‌های باز"}
-              </h2>
-              <p className="text-xs text-jar-muted font-medium">
-                {isMine
-                  ? "پیشنهادهای ارسال‌شده، انتخاب کارفرما و پروژه‌های قطعی"
-                  : "سفارش‌های جدید برای اعلام آمادگی. قیمت و ایاب‌وذهاب را روی هر پیشنهاد تنظیم کنید."}
-              </p>
-            </div>
+          <div>
+            <h2 className="text-base font-bold text-jar-primary">
+              {isMine ? "پروژه‌های من" : "پروژه‌های باز"}
+            </h2>
+            <p className="text-xs text-jar-muted font-medium mt-0.5">
+              {isMine
+                ? "پیشنهادهای ارسال‌شده، انتخاب کارفرما و پروژه‌های قطعی"
+                : "سفارش‌های جدید برای اعلام آمادگی. قیمت و ایاب‌وذهاب را روی هر پیشنهاد تنظیم کنید."}
+            </p>
           </div>
 
           {!isMine && tokens && (
-            <div className="inline-flex items-center gap-2 rounded-2xl border border-jar-border bg-jar-canvas px-3.5 py-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-jar-border bg-jar-surface px-3.5 py-2">
               <Coins className="h-4 w-4 text-jar-logo shrink-0" />
               <div className="text-right">
                 <p className="text-[11px] font-bold text-jar-primary">
@@ -450,38 +446,46 @@ export default function SpecialistProjectFeed({
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredOrders.map((order) => {
           let locationText = "محل مدنظر کارفرما";
-          if (order.locationType === "SPECIALIST_ADVICE") locationText = "مشاوره و پیشنهاد متخصص";
-          if (order.locationType === "JAR_STUDIO") locationText = "استودیوها و عمارت‌های جار";
+          if (order.locationType === "SPECIALIST_ADVICE") {
+            locationText = order.districtOrCity
+              ? `مشورت عکاس — ${order.districtOrCity}`
+              : "مشاوره و پیشنهاد متخصص";
+          }
+          if (order.locationType === "JAR_STUDIO") {
+            locationText = order.districtOrCity
+              ? `استودیوهای جار — ${order.districtOrCity}`
+              : "استودیوها و عمارت‌های جار";
+          }
 
           return (
             <div
               key={order.id}
-              className="rounded-3xl border border-jar-border bg-jar-surface p-5 sm:p-6 shadow-xs hover:border-jar-logo transition-colors flex flex-col justify-between space-y-5"
+              className="rounded-2xl border border-jar-border bg-jar-surface p-4 sm:p-5 space-y-4"
             >
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-jar-canvas text-jar-logo border border-jar-border text-xs font-bold">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-jar-logo">
                       <Sparkles className="h-3.5 w-3.5 text-jar-logo" />
                       <span>{order.categoryTitle}</span>
                     </span>
-                    <h3 className="text-base font-bold text-jar-primary pt-1">
+                    <h3 className="text-base font-bold text-jar-primary pt-0.5">
                       آفیش {order.categoryTitle} ({order.durationHours} ساعت)
                     </h3>
                   </div>
 
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-jar-canvas border border-jar-border text-jar-muted text-[11px] font-medium shrink-0">
+                  <span className="inline-flex items-center gap-1 text-jar-muted text-[11px] font-medium shrink-0">
                     <Users className="h-3 w-3" />
                     <span>{faNum(order.interestsCount)} متقاضی</span>
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-jar-canvas border border-jar-border/60 p-3 text-xs">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs border-t border-jar-border/70 pt-3">
                   {order.isFlexibleSchedule ? (
-                    <div className="col-span-2 flex items-center gap-1.5 text-jar-primary bg-jar-surface border border-jar-border px-2.5 py-1.5 rounded-xl text-xs font-medium">
+                    <div className="col-span-2 flex items-center gap-1.5 text-jar-primary text-xs font-medium">
                       <Sparkles className="h-3.5 w-3.5 text-jar-logo shrink-0" />
                       <span>
                         زمان‌بندی: <b className="text-jar-primary">منعطف (هماهنگی توافقی با متخصص پس از پذیرش)</b>
@@ -505,7 +509,7 @@ export default function SpecialistProjectFeed({
                     </>
                   )}
 
-                  <div className="col-span-2 flex items-center gap-1.5 text-jar-muted truncate pt-1 border-t border-jar-border/60">
+                  <div className="col-span-2 flex items-center gap-1.5 text-jar-muted truncate">
                     <MapPin className="h-3.5 w-3.5 text-jar-logo shrink-0" />
                     <span className="truncate">
                       موقعیت: <b className="text-jar-primary">{locationText}</b>

@@ -40,7 +40,7 @@ export default async function OnboardingPortfolioStepPage() {
       rightAction={
         hasEligible ? (
           <Link
-            href="/specialist/onboarding/details"
+            href="/specialist/onboarding/subscription"
             className="inline-flex items-center gap-1.5 rounded-full bg-jar-primary text-white px-4 py-1.5 text-xs font-medium"
           >
             مرحله بعد
@@ -79,6 +79,8 @@ export default async function OnboardingPortfolioStepPage() {
       <SpecialistPortfolioManager
         initialSelectedCategories={portfolioData.selectedCategories || []}
         initialPortfolioItems={portfolioData.portfolioItems || []}
+        mode="onboarding"
+        continueHref="/specialist/onboarding/subscription"
       />
     </SpecialistOnboardingShell>
   );

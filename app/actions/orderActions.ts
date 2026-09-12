@@ -12,6 +12,7 @@ import {
 } from "@/lib/orders/status";
 import { resolveScheduledAt } from "@/lib/date/jalali";
 import { revalidatePath } from "next/cache";
+import { snapHourlyRate, getGoldenIndex, resolveHourlyRate } from "@/lib/pricing/budgetStops";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -80,7 +81,6 @@ export async function createOrderAction(input: CreateOrderInput) {
     }
 
     const isFlexibleSchedule = input.isFlexibleSchedule ?? true;
-    const isAutoPriced = input.isAutoPriced ?? true;
 
     // Only validate specific date/timeslot if user chose custom scheduling
     if (!isFlexibleSchedule) {
@@ -112,11 +112,16 @@ export async function createOrderAction(input: CreateOrderInput) {
       };
     }
 
-    // Baseline until the selected specialist sets the agreed total later.
-    const hourlyRate =
-      input.hourlyRate && input.hourlyRate >= 500000 ? input.hourlyRate : 3_600_000;
+    // Snap to configured ladder (lib/pricing/budgetStops — dashboard-ready).
+    const hourlyRate = snapHourlyRate(
+      input.hourlyRate && input.hourlyRate >= 500_000
+        ? input.hourlyRate
+        : resolveHourlyRate(getGoldenIndex())
+    );
     const totalEstimatedPrice = hourlyRate * input.durationHours;
     const depositAmount = 0; // Deposit is completely removed from upfront flow
+    const isAutoPriced =
+      input.isAutoPriced ?? hourlyRate === resolveHourlyRate(getGoldenIndex());
 
     const categoryDef = CATEGORIES_BY_SLUG[input.categorySlug];
     const categoryTitle = categoryDef ? categoryDef.title : input.categorySlug;
@@ -150,7 +155,8 @@ export async function createOrderAction(input: CreateOrderInput) {
         // Always land in admin review before the specialist board.
         status: "PENDING_REVIEW" satisfies OrderStatus,
         contactName,
-        contactPhone: input.contactPhone || session.phone || null,
+        // Ownership phone must come from the verified session — never trust client input.
+        contactPhone: session.phone || null,
         userId: session.userId,
       },
     });

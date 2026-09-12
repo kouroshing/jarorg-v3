@@ -9,7 +9,6 @@ import {
 } from "@/app/actions/marketplaceActions";
 import OrderMatchingRadar from "./OrderMatchingRadar";
 import OrderApplicantsList from "./OrderApplicantsList";
-import CancelOrderButton from "./CancelOrderButton";
 import { isOnMarket, parseOrderStatus } from "@/lib/orders/status";
 
 function faNum(value: number): string {
@@ -27,9 +26,8 @@ interface OrderClientWaitingProps {
 }
 
 /**
- * Minimal waiting surface after submit: radar + status + cancel.
- * Specialist cards appear only when someone applies (needed for selection).
- * No financial summary here — that comes after selection.
+ * Waiting surface after publish: radar + applicants.
+ * Cancel lives in the sticky footer on /order/[id].
  */
 export default function OrderClientWaiting({
   orderId,
@@ -84,38 +82,38 @@ export default function OrderClientWaiting({
 
   return (
     <section
-      className="relative overflow-hidden rounded-[32px] border border-jar-border bg-jar-surface shadow-xs"
+      className="relative overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm"
       dir="rtl"
     >
-      <div className="relative z-10 space-y-8 p-6 sm:p-9">
+      <div className="relative z-10 space-y-8 p-6 sm:p-8">
         <div className="flex flex-col items-center text-center gap-5">
           <OrderMatchingRadar size={200} foundCount={foundCount} />
 
           <div className="space-y-2.5 max-w-md">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-jar-logo/25 bg-jar-logo/10 px-3 py-1 text-[11px] font-bold text-jar-logo">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[11px] font-bold text-neutral-700">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-jar-logo opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-jar-logo" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
               {waiting
                 ? "در انتظار اعلام آمادگی متخصصان"
                 : `${faNum(foundCount)} متخصص اعلام آمادگی کردند`}
             </div>
 
-            <h1 className="text-xl sm:text-2xl font-black text-jar-primary tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight">
               {waiting
                 ? `در حال پیدا کردن متخصص برای ${categoryTitle}`
                 : "یکی از متخصصان را انتخاب کنید"}
             </h1>
 
-            <p className="text-xs sm:text-sm text-jar-muted font-medium leading-relaxed">
+            <p className="text-xs sm:text-sm text-neutral-500 font-medium leading-relaxed">
               {waiting
                 ? "پروژه شما برای متخصصان واجد شرایط ارسال شد. همین صفحه به‌روز می‌شود."
-                : "بعد از انتخاب، مرحله پرداخت باز می‌شود و پروژه قطعی می‌گردد."}
+                : "بعد از انتخاب، مرحله پرداخت باز می‌شود و رزرو قطعی می‌گردد."}
             </p>
 
-            <div className="inline-flex items-center gap-1 rounded-full border border-jar-border bg-jar-canvas px-2.5 py-1 text-[11px] font-medium text-jar-muted">
-              <Radio className="h-3 w-3 text-jar-logo" />
+            <div className="inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
+              <Radio className="h-3 w-3 text-neutral-400" />
               {parsed === "HAS_APPLICANTS" ? "پیشنهادها رسیده" : "منتشرشده برای متخصصان"}
             </div>
           </div>
@@ -131,14 +129,6 @@ export default function OrderClientWaiting({
             agreedTotalPrice={agreedTotalPrice}
           />
         )}
-
-        <div className="max-w-sm mx-auto w-full">
-          <CancelOrderButton
-            orderId={orderId}
-            orderStatus={status}
-            isOwnerOrAdmin={isOwnerOrAdmin}
-          />
-        </div>
       </div>
     </section>
   );

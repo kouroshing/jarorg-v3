@@ -10,8 +10,10 @@ import {
   X,
   Image as ImageIcon,
   AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { updateOrderByClientAction } from "@/app/actions/orderActions";
+import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
 import {
   MIN_PROJECT_DESCRIPTION_LENGTH,
   isValidPersonName,
@@ -40,12 +42,19 @@ export interface OrderEditInitial {
 interface OrderClientEditFormProps {
   order: OrderEditInitial;
   onCancel?: () => void;
+  /** Kept for call-site compatibility; cancel is on the sticky footer. */
+  isOwnerOrAdmin?: boolean;
 }
 
-export default function OrderClientEditForm({ order, onCancel }: OrderClientEditFormProps) {
+export default function OrderClientEditForm({
+  order,
+  onCancel,
+}: OrderClientEditFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [toastOpen, setToastOpen] = useState(false);
   const [contactName, setContactName] = useState(
     sanitizePersonName(order.contactName || "")
   );
@@ -90,6 +99,7 @@ export default function OrderClientEditForm({ order, onCancel }: OrderClientEdit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSaved(false);
 
     if (!isValidPersonName(contactName)) {
       setError("نام را فقط با حروف وارد کنید.");
@@ -125,6 +135,8 @@ export default function OrderClientEditForm({ order, onCancel }: OrderClientEdit
         setError(res.error || "خطا در ذخیره");
         return;
       }
+      setSaved(true);
+      setToastOpen(true);
       router.refresh();
     });
   };
@@ -132,13 +144,13 @@ export default function OrderClientEditForm({ order, onCancel }: OrderClientEdit
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-[28px] border border-amber-200 bg-white p-5 sm:p-7 space-y-5 shadow-xs"
+      className="rounded-2xl border border-neutral-200 bg-white p-5 sm:p-7 space-y-5 shadow-sm"
       dir="rtl"
     >
       <div className="space-y-1">
-        <h2 className="text-lg font-black text-jar-primary">ویرایش درخواست پروژه</h2>
-        <p className="text-xs text-jar-muted">
-          پس از ذخیره، دوباره برای تایید تیم جار ارسال می‌شود.
+        <h2 className="text-lg font-black text-neutral-900">ویرایش درخواست پروژه</h2>
+        <p className="text-xs text-neutral-500">
+          پس از ذخیره، دوباره برای تایید تیم جار ارسال می‌شود. برای لغو کل رزرو از نوار پایین استفاده کنید.
         </p>
       </div>
 
@@ -281,13 +293,24 @@ export default function OrderClientEditForm({ order, onCancel }: OrderClientEdit
         </div>
       </div>
 
+      {saved && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          ذخیره شد — درخواست دوباره برای تایید تیم جار ارسال شد.
+        </div>
+      )}
+
       <div className="flex gap-2 pt-1">
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
             disabled={isPending}
-            className="h-11 px-5 rounded-full border border-jar-border text-xs font-medium"
+            className="h-11 px-5 rounded-xl border border-neutral-200 text-xs font-medium text-neutral-700"
           >
             انصراف
           </button>
@@ -295,12 +318,26 @@ export default function OrderClientEditForm({ order, onCancel }: OrderClientEdit
         <button
           type="submit"
           disabled={isPending}
-          className="flex-1 h-11 rounded-full bg-jar-primary text-white text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+          className={`flex-1 h-11 rounded-xl text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50 ${
+            saved
+              ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+              : "bg-neutral-900 text-white hover:bg-neutral-800"
+          }`}
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          ذخیره و ارسال مجدد برای تایید
+          {isPending
+            ? "در حال ذخیره..."
+            : saved
+              ? "ذخیره شد ✓"
+              : "ذخیره و ارسال مجدد برای تایید"}
         </button>
       </div>
+
+      <SaveFeedbackToast
+        open={toastOpen}
+        message="ذخیره شد — درخواست برای تایید ارسال شد"
+        onClose={() => setToastOpen(false)}
+      />
     </form>
   );
 }

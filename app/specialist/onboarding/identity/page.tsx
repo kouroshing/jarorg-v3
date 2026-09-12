@@ -20,8 +20,8 @@ export default async function SpecialistIdentityPage() {
     <SpecialistAppShell active="identity" phone={session.phone}>
       <div className="max-w-xl mx-auto space-y-4">
         <div className="rounded-3xl border border-jar-border bg-jar-surface p-5 sm:p-6 shadow-xs space-y-1">
-          <h1 className="text-lg font-black">احراز هویت بانکی</h1>
-          <p className="text-xs text-jar-muted leading-relaxed">
+          <h1 className="text-lg font-black text-jar-primary">احراز هویت بانکی</h1>
+          <p className="text-sm text-jar-muted leading-relaxed">
             بعد از تایید کیفی پرونده، برای تسویه کیف‌پول باید شاهکار و تطبیق شبا از طریق زحل تایید شود.
           </p>
         </div>
