@@ -33,6 +33,7 @@ export default async function AdminSpecialistReviewPage({
 
   const cards = await getSpecialistReviewCards(statuses, {
     includeKycPending: filter === "pending",
+    includeProfileEditPending: filter === "pending",
   });
 
   return <SpecialistReviewBoard cards={cards} filter={filter} />;

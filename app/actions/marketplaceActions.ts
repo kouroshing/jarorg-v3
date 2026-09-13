@@ -9,6 +9,7 @@ import { getMarketplaceSettings } from "@/lib/orders/settings";
 import { canAfford, getTokenBalance, outOfTokensMessage } from "@/lib/orders/tokens";
 import { conflictMessage, findScheduleConflict } from "@/lib/orders/conflicts";
 import { proposalTotal, quoteTravel } from "@/lib/orders/travel";
+import { resolveScheduledAt } from "@/lib/date/jalali";
 import {
   type OrderStatus,
   OPEN_TO_APPLICANTS_STATUSES,
@@ -17,6 +18,13 @@ import {
   parseOrderStatus,
   storedValuesFor,
 } from "@/lib/orders/status";
+import {
+  buildClientCancelNote,
+  CLIENT_CANCEL_REASONS,
+  type ClientCancelReasonId,
+} from "@/lib/orders/cancelReasons";
+import { CATEGORIES_BY_SLUG } from "@/lib/categories";
+import { formatPublicSpecialistName } from "@/lib/specialists/publicName";
 
 // -------------------------------------------------------------
 // Validation Schemas
@@ -31,37 +39,55 @@ const selectSpecialistSchema = z.object({
   interestId: z.string().uuid("شناسه متقاضی نامعتبر است."),
 });
 
-const submitInterestSchema = z.object({
-  orderId: z.string().uuid("شناسه سفارش نامعتبر است."),
-  message: z
-    .string()
-    .trim()
-    .min(5, "متن پیام معرفی باید حداقل ۵ کاراکتر باشد.")
-    .max(1000, "متن پیام نمی‌تواند بیشتر از ۱۰۰۰ کاراکتر باشد."),
-  proposedPrice: z
-    .number()
-    .int("مبلغ پیشنهادی باید عدد صحیح باشد.")
-    .positive("مبلغ پیشنهادی باید بیشتر از صفر باشد.")
-    .optional()
-    .nullable(),
-  // Jar quotes travel automatically; a specialist may adjust it, but has to
-  // say why, and the client is shown both figures.
-  travelFeeOverride: z
-    .number()
-    .int("هزینه ایاب‌وذهاب باید عدد صحیح باشد.")
-    .min(0, "هزینه ایاب‌وذهاب نمی‌تواند منفی باشد.")
-    .optional()
-    .nullable(),
-  travelFeeOverrideReason: z
-    .string()
-    .trim()
-    .max(300, "توضیح نمی‌تواند بیشتر از ۳۰۰ کاراکتر باشد.")
-    .optional()
-    .nullable(),
-}).refine(
-  (v) => v.travelFeeOverride == null || (v.travelFeeOverrideReason?.length ?? 0) >= 5,
-  { message: "برای تغییر هزینه ایاب‌وذهاب باید دلیلش را بنویسید.", path: ["travelFeeOverrideReason"] }
-);
+const submitInterestSchema = z
+  .object({
+    orderId: z.string().uuid("شناسه سفارش نامعتبر است."),
+    message: z
+      .string()
+      .trim()
+      .min(5, "متن پیام معرفی باید حداقل ۵ کاراکتر باشد.")
+      .max(1000, "متن پیام نمی‌تواند بیشتر از ۱۰۰۰ کاراکتر باشد."),
+    proposedPrice: z
+      .number()
+      .int("مبلغ پیشنهادی باید عدد صحیح باشد.")
+      .positive("مبلغ پیشنهادی باید بیشتر از صفر باشد.")
+      .optional()
+      .nullable(),
+    travelFeeOverride: z
+      .number()
+      .int("هزینه ایاب‌وذهاب باید عدد صحیح باشد.")
+      .min(0, "هزینه ایاب‌وذهاب نمی‌تواند منفی باشد.")
+      .optional()
+      .nullable(),
+    travelFeeOverrideReason: z
+      .string()
+      .trim()
+      .max(300, "توضیح نمی‌تواند بیشتر از ۳۰۰ کاراکتر باشد.")
+      .optional()
+      .nullable(),
+    scheduleStance: z
+      .enum(["ACCEPT_CLIENT", "DEFER", "PROPOSE"])
+      .default("ACCEPT_CLIENT"),
+    proposedBookingDate: z.string().trim().max(32).optional().nullable(),
+    proposedTimeSlot: z.string().trim().max(80).optional().nullable(),
+  })
+  .refine(
+    (v) =>
+      v.travelFeeOverride == null || (v.travelFeeOverrideReason?.length ?? 0) >= 5,
+    {
+      message: "برای تغییر هزینه ایاب‌وذهاب باید دلیلش را بنویسید.",
+      path: ["travelFeeOverrideReason"],
+    }
+  )
+  .refine(
+    (v) =>
+      v.scheduleStance !== "PROPOSE" ||
+      (!!v.proposedBookingDate && !!v.proposedTimeSlot),
+    {
+      message: "برای پیشنهاد زمان جایگزین، تاریخ و بازه الزامی است.",
+      path: ["proposedBookingDate"],
+    }
+  );
 
 export type SubmitProjectInterestInput = z.infer<typeof submitInterestSchema>;
 
@@ -147,6 +173,9 @@ export interface ApplicantSpecialistView {
   distanceKm: number | null;
   /** proposedPrice plus the effective travel fee — what the client pays. */
   totalPrice: number;
+  scheduleStance: string;
+  proposedBookingDate: string | null;
+  proposedTimeSlot: string | null;
   createdAt: string;
   specialist: {
     id: string;
@@ -157,6 +186,9 @@ export interface ApplicantSpecialistView {
     hasStudio: boolean;
     isMobileGrapher: boolean;
     isBlueTick: boolean;
+    avatarUrl: string | null;
+    completedProjects: number;
+    approvedPortfolio: number;
     portfolioItems: {
       id: string;
       fileUrl: string;
@@ -372,8 +404,28 @@ export async function submitProjectInterestAction(
       };
     }
 
-    const { orderId, message, proposedPrice, travelFeeOverride, travelFeeOverrideReason } =
-      parsed.data;
+    const avatarRow = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: { avatarUrl: true },
+    });
+    if (!avatarRow?.avatarUrl?.trim()) {
+      return {
+        success: false,
+        error: "عکس پروفایل الزامی است. ابتدا عکس خود را آپلود کنید.",
+        redirectTo: "/specialist/onboarding/profile",
+      };
+    }
+
+    const {
+      orderId,
+      message,
+      proposedPrice,
+      travelFeeOverride,
+      travelFeeOverrideReason,
+      scheduleStance,
+      proposedBookingDate,
+      proposedTimeSlot,
+    } = parsed.data;
 
     // Verify order exists and is accepting applications
     const order = await prisma.order.findUnique({
@@ -388,6 +440,9 @@ export async function submitProjectInterestAction(
         locationLng: true,
         scheduledAt: true,
         durationHours: true,
+        bookingDate: true,
+        timeSlot: true,
+        isFlexibleSchedule: true,
       },
     });
 
@@ -432,15 +487,27 @@ export async function submitProjectInterestAction(
 
     // Multiple projects are fine; two at the same time are not. Checked again
     // when the client selects, because a clash can appear in between.
+    const conflictAt =
+      scheduleStance === "PROPOSE"
+        ? resolveScheduledAt(proposedBookingDate, proposedTimeSlot)
+        : order.scheduledAt;
     const clash = await findScheduleConflict(
       session.userId,
-      order.scheduledAt,
+      conflictAt,
       order.durationHours,
       order.id
     );
     if (clash) {
       return { success: false, error: conflictMessage(clash) };
     }
+
+    const scheduleData = {
+      scheduleStance,
+      proposedBookingDate:
+        scheduleStance === "PROPOSE" ? proposedBookingDate || null : null,
+      proposedTimeSlot:
+        scheduleStance === "PROPOSE" ? proposedTimeSlot || null : null,
+    };
 
     // Quote travel from the specialist's registered base to the shoot. Computed
     // server-side so the client and the specialist always see the same figure
@@ -474,6 +541,7 @@ export async function submitProjectInterestAction(
             message,
             proposedPrice: proposedPrice || null,
             ...travelData,
+            ...scheduleData,
             status: "PENDING",
             updatedAt: new Date(),
           },
@@ -486,6 +554,7 @@ export async function submitProjectInterestAction(
             message,
             proposedPrice: proposedPrice || null,
             ...travelData,
+            ...scheduleData,
             status: "PENDING",
           },
         });
@@ -530,8 +599,8 @@ export async function submitProjectInterestAction(
 // 3. Withdraw Project Interest (Specialist Action)
 // -------------------------------------------------------------
 /**
- * Allows a specialist to withdraw their proposal before being selected by the client.
- * Sets status to WITHDRAWN (preserves history).
+ * Legacy server helper — specialist UI no longer exposes withdraw.
+ * Kept for admin/history; do not wire back into specialist feeds.
  */
 export async function withdrawProjectInterestAction(
   interestId: string
@@ -712,12 +781,19 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
                 studioLat: true,
                 studioLng: true,
                 isMobileGrapher: true,
+                avatarUrl: true,
+                _count: {
+                  select: {
+                    portfolioItems: { where: { reviewStatus: "APPROVED" } },
+                  },
+                },
                 portfolioItems: {
                   where: {
                     categorySlug: order.categorySlug,
                     reviewStatus: "APPROVED",
                   },
-                  take: 6,
+                  orderBy: { createdAt: "desc" },
+                  take: 12,
                   select: {
                     id: true,
                     fileUrl: true,
@@ -733,42 +809,79 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
       orderBy: { createdAt: "desc" },
     });
 
-    const mapped: ApplicantSpecialistView[] = interests.map((item) => ({
-      id: item.id,
-      specialistId: item.specialistId,
-      status: item.status,
-      message: item.message,
-      proposedPrice: item.proposedPrice,
-      travelFee: item.travelFee,
-      travelFeeOverride: item.travelFeeOverride,
-      travelFeeOverrideReason: item.travelFeeOverrideReason,
-      distanceKm: item.distanceKm,
-      totalPrice: proposalTotal(item),
-      createdAt: item.createdAt.toISOString(),
-      specialist: {
-        id: item.specialist.id,
-        displayName: item.specialist.displayName || "عکاس متخصص جار",
-        // SpecialistProfile is where onboarding actually writes. Reading
-        // User.city here meant a specialist who filled the form properly showed
-        // a hard-coded "تهران" fallback instead of their real city.
-        city:
-          item.specialist.specialistProfile?.city ||
-          item.specialist.city ||
-          "—",
-        bio: item.specialist.specialistProfile?.bio ?? null,
-        equipment:
-          item.specialist.specialistProfile?.equipmentSummary ??
-          item.specialist.equipment,
-        hasStudio: Boolean(
-          item.specialist.specialistProfile?.studioName &&
-            typeof item.specialist.specialistProfile.studioLat === "number" &&
-            typeof item.specialist.specialistProfile.studioLng === "number"
-        ),
-        isMobileGrapher: Boolean(item.specialist.specialistProfile?.isMobileGrapher),
-        isBlueTick: item.specialist.requestedBlueTick,
-        portfolioItems: item.specialist.specialistProfile?.portfolioItems || [],
-      },
-    }));
+    const categoryMedia = CATEGORIES_BY_SLUG[order.categorySlug || ""]?.mediaType;
+
+    const specialistIds = interests.map((i) => i.specialistId);
+    const completedGroups =
+      specialistIds.length > 0
+        ? await prisma.order.groupBy({
+            by: ["selectedSpecialistId"],
+            where: {
+              selectedSpecialistId: { in: specialistIds },
+              OR: [{ status: "COMPLETED" }, { settledAt: { not: null } }],
+            },
+            _count: { _all: true },
+          })
+        : [];
+    const completedBySpecialist = new Map(
+      completedGroups
+        .filter((g) => g.selectedSpecialistId)
+        .map((g) => [g.selectedSpecialistId as string, g._count._all])
+    );
+
+    const mapped: ApplicantSpecialistView[] = interests.map((item) => {
+      const rawItems = item.specialist.specialistProfile?.portfolioItems || [];
+      // Prefer media that matches the order's category (photo vs video),
+      // but never mix in unrelated category work.
+      const portfolioItems =
+        categoryMedia && categoryMedia !== "ALL"
+          ? [
+              ...rawItems.filter((p) => p.mediaType === categoryMedia),
+              ...rawItems.filter((p) => p.mediaType !== categoryMedia),
+            ].slice(0, 8)
+          : rawItems.slice(0, 8);
+
+      return {
+        id: item.id,
+        specialistId: item.specialistId,
+        status: item.status,
+        message: item.message,
+        proposedPrice: item.proposedPrice,
+        travelFee: item.travelFee,
+        travelFeeOverride: item.travelFeeOverride,
+        travelFeeOverrideReason: item.travelFeeOverrideReason,
+        distanceKm: item.distanceKm,
+        totalPrice: proposalTotal(item),
+        scheduleStance: item.scheduleStance || "ACCEPT_CLIENT",
+        proposedBookingDate: item.proposedBookingDate ?? null,
+        proposedTimeSlot: item.proposedTimeSlot ?? null,
+        createdAt: item.createdAt.toISOString(),
+        specialist: {
+          id: item.specialist.id,
+          displayName: formatPublicSpecialistName(item.specialist.displayName),
+          city:
+            item.specialist.specialistProfile?.city ||
+            item.specialist.city ||
+            "—",
+          bio: item.specialist.specialistProfile?.bio ?? null,
+          equipment:
+            item.specialist.specialistProfile?.equipmentSummary ??
+            item.specialist.equipment,
+          hasStudio: Boolean(
+            item.specialist.specialistProfile?.studioName &&
+              typeof item.specialist.specialistProfile.studioLat === "number" &&
+              typeof item.specialist.specialistProfile.studioLng === "number"
+          ),
+          isMobileGrapher: Boolean(item.specialist.specialistProfile?.isMobileGrapher),
+          isBlueTick: item.specialist.requestedBlueTick,
+          avatarUrl: item.specialist.specialistProfile?.avatarUrl ?? null,
+          completedProjects: completedBySpecialist.get(item.specialistId) || 0,
+          approvedPortfolio:
+            item.specialist.specialistProfile?._count?.portfolioItems || 0,
+          portfolioItems,
+        },
+      };
+    }).filter((row) => Boolean(row.specialist.avatarUrl?.trim()));
 
     return {
       success: true,
@@ -856,6 +969,9 @@ export async function selectSpecialistForOrderAction(
           proposedPrice: true,
           travelFee: true,
           travelFeeOverride: true,
+          scheduleStance: true,
+          proposedBookingDate: true,
+          proposedTimeSlot: true,
         },
       });
 
@@ -879,6 +995,21 @@ export async function selectSpecialistForOrderAction(
       const agreedBasePrice = interest.proposedPrice ?? 0;
       const agreedTravelFee = interest.travelFeeOverride ?? interest.travelFee ?? 0;
 
+      const schedulePatch =
+        interest.scheduleStance === "PROPOSE" &&
+        interest.proposedBookingDate &&
+        interest.proposedTimeSlot
+          ? {
+              isFlexibleSchedule: false,
+              bookingDate: interest.proposedBookingDate,
+              timeSlot: interest.proposedTimeSlot,
+              scheduledAt: resolveScheduledAt(
+                interest.proposedBookingDate,
+                interest.proposedTimeSlot
+              ),
+            }
+          : {};
+
       await tx.order.update({
         where: { id: validOrderId },
         data: {
@@ -891,6 +1022,7 @@ export async function selectSpecialistForOrderAction(
           agreedTravelFee,
           agreedTotalPrice: agreedBasePrice + agreedTravelFee,
           commissionPercent: commission,
+          ...schedulePatch,
         },
       });
 
@@ -1147,10 +1279,12 @@ export async function declineSpecialistSelectionAction(
 /**
  * Client cancels their order.
  * Sets order to CANCELLED and marks active interests as CANCELLED.
+ * A cancel reason is required for ops insight and support follow-up.
  */
 export async function cancelOrderByClientAction(
   orderId: string,
-  reason?: string
+  reasonId: string,
+  extraNote?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const session = await getSession();
@@ -1162,6 +1296,19 @@ export async function cancelOrderByClientAction(
     if (!parsedId.success) {
       return { success: false, error: "شناسه سفارش نامعتبر است." };
     }
+
+    const validReason = CLIENT_CANCEL_REASONS.find((r) => r.id === reasonId);
+    if (!validReason) {
+      return { success: false, error: "لطفاً علت لغو را انتخاب کنید." };
+    }
+    if (validReason.id === "OTHER" && !extraNote?.trim()) {
+      return { success: false, error: "برای «دلیل دیگر» توضیح کوتاه بنویسید." };
+    }
+
+    const cancelNote = buildClientCancelNote(
+      validReason.id as ClientCancelReasonId,
+      extraNote
+    );
 
     const validOrderId = parsedId.data;
 
@@ -1221,6 +1368,7 @@ export async function cancelOrderByClientAction(
         data: {
           status: "CANCELLED",
           selectedSpecialistId: null,
+          adminCancelNote: cancelNote,
         },
       });
 
@@ -1237,6 +1385,16 @@ export async function cancelOrderByClientAction(
         categoryTitle: order.categoryTitle || "عکاسی",
       };
     });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: "ORDER_CANCELLED_BY_CLIENT",
+        targetModel: "Order",
+        targetId: validOrderId,
+        note: cancelNote,
+      },
+    }).catch(() => undefined);
 
     // Never block cancel success on notification delivery.
     void Promise.all(

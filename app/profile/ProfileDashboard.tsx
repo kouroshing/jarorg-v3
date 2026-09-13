@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   Sparkles,
   Download,
-  AlertCircle,
   MapPin,
   Banknote,
   RotateCcw,
@@ -27,34 +26,15 @@ import { isClientCancellable } from "@/lib/orders/status";
 
 type SubTabId = "active" | "history";
 
-type GalleryPurchaseType = {
-  id: string;
-  createdAt: string;
-  projectName: string;
-  photoCount: number;
-  amount: number;
-  authority: string | null;
-};
-
-const dateFormatter = new Intl.DateTimeFormat("fa-IR", {
-  dateStyle: "medium",
-});
-
-function formatDate(iso: string) {
-  return dateFormatter.format(new Date(iso));
-}
-
 export function ProfileDashboard({
   user,
   projects = [],
-  purchases = [],
   isSpecialistUser = false,
   specialistContinueHref = null,
   showPanelSwitcherHint = false,
 }: {
   user: ProfileUser;
   projects: any[];
-  purchases?: GalleryPurchaseType[];
   isSpecialistUser?: boolean;
   /** Resume incomplete onboarding or open specialist app. */
   specialistContinueHref?: string | null;
@@ -182,56 +162,6 @@ export function ProfileDashboard({
           )}
           {activeSubTab === "history" && (
             <ProjectList projects={historyProjects} tab="history" />
-          )}
-        </div>
-
-        <div className="space-y-4 pt-4 border-t border-jar-border">
-          <h3 className="text-sm font-black text-jar-primary flex items-center gap-1.5">
-            <Sparkles className="h-4 w-4 text-jar-logo fill-jar-logo" />
-            آلبوم‌های خریداری‌شده (گالری شاتی)
-          </h3>
-
-          {purchases.length === 0 ? (
-            <div className="rounded-2xl border border-jar-border bg-jar-surface p-8 text-center flex flex-col items-center justify-center gap-4">
-              <span className="text-xs font-medium text-jar-muted">
-                هنوز آلبومی خریداری نکرده‌اید.
-              </span>
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {purchases.map((purchase) => (
-                <li
-                  key={purchase.id}
-                  className="rounded-2xl border border-jar-border bg-jar-surface p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition hover:border-jar-primary/40 shadow-xs"
-                >
-                  <div className="text-right space-y-1">
-                    <h4 className="text-sm font-bold text-jar-primary">{purchase.projectName}</h4>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-jar-muted">
-                      <span>تعداد: {purchase.photoCount} عکس</span>
-                      <span>
-                        مبلغ: {purchase.amount.toLocaleString("fa-IR")} تومان
-                      </span>
-                      <span>تاریخ: {formatDate(purchase.createdAt)}</span>
-                    </div>
-                  </div>
-
-                  {purchase.authority ? (
-                    <Link
-                      href={`/gallery/success?authority=${purchase.authority}`}
-                      className="inline-flex h-9 items-center justify-center gap-1 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white px-5 text-xs font-medium transition-colors active:scale-95 text-center shadow-none"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      مشاهده و دانلود عکس‌ها
-                    </Link>
-                  ) : (
-                    <div className="text-xs font-bold text-rose-500 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      عدم یافت توکن پرداخت
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
           )}
         </div>
       </div>

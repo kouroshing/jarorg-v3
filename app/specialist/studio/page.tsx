@@ -38,6 +38,9 @@ export default async function SpecialistStudioPage() {
       initialLat={state.studioLat}
       initialLng={state.studioLng}
       initialAddress={state.studioAddress}
+      requireApproval={access.kind === "active"}
+      profileEditStatus={state.profileEditStatus}
+      profileEditNote={state.profileEditNote}
     />
   );
 

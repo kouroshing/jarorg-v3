@@ -106,7 +106,8 @@ export default function SpecialistProfileBasicsForm({
       <div className="space-y-1">
         <h1 className="text-lg sm:text-xl font-black text-jar-primary">اطلاعات پایه</h1>
         <p className="text-sm text-jar-muted leading-relaxed">
-          نام نمایشی و عکس پروفایل برای کارفرمایان و پنل ادمین استفاده می‌شود. شماره موبایل از حساب شما گرفته شده است.
+          عکس پروفایل الزامی است و بدون آن پروفایل شما برای کارفرما نمایش داده نمی‌شود.
+          نام نمایشی هم برای معرفی شما استفاده می‌شود. شماره موبایل از حساب شما گرفته شده است.
         </p>
       </div>
 

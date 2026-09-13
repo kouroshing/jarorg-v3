@@ -17,8 +17,16 @@ import {
 } from "lucide-react";
 import { CategoryIcon } from "@/components/order/steps/StepCategory";
 import OrderBudgetAdjuster from "@/components/order/OrderBudgetAdjuster";
+import {
+  MIN_PROJECT_DESCRIPTION_LENGTH,
+  PROJECT_DESCRIPTION_SOFT_GOOD,
+} from "@/lib/orders/descriptionLimits";
 
-export const MIN_PROJECT_DESCRIPTION_LENGTH = 120;
+export {
+  MIN_PROJECT_DESCRIPTION_LENGTH,
+  PROJECT_DESCRIPTION_SOFT_GOOD,
+} from "@/lib/orders/descriptionLimits";
+
 
 /** Strip digits and keep letters / spaces for person names. */
 export function sanitizePersonName(value: string) {
@@ -80,6 +88,23 @@ export default function StepFinalize({
   const isNameValid = isValidPersonName(contactName);
   const descLen = projectDescription.trim().length;
   const isDescValid = descLen >= MIN_PROJECT_DESCRIPTION_LENGTH;
+  const isDescRich = descLen > PROJECT_DESCRIPTION_SOFT_GOOD;
+  const descMeterClass =
+    descLen === 0
+      ? "text-jar-muted"
+      : !isDescValid
+        ? "text-rose-600"
+        : isDescRich
+          ? "text-emerald-600"
+          : "text-rose-600";
+  const descHint =
+    descLen === 0
+      ? null
+      : !isDescValid
+        ? `حداقل ${MIN_PROJECT_DESCRIPTION_LENGTH} حرف لازم است (${MIN_PROJECT_DESCRIPTION_LENGTH - descLen} حرف دیگر).`
+        : isDescRich
+          ? "توضیحات خوب — شانس پذیرش متخصص بالاتر می‌رود."
+          : `توضیحات کوتاه است؛ بالای ${PROJECT_DESCRIPTION_SOFT_GOOD} حرف معمولاً پذیرش بهتری دارد.`;
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -199,16 +224,13 @@ export default function StepFinalize({
         <p className="text-[10px] text-jar-muted">فقط حروف؛ وارد کردن عدد مجاز نیست.</p>
       </div>
 
-      {/* Required description */}
+      {/* Required description — hard min 30; soft green/red cue around 60 */}
       <div className="space-y-1.5">
         <label className="text-[11px] font-bold text-jar-primary flex items-center justify-between gap-2">
           <span>توضیحات پروژه</span>
-          <span
-            className={`text-[10px] font-mono tabular-nums ${
-              isDescValid ? "text-emerald-600" : "text-jar-muted"
-            }`}
-          >
-            {descLen} / {MIN_PROJECT_DESCRIPTION_LENGTH}
+          <span className={`text-[10px] font-mono tabular-nums ${descMeterClass}`}>
+            {descLen.toLocaleString("fa-IR")} حرف
+            {isDescRich ? " · خوب" : isDescValid ? " · کوتاه" : ""}
           </span>
         </label>
         <textarea
@@ -216,11 +238,21 @@ export default function StepFinalize({
           onChange={(e) => onChangeProjectDescription(e.target.value)}
           placeholder="سبک، فضا، لباس، تعداد نفرات، انتظار از خروجی و هر نکته‌ای که عکاس باید بداند را بنویسید..."
           rows={4}
-          className="w-full p-3 rounded-xl border border-jar-border bg-jar-surface text-xs sm:text-sm font-medium text-jar-primary placeholder:text-[#A8A29A] focus:outline-none focus:border-jar-logo focus:ring-1 focus:ring-jar-logo transition-all shadow-2xs resize-none min-h-[110px]"
+          className={`w-full p-3 rounded-xl border bg-jar-surface text-xs sm:text-sm font-medium text-jar-primary placeholder:text-[#A8A29A] focus:outline-none focus:ring-1 transition-all shadow-2xs resize-none min-h-[110px] ${
+            descLen === 0
+              ? "border-jar-border focus:border-jar-logo focus:ring-jar-logo"
+              : !isDescValid || !isDescRich
+                ? "border-rose-300 focus:border-rose-500 focus:ring-rose-400/40"
+                : "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-400/40"
+          }`}
         />
-        {!isDescValid && descLen > 0 && (
-          <p className="text-[10px] text-amber-700 font-medium">
-            حداقل {MIN_PROJECT_DESCRIPTION_LENGTH} حرف لازم است ({MIN_PROJECT_DESCRIPTION_LENGTH - descLen} حرف دیگر).
+        {descHint && (
+          <p
+            className={`text-[10px] font-medium ${
+              isDescRich ? "text-emerald-700" : "text-rose-700"
+            }`}
+          >
+            {descHint}
           </p>
         )}
       </div>

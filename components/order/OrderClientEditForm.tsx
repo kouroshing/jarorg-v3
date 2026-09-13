@@ -16,6 +16,7 @@ import { updateOrderByClientAction } from "@/app/actions/orderActions";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
 import {
   MIN_PROJECT_DESCRIPTION_LENGTH,
+  PROJECT_DESCRIPTION_SOFT_GOOD,
   isValidPersonName,
   sanitizePersonName,
 } from "@/components/order/steps/StepFinalize";
@@ -71,6 +72,16 @@ export default function OrderClientEditForm({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const descLen = projectDescription.trim().length;
+  const isDescValid = descLen >= MIN_PROJECT_DESCRIPTION_LENGTH;
+  const isDescRich = descLen > PROJECT_DESCRIPTION_SOFT_GOOD;
+  const descMeterClass =
+    descLen === 0
+      ? "text-jar-muted"
+      : !isDescValid
+        ? "text-rose-600"
+        : isDescRich
+          ? "text-emerald-600"
+          : "text-rose-600";
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -225,18 +236,38 @@ export default function OrderClientEditForm({
       )}
 
       <div className="space-y-1.5">
-        <label className="text-[11px] font-bold flex justify-between">
+        <label className="text-[11px] font-bold flex justify-between gap-2">
           <span>توضیحات پروژه</span>
-          <span className="font-mono text-jar-muted">
-            {descLen} / {MIN_PROJECT_DESCRIPTION_LENGTH}
+          <span className={`font-mono text-[10px] tabular-nums ${descMeterClass}`}>
+            {descLen.toLocaleString("fa-IR")} حرف
+            {isDescRich ? " · خوب" : isDescValid ? " · کوتاه" : ""}
           </span>
         </label>
         <textarea
           rows={5}
           value={projectDescription}
           onChange={(e) => setProjectDescription(e.target.value)}
-          className="w-full p-3 rounded-xl border border-jar-border bg-jar-surface text-sm resize-none min-h-[120px]"
+          className={`w-full p-3 rounded-xl border bg-jar-surface text-sm resize-none min-h-[120px] focus:outline-none focus:ring-1 transition-all ${
+            descLen === 0
+              ? "border-jar-border focus:border-jar-logo focus:ring-jar-logo"
+              : !isDescValid || !isDescRich
+                ? "border-rose-300 focus:border-rose-500 focus:ring-rose-400/40"
+                : "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-400/40"
+          }`}
         />
+        {descLen > 0 && (
+          <p
+            className={`text-[10px] font-medium ${
+              isDescRich ? "text-emerald-700" : "text-rose-700"
+            }`}
+          >
+            {!isDescValid
+              ? `حداقل ${MIN_PROJECT_DESCRIPTION_LENGTH} حرف لازم است.`
+              : isDescRich
+                ? "توضیحات خوب — شانس پذیرش متخصص بالاتر می‌رود."
+                : `توضیحات کوتاه است؛ بالای ${PROJECT_DESCRIPTION_SOFT_GOOD} حرف معمولاً پذیرش بهتری دارد.`}
+          </p>
+        )}
       </div>
 
       <div className="space-y-2 rounded-2xl border border-dashed border-jar-border p-3">

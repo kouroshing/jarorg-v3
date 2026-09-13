@@ -20,6 +20,7 @@ import {
 import OrderClientWaiting from "@/components/order/OrderClientWaiting";
 import CancelOrderButton from "@/components/order/CancelOrderButton";
 import OrderAdminStage from "@/components/order/OrderAdminStage";
+import OrderDeliveryPanel from "@/components/order/OrderDeliveryPanel";
 import {
   isAdminTriage,
   isClientCancellable,
@@ -27,6 +28,7 @@ import {
   orderStatusPresentation,
   parseOrderStatus,
 } from "@/lib/orders/status";
+import { formatPublicSpecialistName } from "@/lib/specialists/publicName";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +86,23 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
   const adminAccess = await resolveAdminAccess(session);
   const isAdmin = Boolean(adminAccess);
   const isOwnerOrAdmin = !!(isOwner || isAdmin);
+  const isSelectedSpecialist = !!(
+    session?.userId && order.selectedSpecialistId === session.userId
+  );
+  const deliveryRole = isAdmin
+    ? "admin"
+    : isSelectedSpecialist
+      ? "specialist"
+      : isOwner
+        ? "client"
+        : null;
+  const showDelivery =
+    Boolean(order.paidAt) &&
+    (parsedStatus === "CONFIRMED" ||
+      parsedStatus === "COMPLETED" ||
+      Boolean(order.settledAt) ||
+      Boolean(order.disputedAt)) &&
+    deliveryRole != null;
 
   let applicants: ApplicantSpecialistView[] = [];
   const isPendingFlow = isAdminTriage(order.status);
@@ -99,17 +118,20 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
   const moodboardUrls = Array.isArray(order.moodboardUrls) ? order.moodboardUrls : [];
   const showCancel =
     isOwnerOrAdmin &&
+    !order.settledAt &&
+    !order.disputedAt &&
     parsedStatus !== "CANCELLED" &&
     parsedStatus !== "COMPLETED" &&
-    (isClientCancellable(order.status) || parsedStatus === "CONFIRMED");
+    (isClientCancellable(order.status) ||
+      (parsedStatus === "CONFIRMED" && !order.deliveredAt));
 
   return (
     <main
-      className="min-h-screen bg-white text-neutral-900 pb-[calc(7rem+env(safe-area-inset-bottom,0px))]"
+      className="min-h-screen bg-white text-neutral-900 pb-10"
       dir="rtl"
     >
       <div className="border-b border-neutral-200 bg-white sticky top-0 z-30">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
           <Link
             href="/profile"
             className="inline-flex items-center gap-1.5 text-sm font-bold text-neutral-600 hover:text-neutral-900 transition-colors"
@@ -117,13 +139,23 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             <ArrowRight className="h-4 w-4" />
             <span>بازگشت به پروفایل</span>
           </Link>
-          <span className="text-xs text-neutral-400 font-mono tracking-wide">
-            رزرو #{order.id.slice(-8).toUpperCase()}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 font-mono tracking-wide">
+              رزرو #{order.id.slice(-8).toUpperCase()}
+            </span>
+            {showCancel && (
+              <CancelOrderButton
+                orderId={order.id}
+                orderStatus={order.status}
+                isOwnerOrAdmin={isOwnerOrAdmin}
+                variant="headerMenu"
+              />
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-5">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-5">
         {searchParams?.payment === "success" && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-sm font-bold">
             <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
@@ -180,6 +212,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           <OrderClientWaiting
             orderId={order.id}
             categoryTitle={order.categoryTitle || "پروژه"}
+            categorySlug={order.categorySlug}
             orderStatus={order.status}
             initialApplicants={applicants}
             isOwnerOrAdmin={isOwnerOrAdmin}
@@ -216,20 +249,20 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           </div>
         )}
 
-        {parsedStatus === "CONFIRMED" && isOwnerOrAdmin && (
+        {parsedStatus === "CONFIRMED" && (isOwnerOrAdmin || isSelectedSpecialist) && (
           <div className="rounded-2xl border border-emerald-200 bg-white p-6 space-y-4 shadow-sm">
             <div className="flex items-center gap-2 text-emerald-900">
               <CheckCircle2 className="h-5 w-5" />
               <h1 className="text-base font-black">رزرو قطعی شد</h1>
             </div>
-            {order.selectedSpecialist && (
+            {isOwnerOrAdmin && order.selectedSpecialist && (
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 flex items-center gap-3 text-right">
                 <div className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center">
                   <User className="h-5 w-5" />
                 </div>
                 <div>
                   <p className="text-sm font-black text-neutral-900">
-                    {order.selectedSpecialist.displayName || "متخصص جار"}
+                    {formatPublicSpecialistName(order.selectedSpecialist.displayName)}
                   </p>
                   {order.contactRevealedAt && order.selectedSpecialist.phone ? (
                     <a
@@ -241,13 +274,44 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
                     </a>
                   ) : (
                     <p className="text-xs text-neutral-500 mt-1">
-                      شماره تماس نزدیک زمان پروژه نمایش داده می‌شود.
+                      شماره تماس نزدیک زمان پروژه نمایش داده می‌شود. هماهنگی از همین صفحه و تماس پس از افشا انجام می‌شود.
                     </p>
                   )}
                 </div>
               </div>
             )}
+            {isSelectedSpecialist && !isOwnerOrAdmin && (
+              <p className="text-xs text-neutral-600 leading-relaxed">
+                پروژه قطعی است. پس از اتمام کار، تحویل را از پنل پایین ثبت کنید. شماره و آدرس کارفرما نزدیک زمان پروژه آزاد می‌شود.
+              </p>
+            )}
           </div>
+        )}
+
+        {showDelivery && deliveryRole && (
+          <OrderDeliveryPanel
+            role={deliveryRole}
+            order={{
+              id: order.id,
+              paidAt: order.paidAt ? new Date(order.paidAt).toISOString() : null,
+              deliveredAt: order.deliveredAt
+                ? new Date(order.deliveredAt).toISOString()
+                : null,
+              settledAt: order.settledAt
+                ? new Date(order.settledAt).toISOString()
+                : null,
+              disputedAt: order.disputedAt
+                ? new Date(order.disputedAt).toISOString()
+                : null,
+              disputeReason: order.disputeReason ?? null,
+              disputeResolvedAt: order.disputeResolvedAt
+                ? new Date(order.disputeResolvedAt).toISOString()
+                : null,
+              revisionCount: order.revisionCount ?? 0,
+              revisionNote: order.revisionNote ?? null,
+              categoryTitle: order.categoryTitle,
+            }}
+          />
         )}
 
         {parsedStatus === "AWAITING_SPECIALIST_CONFIRMATION" && isOwnerOrAdmin && (
@@ -259,7 +323,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
               منتظر تأیید نهایی متخصص هستیم
             </h1>
             <p className="text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
-              تا قبل از تأیید متخصص می‌توانید این رزرو را از نوار پایین لغو کنید.
+              تا قبل از تأیید متخصص می‌توانید از منوی ⋮ بالای صفحه رزرو را لغو کنید.
             </p>
           </div>
         )}
@@ -282,20 +346,6 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             </div>
           )}
       </div>
-
-      {/* Always-visible cancel for owner on reservation status page */}
-      {showCancel && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white/95 backdrop-blur-md pb-[env(safe-area-inset-bottom,0px)]">
-          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
-            <CancelOrderButton
-              orderId={order.id}
-              orderStatus={order.status}
-              isOwnerOrAdmin={isOwnerOrAdmin}
-              variant="booking"
-            />
-          </div>
-        </div>
-      )}
     </main>
   );
 }

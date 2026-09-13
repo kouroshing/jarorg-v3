@@ -3,12 +3,49 @@
 import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, AlertCircle } from "lucide-react";
-import { ALL_CATEGORIES } from "@/lib/categories";
+import {
+  PERSONAL_CATEGORIES,
+  COMMERCIAL_CATEGORIES,
+  type ServiceCategory,
+} from "@/lib/categories";
 import { updateSpecialistCategories } from "@/app/actions/specialistPortfolioActions";
 import { MIN_SELECTED_CATEGORIES } from "@/lib/specialists/eligibility";
 
 interface Props {
   initialSelected: string[];
+}
+
+function CategoryGrid({
+  categories,
+  selected,
+  onToggle,
+}: {
+  categories: ServiceCategory[];
+  selected: string[];
+  onToggle: (slug: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {categories.map((cat) => {
+        const on = selected.includes(cat.slug);
+        return (
+          <button
+            key={cat.slug}
+            type="button"
+            onClick={() => onToggle(cat.slug)}
+            className={`flex items-center justify-between gap-2 rounded-2xl border px-3.5 py-3 text-right transition-colors ${
+              on
+                ? "border-jar-primary bg-jar-primary text-white"
+                : "border-jar-border bg-jar-canvas hover:border-jar-primary/40"
+            }`}
+          >
+            <span className="text-xs font-bold">{cat.title}</span>
+            {on && <Check className="h-4 w-4 shrink-0" />}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function SpecialistCategoriesForm({ initialSelected }: Props) {
@@ -50,7 +87,8 @@ export default function SpecialistCategoriesForm({ initialSelected }: Props) {
       <div className="space-y-1">
         <h1 className="text-lg sm:text-xl font-black">دسته‌بندی‌هایی که بلدید</h1>
         <p className="text-xs text-jar-muted leading-relaxed">
-          حداقل {MIN_SELECTED_CATEGORIES} شاخه انتخاب کنید. بعداً باید حداقل ۱۰ نمونه‌کار در یکی از همین شاخه‌ها بارگذاری کنید.
+          حداقل {MIN_SELECTED_CATEGORIES} شاخه انتخاب کنید. شاخه‌های شخصی و تجاری جدا هستند؛
+          بعداً باید حداقل ۱۰ نمونه‌کار در یکی از همین شاخه‌ها بارگذاری کنید.
         </p>
       </div>
 
@@ -61,26 +99,27 @@ export default function SpecialistCategoriesForm({ initialSelected }: Props) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {ALL_CATEGORIES.map((cat) => {
-          const on = selected.includes(cat.slug);
-          return (
-            <button
-              key={cat.slug}
-              type="button"
-              onClick={() => toggle(cat.slug)}
-              className={`flex items-center justify-between gap-2 rounded-2xl border px-3.5 py-3 text-right transition-colors ${
-                on
-                  ? "border-jar-primary bg-jar-primary text-white"
-                  : "border-jar-border bg-jar-canvas hover:border-jar-primary/40"
-              }`}
-            >
-              <span className="text-xs font-bold">{cat.title}</span>
-              {on && <Check className="h-4 w-4 shrink-0" />}
-            </button>
-          );
-        })}
-      </div>
+      <section className="space-y-2.5">
+        <h2 className="text-xs font-black text-jar-primary tracking-tight">
+          شخصی
+        </h2>
+        <CategoryGrid
+          categories={PERSONAL_CATEGORIES}
+          selected={selected}
+          onToggle={toggle}
+        />
+      </section>
+
+      <section className="space-y-2.5 pt-2 border-t border-jar-border">
+        <h2 className="text-xs font-black text-jar-primary tracking-tight">
+          تجاری
+        </h2>
+        <CategoryGrid
+          categories={COMMERCIAL_CATEGORIES}
+          selected={selected}
+          onToggle={toggle}
+        />
+      </section>
 
       <p className="text-[11px] text-jar-muted font-medium">
         انتخاب‌شده: {selected.length.toLocaleString("fa-IR")} شاخه

@@ -21,6 +21,15 @@ export default async function EditProfilePage() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
+    include: {
+      specialistProfile: {
+        select: {
+          status: true,
+          profileEditStatus: true,
+          profileEditNote: true,
+        },
+      },
+    },
   });
 
   if (!user) {
@@ -41,6 +50,7 @@ export default async function EditProfilePage() {
   }
 
   const phoneDisplay = phoneToLocalDisplay(session.phone);
+  const requireApproval = user.specialistProfile?.status === "ACTIVE";
 
   return (
     <ProfileAppShell
@@ -48,12 +58,14 @@ export default async function EditProfilePage() {
       phone={session.phone}
       displayName={user.displayName}
       specialistGate={specialistGate}
-      customerActive="account"
     >
       <div className="mx-auto w-full max-w-2xl">
         <EditProfileForm
           initialName={user.displayName || ""}
           phoneDisplay={phoneDisplay}
+          requireApproval={requireApproval}
+          profileEditStatus={user.specialistProfile?.profileEditStatus}
+          profileEditNote={user.specialistProfile?.profileEditNote}
         />
       </div>
     </ProfileAppShell>

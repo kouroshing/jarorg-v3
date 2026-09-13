@@ -14,6 +14,7 @@ import {
 import { logout } from "@/app/actions/authActions";
 import { updateUserDisplayName } from "@/app/actions/profileActions";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
+import ProfileEditPendingBanner from "@/components/specialist/ProfileEditPendingBanner";
 
 const inputClasses =
   "w-full rounded-xl border border-jar-border bg-jar-canvas px-4 py-3 text-sm text-jar-primary placeholder:text-jar-muted/60 outline-none transition-all duration-200 focus:border-jar-logo focus:ring-2 focus:ring-jar-logo/20";
@@ -21,14 +22,21 @@ const inputClasses =
 export default function EditProfileForm({
   initialName,
   phoneDisplay,
+  profileEditStatus,
+  profileEditNote,
+  requireApproval = false,
 }: {
   initialName: string;
   phoneDisplay: string;
+  profileEditStatus?: string | null;
+  profileEditNote?: string | null;
+  requireApproval?: boolean;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [message, setMessage] = useState<string | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
+  const [pendingQueued, setPendingQueued] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const handleSave = () => {
@@ -36,6 +44,7 @@ export default function EditProfileForm({
     startTransition(async () => {
       const result = await updateUserDisplayName(name);
       if (result.success) {
+        setPendingQueued(Boolean(result.pendingApproval));
         setMessage("success");
         setToastOpen(true);
         router.refresh();
@@ -57,6 +66,10 @@ export default function EditProfileForm({
           <ArrowRight className="h-4 w-4" />
         </Link>
       </header>
+
+      {requireApproval ? (
+        <ProfileEditPendingBanner status={profileEditStatus} note={profileEditNote} />
+      ) : null}
 
       <div className="space-y-6">
         <div>
@@ -149,7 +162,11 @@ export default function EditProfileForm({
 
       <SaveFeedbackToast
         open={toastOpen}
-        message="ذخیره شد — مشخصات حساب به‌روز شد"
+        message={
+          pendingQueued
+            ? "ارسال شد — در انتظار تایید جار"
+            : "ذخیره شد — مشخصات حساب به‌روز شد"
+        }
         onClose={() => setToastOpen(false)}
       />
     </div>

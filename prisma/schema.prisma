@@ -158,6 +158,8 @@ model Order {
   adminCancelNote String? @map("admin_cancel_note")
   /// Message shown to the client when admin requests edits (NEEDS_CLIENT_EDIT).
   adminNote       String? @map("admin_note")
+  /// JSON array of publish-gate flags from last evaluate (admin triage chips).
+  publishFlags    String? @map("publish_flags")
 
   // Snapshot of the accepted proposal, written when the client selects a
   // specialist. Kept on the order so a later edit to the proposal cannot
@@ -236,6 +238,12 @@ model ProjectInterest {
   /// Specialist's manual adjustment. When set, this is what the client pays.
   travelFeeOverride       Int?    @map("travel_fee_override")
   travelFeeOverrideReason String? @map("travel_fee_override_reason")
+
+  /// How the specialist wants to handle shoot timing vs the client's request.
+  /// ACCEPT_CLIENT | DEFER | PROPOSE
+  scheduleStance       String  @default("ACCEPT_CLIENT") @map("schedule_stance")
+  proposedBookingDate  String? @map("proposed_booking_date")
+  proposedTimeSlot     String? @map("proposed_time_slot")
 
   order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   specialist User  @relation(fields: [specialistId], references: [id], onDelete: Cascade)
@@ -552,6 +560,13 @@ model SpecialistProfile {
   kycFailureReason  String?   @map("kyc_failure_reason")
   kycSubmittedAt    DateTime? @map("kyc_submitted_at")
 
+  /// Post-activation profile edits wait here until an admin applies or rejects.
+  /// Live city/base/studio fields stay unchanged while status is PENDING.
+  pendingProfileEdit       String?   @map("pending_profile_edit") // JSON draft
+  profileEditStatus        String    @default("NONE") @map("profile_edit_status") // NONE, PENDING, REJECTED
+  profileEditSubmittedAt   DateTime? @map("profile_edit_submitted_at")
+  profileEditNote          String?   @map("profile_edit_note")
+
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   portfolioItems PortfolioItem[]
 
@@ -571,6 +586,8 @@ model PortfolioItem {
   fileSize        Int?     @map("file_size")
   reviewStatus    String   @default("PENDING") @map("review_status") // PENDING, APPROVED, REJECTED
   rejectionReason String?  @map("rejection_reason")
+  /// When an admin curated this file for Instagram (or similar). Null = not used yet.
+  instagramPickedAt DateTime? @map("instagram_picked_at")
   createdAt       DateTime @default(now()) @map("created_at")
 
   specialist SpecialistProfile @relation(fields: [specialistId], references: [id], onDelete: Cascade)

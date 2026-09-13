@@ -11,6 +11,7 @@ import {
   getSpecialistAccess,
   repairOrphanSpecialistRole,
 } from "@/lib/specialists/access";
+import { formatPublicSpecialistName } from "@/lib/specialists/publicName";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,6 @@ export default async function ProfilePage({
 
   let user: Awaited<ReturnType<typeof prisma.user.findUnique>> = null;
   let projects: any[] = [];
-  let serializedPurchases: any[] = [];
 
   try {
     user = await prisma.user.findUnique({
@@ -115,7 +115,10 @@ export default async function ProfilePage({
       expert: o.selectedSpecialist
         ? {
             id: o.selectedSpecialist.id,
-            name: o.selectedSpecialist.displayName || "متخصص انتخابی شما",
+            name: formatPublicSpecialistName(
+              o.selectedSpecialist.displayName,
+              "متخصص انتخابی شما"
+            ),
             imageUrl: null as string | null,
             profileHref: `/s/${o.selectedSpecialist.id}`,
           }
@@ -123,7 +126,6 @@ export default async function ProfilePage({
     }));
 
     projects = [...mappedOrders, ...projects];
-    serializedPurchases = [];
   } catch (error) {
     console.error("Error fetching profile dashboard details:", error);
   }
@@ -157,12 +159,10 @@ export default async function ProfilePage({
       phone={session.phone}
       displayName={profileUser.displayName}
       specialistGate={specialistGate}
-      customerActive="orders"
     >
       <ProfileDashboard
         user={profileUser}
         projects={projects}
-        purchases={serializedPurchases}
         isSpecialistUser={access.kind === "active"}
         specialistContinueHref={
           access.kind === "onboarding" || access.kind === "pending"

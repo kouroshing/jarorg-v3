@@ -14,12 +14,19 @@ export default async function SpecialistOnboardingProfilePage() {
   if (state.status === "PENDING_REVIEW" || state.status === "SUSPENDED") {
     redirect("/specialist/onboarding/review");
   }
-  if (state.status === "ACTIVE") {
+  // ACTIVE specialists missing a required avatar must stay here to upload.
+  if (state.status === "ACTIVE" && state.hasAvatar) {
     redirect(state.nextStep || "/specialist/projects");
   }
 
   return (
     <SpecialistOnboardingShell activeStep="profile">
+      {!state.hasAvatar ? (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-950 leading-relaxed">
+          عکس پروفایل الزامی است. تا وقتی عکس آپلود نکنید، پروفایل شما برای کارفرما
+          نمایش داده نمی‌شود و دسترسی به پروژه‌ها باز نمی‌شود.
+        </div>
+      ) : null}
       <SpecialistProfileBasicsForm
         initialDisplayName={state.displayName || ""}
         initialAvatarUrl={state.avatarUrl || null}

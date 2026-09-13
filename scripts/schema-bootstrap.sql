@@ -92,6 +92,7 @@ CREATE TABLE "orders" (
     "contact_phone" TEXT,
     "admin_cancel_note" TEXT,
     "admin_note" TEXT,
+    "publish_flags" TEXT,
     "agreed_base_price" INTEGER,
     "agreed_travel_fee" INTEGER,
     "agreed_total_price" INTEGER,
@@ -132,6 +133,9 @@ CREATE TABLE "project_interests" (
     "travel_fee" INTEGER,
     "travel_fee_override" INTEGER,
     "travel_fee_override_reason" TEXT,
+    "schedule_stance" TEXT NOT NULL DEFAULT 'ACCEPT_CLIENT',
+    "proposed_booking_date" TEXT,
+    "proposed_time_slot" TEXT,
     CONSTRAINT "project_interests_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "project_interests_specialist_id_fkey" FOREIGN KEY ("specialist_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -363,6 +367,10 @@ CREATE TABLE "specialist_profiles" (
     "kyc_verified_at" DATETIME,
     "kyc_failure_reason" TEXT,
     "kyc_submitted_at" DATETIME,
+    "pending_profile_edit" TEXT,
+    "profile_edit_status" TEXT NOT NULL DEFAULT 'NONE',
+    "profile_edit_submitted_at" DATETIME,
+    "profile_edit_note" TEXT,
     CONSTRAINT "specialist_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -379,6 +387,7 @@ CREATE TABLE "portfolio_items" (
     "file_size" INTEGER,
     "review_status" TEXT NOT NULL DEFAULT 'PENDING',
     "rejection_reason" TEXT,
+    "instagram_picked_at" DATETIME,
     "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "portfolio_items_specialist_id_fkey" FOREIGN KEY ("specialist_id") REFERENCES "specialist_profiles" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );

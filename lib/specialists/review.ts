@@ -11,6 +11,10 @@ import {
   type EligibilityResult,
 } from "@/lib/specialists/eligibility";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
+import {
+  parsePendingProfileEdit,
+  type PendingProfileEditDraft,
+} from "@/lib/specialists/profileEditShared";
 
 export type SpecialistReviewCard = {
   profileId: string;
@@ -32,6 +36,10 @@ export type SpecialistReviewCard = {
   reviewedAt: string | null;
   reviewNote: string | null;
   baseAddress: string | null;
+  profileEditStatus: string;
+  profileEditSubmittedAt: string | null;
+  profileEditNote: string | null;
+  pendingProfileEdit: PendingProfileEditDraft | null;
   categories: { slug: string; title: string; total: number; approved: number; pending: number; rejected: number }[];
   items: {
     id: string;
@@ -42,6 +50,7 @@ export type SpecialistReviewCard = {
     title: string | null;
     reviewStatus: string;
     rejectionReason: string | null;
+    instagramPickedAt: string | null;
   }[];
   counts: { total: number; approved: number; pending: number; rejected: number };
   /** True once enough APPROVED work exists to switch the profile to ACTIVE. */
@@ -66,17 +75,18 @@ function categoryTitle(slug: string): string {
  */
 export async function getSpecialistReviewCards(
   statuses: string[] = ["PENDING_REVIEW"],
-  options?: { includeKycPending?: boolean }
+  options?: { includeKycPending?: boolean; includeProfileEditPending?: boolean }
 ): Promise<SpecialistReviewCard[]> {
+  const orClauses: Record<string, unknown>[] = [{ status: { in: statuses } }];
+  if (options?.includeKycPending) {
+    orClauses.push({ status: "ACTIVE", kycStatus: "PENDING" });
+  }
+  if (options?.includeProfileEditPending) {
+    orClauses.push({ status: "ACTIVE", profileEditStatus: "PENDING" });
+  }
+
   const profiles = await prisma.specialistProfile.findMany({
-    where: options?.includeKycPending
-      ? {
-          OR: [
-            { status: { in: statuses } },
-            { status: "ACTIVE", kycStatus: "PENDING" },
-          ],
-        }
-      : { status: { in: statuses } },
+    where: orClauses.length > 1 ? { OR: orClauses } : { status: { in: statuses } },
     include: {
       user: { select: { id: true, phone: true, displayName: true } },
       portfolioItems: { orderBy: { createdAt: "desc" } },
@@ -132,6 +142,10 @@ export async function getSpecialistReviewCards(
       reviewedAt: profile.reviewedAt?.toISOString() ?? null,
       reviewNote: profile.reviewNote,
       baseAddress: profile.baseAddress,
+      profileEditStatus: profile.profileEditStatus,
+      profileEditSubmittedAt: profile.profileEditSubmittedAt?.toISOString() ?? null,
+      profileEditNote: profile.profileEditNote,
+      pendingProfileEdit: parsePendingProfileEdit(profile.pendingProfileEdit),
       categories,
       items: items.map((item) => ({
         id: item.id,
@@ -142,6 +156,7 @@ export async function getSpecialistReviewCards(
         title: item.title,
         reviewStatus: item.reviewStatus,
         rejectionReason: item.rejectionReason,
+        instagramPickedAt: item.instagramPickedAt?.toISOString() ?? null,
       })),
       counts: {
         total: items.length,

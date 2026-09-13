@@ -15,9 +15,14 @@ import { notifyAdminsOfSpecialistSubmission, missingRequirementLabels } from "@/
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import { normalizeJalaliBirthDate, verifySpecialistKycWithZohal } from "@/lib/kyc/zohal";
 import {
+  checkKycSubmitRateLimit,
+  isValidIranianNationalId,
+} from "@/lib/kyc/rateLimit";
+import {
   parseEquipmentTags,
   serializeEquipmentTags,
 } from "@/lib/equipment/catalog";
+import { queueSpecialistProfileEdit } from "@/lib/specialists/profileEdit";
 
 const profileBasicsSchema = z.object({
   displayName: z.string().trim().min(2, "نام الزامی است."),
@@ -27,7 +32,12 @@ const profileBasicsSchema = z.object({
 export async function saveSpecialistProfileBasicsAction(input: {
   displayName: string;
   avatarUrl: string;
-}): Promise<{ success: boolean; error?: string; redirect?: string }> {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  redirect?: string;
+  pendingApproval?: boolean;
+}> {
   try {
     await ensurePrismaSchemaReady();
     const session = await getSession();
@@ -46,7 +56,18 @@ export async function saveSpecialistProfileBasicsAction(input: {
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      select: { role: true },
+      select: {
+        role: true,
+        displayName: true,
+        specialistProfile: {
+          select: {
+            status: true,
+            avatarUrl: true,
+            pendingProfileEdit: true,
+            city: true,
+          },
+        },
+      },
     });
     if (!user) {
       return { success: false, error: "کاربر یافت نشد." };
@@ -89,6 +110,33 @@ export async function saveSpecialistProfileBasicsAction(input: {
       };
     }
 
+    const profile = user.specialistProfile;
+    const hasLiveAvatar = Boolean(profile?.avatarUrl?.trim());
+    const isActive = profile?.status === "ACTIVE";
+
+    // ACTIVE specialists already have a photo: edits wait for admin approval.
+    // Missing avatar is a hard gate — write live so they can re-enter the market.
+    if (isActive && hasLiveAvatar) {
+      await queueSpecialistProfileEdit({
+        userId: session.userId,
+        existingPendingRaw: profile?.pendingProfileEdit,
+        patch: {
+          displayName: parsed.data.displayName,
+          avatarUrl,
+        },
+        displayNameForNotify: parsed.data.displayName,
+        cityForNotify: profile?.city,
+      });
+      revalidatePath("/specialist/onboarding/profile");
+      revalidatePath("/admin/review");
+      revalidatePath(`/s/${session.userId}`);
+      return {
+        success: true,
+        pendingApproval: true,
+        redirect: "/specialist/projects",
+      };
+    }
+
     await prisma.user.update({
       where: { id: session.userId },
       data: {
@@ -111,8 +159,12 @@ export async function saveSpecialistProfileBasicsAction(input: {
 
     revalidatePath("/specialist/onboarding");
     revalidatePath("/admin/review");
+    revalidatePath(`/s/${session.userId}`);
 
-    return { success: true, redirect: "/specialist/onboarding/categories" };
+    return {
+      success: true,
+      redirect: isActive ? "/specialist/projects" : "/specialist/onboarding/categories",
+    };
   } catch (err) {
     console.error("saveSpecialistProfileBasicsAction:", err);
     return { success: false, error: "خطا در ذخیره اطلاعات پایه." };
@@ -137,6 +189,7 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
   success: boolean;
   error?: string;
   redirect?: string;
+  pendingApproval?: boolean;
 }> {
   try {
     await ensurePrismaSchemaReady();
@@ -204,9 +257,42 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
 
     const currentStatus = user.specialistProfile?.status;
 
+    // ACTIVE specialists: live fields stay public until admin approves the draft.
+    if (currentStatus === "ACTIVE" && user.specialistProfile) {
+      await queueSpecialistProfileEdit({
+        userId: session.userId,
+        existingPendingRaw: user.specialistProfile.pendingProfileEdit,
+        patch: {
+          city,
+          workArea: workArea || null,
+          equipmentSummary,
+          isMobileGrapher,
+          baseLat,
+          baseLng,
+          baseAddress: baseAddress || null,
+        },
+        displayNameForNotify: user.displayName,
+        cityForNotify: city,
+      });
+
+      revalidatePath("/specialist/profile");
+      revalidatePath("/admin/review");
+
+      const targetRedirect =
+        returnTo && returnTo.startsWith("/specialist") && !returnTo.startsWith("//")
+          ? returnTo
+          : "/specialist/profile";
+
+      return {
+        success: true,
+        pendingApproval: true,
+        redirect: targetRedirect,
+      };
+    }
+
     // Location save alone must not enter the review queue — NDA is a separate step.
     const statusToWrite =
-      currentStatus === "ACTIVE" || currentStatus === "SUSPENDED" || currentStatus === "PENDING_REVIEW"
+      currentStatus === "SUSPENDED" || currentStatus === "PENDING_REVIEW"
         ? currentStatus
         : "INCOMPLETE";
 
@@ -261,15 +347,9 @@ export async function saveSpecialistDetailsAction(input: SaveSpecialistDetailsIn
     revalidatePath("/specialist/onboarding/terms");
     revalidatePath("/specialist/profile");
 
-    const canReturn = currentStatus === "ACTIVE";
-    const targetRedirect =
-      canReturn && returnTo && returnTo.startsWith("/specialist") && !returnTo.startsWith("//")
-        ? returnTo
-        : eligibility.nextStep;
-
     return {
       success: true,
-      redirect: targetRedirect,
+      redirect: eligibility.nextStep,
     };
   } catch (err: unknown) {
     console.error("Error in saveSpecialistDetailsAction:", err);
@@ -442,14 +522,18 @@ function maskShaba(shaba: string) {
 }
 
 /**
- * Collects KYC fields and verifies via Zohal (Shahkar + IBAN/national match).
+ * Collects KYC fields and runs automated identity/IBAN checks.
  * On API outage, leaves PENDING for admin review in /admin/review.
  */
 export async function submitSpecialistKycAction(input: {
   nationalId: string;
   birthDate: string;
   shaba: string;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  status?: "VERIFIED" | "FAILED" | "PENDING";
+}> {
   try {
     const session = await getSession();
     if (!session?.userId) {
@@ -465,11 +549,16 @@ export async function submitSpecialistKycAction(input: {
       return { success: false, error: parsed.error.issues[0]?.message || "اطلاعات نامعتبر" };
     }
 
+    if (!isValidIranianNationalId(parsed.data.nationalId)) {
+      return { success: false, error: "کد ملی واردشده معتبر نیست." };
+    }
+
     const profile = await prisma.specialistProfile.findUnique({
       where: { userId: session.userId },
       select: {
         id: true,
         status: true,
+        kycStatus: true,
         user: { select: { phone: true } },
       },
     });
@@ -477,7 +566,18 @@ export async function submitSpecialistKycAction(input: {
     if (!profile || profile.status !== "ACTIVE") {
       return {
         success: false,
-        error: "احراز هویت بانکی بعد از تایید کیفی پرونده فعال می‌شود.",
+        error: "احراز هویت بعد از تایید کیفی پرونده فعال می‌شود.",
+      };
+    }
+
+    if (profile.kycStatus === "VERIFIED") {
+      return { success: true, status: "VERIFIED" };
+    }
+
+    if (profile.kycStatus === "PENDING") {
+      return {
+        success: false,
+        error: "درخواست قبلی هنوز در صف بررسی است. تا اعلام نتیجه دوباره ارسال نکنید.",
       };
     }
 
@@ -485,8 +585,36 @@ export async function submitSpecialistKycAction(input: {
       return { success: false, error: "شماره موبایل حساب یافت نشد." };
     }
 
-    let shaba = parsed.data.shaba.toUpperCase();
+    const rateError = await checkKycSubmitRateLimit(profile.id);
+    if (rateError) {
+      await prisma.auditLog.create({
+        data: {
+          actorId: session.userId,
+          action: "SPECIALIST_KYC_BLOCKED",
+          targetModel: "SpecialistProfile",
+          targetId: profile.id,
+          note: rateError,
+        },
+      }).catch(() => undefined);
+      return { success: false, error: rateError };
+    }
+
+    let shaba = parsed.data.shaba.toUpperCase().replace(/\s/g, "");
     if (!shaba.startsWith("IR")) shaba = `IR${shaba}`;
+    if (!/^IR[0-9]{24}$/.test(shaba)) {
+      return { success: false, error: "شماره شبا باید IR و ۲۴ رقم باشد." };
+    }
+
+    // Count this attempt before paid inquiries (anti-spam accounting).
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: "SPECIALIST_KYC_ATTEMPT",
+        targetModel: "SpecialistProfile",
+        targetId: profile.id,
+        note: `mask=${maskNationalId(parsed.data.nationalId)}/${maskShaba(shaba)}`,
+      },
+    });
 
     const verification = await verifySpecialistKycWithZohal({
       phone: profile.user.phone,
@@ -543,7 +671,7 @@ export async function submitSpecialistKycAction(input: {
         action: "SPECIALIST_KYC_SUBMITTED",
         targetModel: "SpecialistProfile",
         targetId: profile.id,
-        note: `زحل: ${verification.status}${
+        note: `${verification.status}${
           verification.status !== "VERIFIED" ? ` — ${verification.reason}` : ""
         }`,
       },
@@ -555,7 +683,7 @@ export async function submitSpecialistKycAction(input: {
           userId: session.userId,
           title: "احراز هویت در صف بررسی",
           message:
-            "استعلام خودکار زحل کامل نشد؛ تیم جار نتیجه را در پنل ادمین نهایی می‌کند.",
+            "استعلام خودکار کامل نشد؛ تیم جار نتیجه را بررسی و اعلام می‌کند.",
           type: "INFO",
           link: "/specialist/onboarding/identity",
         },
@@ -565,9 +693,21 @@ export async function submitSpecialistKycAction(input: {
         data: {
           userId: session.userId,
           title: "احراز هویت تایید شد",
-          message: "شاهکار و تطبیق شبا با موفقیت تایید شد.",
+          message: "هویت و شبا با موفقیت تایید شد. تسویه کیف‌پول فعال است.",
           type: "SUCCESS",
           link: "/specialist/projects",
+        },
+      }).catch(() => undefined);
+    } else if (verification.status === "FAILED") {
+      await prisma.notification.create({
+        data: {
+          userId: session.userId,
+          title: "احراز هویت رد شد",
+          message:
+            verification.reason ||
+            "اطلاعات واردشده با استعلام مطابقت نداشت. پس از اصلاح دوباره تلاش کنید.",
+          type: "WARNING",
+          link: "/specialist/onboarding/identity",
         },
       }).catch(() => undefined);
     }
@@ -577,10 +717,10 @@ export async function submitSpecialistKycAction(input: {
     revalidatePath("/dashboard/wallet");
 
     if (verification.status === "FAILED") {
-      return { success: false, error: verification.reason };
+      return { success: false, error: verification.reason, status: "FAILED" };
     }
 
-    return { success: true };
+    return { success: true, status: verification.status };
   } catch (err) {
     console.error("submitSpecialistKycAction:", err);
     return { success: false, error: "خطا در ثبت احراز هویت." };
@@ -625,6 +765,10 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
   kycNationalIdMask?: string | null;
   kycShabaMask?: string | null;
   kycFailureReason?: string | null;
+  kycBankName?: string | null;
+  profileEditStatus?: string;
+  profileEditNote?: string | null;
+  profileEditSubmittedAt?: string | null;
   nextStep?: string;
   currentStepId?: string;
 }> {
@@ -749,6 +893,10 @@ export async function getSpecialistOnboardingStateAction(): Promise<{
     kycNationalIdMask: profile.kycNationalIdMask,
     kycShabaMask: profile.kycShabaMask,
     kycFailureReason: profile.kycFailureReason,
+    kycBankName: profile.kycBankName,
+    profileEditStatus: profile.profileEditStatus,
+    profileEditNote: profile.profileEditNote,
+    profileEditSubmittedAt: profile.profileEditSubmittedAt?.toISOString() ?? null,
     nextStep,
     currentStepId: eligibility.currentStepId,
   };
@@ -767,7 +915,7 @@ export type SaveSpecialistStudioInput = z.infer<typeof studioSchema>;
 /** Separate from travel-base: registers the specialist's fixed studio / space. */
 export async function saveSpecialistStudioAction(
   input: SaveSpecialistStudioInput
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; pendingApproval?: boolean }> {
   try {
     await ensurePrismaSchemaReady();
     const session = await getSession();
@@ -789,6 +937,45 @@ export async function saveSpecialistStudioAction(
     }
 
     const { studioName, studioLat, studioLng, studioAddress, clear } = parsed.data;
+    const profile = user.specialistProfile;
+
+    if (profile.status === "ACTIVE") {
+      if (clear) {
+        await queueSpecialistProfileEdit({
+          userId: session.userId,
+          existingPendingRaw: profile.pendingProfileEdit,
+          patch: { clearStudio: true },
+          displayNameForNotify: user.displayName,
+          cityForNotify: profile.city,
+        });
+      } else {
+        const name = (studioName || "").trim();
+        if (name.length < 2) {
+          return { success: false, error: "نام استودیو الزامی است." };
+        }
+        if (typeof studioLat !== "number" || typeof studioLng !== "number") {
+          return { success: false, error: "لوکیشن استودیو را روی نقشه مشخص کنید." };
+        }
+        await queueSpecialistProfileEdit({
+          userId: session.userId,
+          existingPendingRaw: profile.pendingProfileEdit,
+          patch: {
+            studioName: name,
+            studioLat,
+            studioLng,
+            studioAddress: studioAddress || null,
+            clearStudio: false,
+          },
+          displayNameForNotify: user.displayName,
+          cityForNotify: profile.city,
+        });
+      }
+
+      revalidatePath("/specialist/studio");
+      revalidatePath("/specialist/profile");
+      revalidatePath("/admin/review");
+      return { success: true, pendingApproval: true };
+    }
 
     if (clear) {
       await prisma.specialistProfile.update({

@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getSpecialistCategoriesAndPortfolio } from "@/app/actions/specialistPortfolioActions";
+import { getSpecialistOnboardingStateAction } from "@/app/actions/specialistOnboardingActions";
 import SpecialistPortfolioManager from "@/components/specialist/SpecialistPortfolioManager";
 import SpecialistAppShell from "@/components/specialist/SpecialistAppShell";
+import ProfileEditPendingBanner from "@/components/specialist/ProfileEditPendingBanner";
 import {
   getSpecialistAccess,
   repairOrphanSpecialistRole,
@@ -26,15 +28,24 @@ export default async function SpecialistPortfolioPage() {
     redirect(access.landingPath);
   }
 
-  const result = await getSpecialistCategoriesAndPortfolio();
+  const [result, state] = await Promise.all([
+    getSpecialistCategoriesAndPortfolio(),
+    getSpecialistOnboardingStateAction(),
+  ]);
 
   return (
     <SpecialistAppShell active="portfolio" phone={session.phone}>
-      <SpecialistPortfolioManager
-        initialSelectedCategories={result.selectedCategories || []}
-        initialPortfolioItems={result.portfolioItems || []}
-        mode="manage"
-      />
+      <div className="space-y-4">
+        <ProfileEditPendingBanner
+          status={state.profileEditStatus}
+          note={state.profileEditNote}
+        />
+        <SpecialistPortfolioManager
+          initialSelectedCategories={result.selectedCategories || []}
+          initialPortfolioItems={result.portfolioItems || []}
+          mode="manage"
+        />
+      </div>
     </SpecialistAppShell>
   );
 }

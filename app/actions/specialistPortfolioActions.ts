@@ -14,7 +14,9 @@ import {
   SPECIALIST_REVIEW_PATH,
 } from "@/lib/specialists/eligibility";
 import { notifyAdminsOfSpecialistSubmission } from "@/lib/specialists/review";
+import { queueSpecialistProfileEdit } from "@/lib/specialists/profileEdit";
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
+import { checkPortfolioUploadLimits } from "@/lib/portfolio/uploadLimits";
 
 export interface PortfolioItemData {
   id: string;
@@ -116,7 +118,12 @@ export async function getSpecialistCategoriesAndPortfolio(): Promise<SpecialistC
  */
 export async function updateSpecialistCategories(
   categorySlugs: string[]
-): Promise<{ success: boolean; error?: string; selectedCategories?: string[] }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  selectedCategories?: string[];
+  pendingApproval?: boolean;
+}> {
   try {
     const session = await getSession();
     if (!session) {
@@ -130,6 +137,33 @@ export async function updateSpecialistCategories(
       return {
         success: false,
         error: `حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی انتخاب کنید.`,
+      };
+    }
+
+    const existing = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: {
+        status: true,
+        pendingProfileEdit: true,
+        city: true,
+        user: { select: { displayName: true } },
+      },
+    });
+
+    if (existing?.status === "ACTIVE") {
+      await queueSpecialistProfileEdit({
+        userId: session.userId,
+        existingPendingRaw: existing.pendingProfileEdit,
+        patch: { selectedCategories: validSlugs },
+        displayNameForNotify: existing.user?.displayName,
+        cityForNotify: existing.city,
+      });
+      revalidatePath("/specialist/portfolio");
+      revalidatePath("/admin/review");
+      return {
+        success: true,
+        selectedCategories: validSlugs,
+        pendingApproval: true,
       };
     }
 
@@ -198,16 +232,39 @@ export async function uploadPortfolioItem(
       "image/png",
       "image/webp",
       "image/gif",
+    ];
+    const blockedAppleStill = [
       "image/heic",
       "image/heif",
+      "image/heic-sequence",
+      "image/heif-sequence",
     ];
     const allowedVideoMimes = [
       "video/mp4",
-      "video/quicktime",
       "video/webm",
-      "video/x-matroska",
       "video/mpeg",
     ];
+    // MOV often uploads OK but Chrome desktop cannot preview it in admin.
+    const blockedAppleVideo = ["video/quicktime"];
+
+    const lowerName = file.name.toLowerCase();
+    if (
+      blockedAppleStill.includes(mimeType) ||
+      /\.hei[cf]$/i.test(lowerName)
+    ) {
+      return {
+        success: false,
+        error:
+          "فرمت HEIC/HEIF آیفون در مرورگر و پنل ادمین نمایش داده نمی‌شود. لطفاً از Photos گزینهٔ «Most Compatible» را بزنید یا فایل را به JPG تبدیل کنید.",
+      };
+    }
+    if (blockedAppleVideo.includes(mimeType) || /\.mov$/i.test(lowerName)) {
+      return {
+        success: false,
+        error:
+          "فایل MOV روی پنل ادمین درست پیش‌نمایش نمی‌شود. لطفاً ویدیو را به MP4 تبدیل کنید و دوباره بارگذاری کنید.",
+      };
+    }
 
     if (allowedImageMimes.includes(mimeType)) {
       mediaType = "IMAGE";
@@ -216,7 +273,7 @@ export async function uploadPortfolioItem(
     } else {
       return {
         success: false,
-        error: "فرمت فایل پشتیبانی نمی‌شود. لطفاً فایل عکس (JPG, PNG, WebP) یا ویدیو (MP4, MOV, WebM) بارگذاری کنید.",
+        error: "فرمت فایل پشتیبانی نمی‌شود. لطفاً فایل عکس (JPG, PNG, WebP) یا ویدیو (MP4, WebM) بارگذاری کنید.",
       };
     }
 
@@ -238,6 +295,11 @@ export async function uploadPortfolioItem(
       },
       update: {},
     });
+
+    const limitError = await checkPortfolioUploadLimits(specialist.id, categorySlug);
+    if (limitError) {
+      return { success: false, error: limitError };
+    }
 
     // Persist under UPLOAD_ROOT (Liara disk) / public/uploads
     const ext = path.extname(file.name) || (mediaType === "IMAGE" ? ".jpg" : ".mp4");

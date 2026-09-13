@@ -91,6 +91,16 @@ export async function getSpecialistAccess(
   );
 
   if (status === "ACTIVE") {
+    // Avatar is a hard marketplace requirement — never leave ACTIVE without a face photo.
+    if (!eligibility.hasAvatar) {
+      return {
+        kind: "onboarding",
+        roleIsSpecialist,
+        status,
+        landingPath: "/specialist/onboarding/profile",
+        preferSpecialistHome: false,
+      };
+    }
     return {
       kind: "active",
       roleIsSpecialist,

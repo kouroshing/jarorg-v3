@@ -20,14 +20,14 @@ import {
   Loader2,
   XCircle,
   Check,
-  RotateCcw,
   Phone,
   Car,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   AvailableOrderSpecialistView,
   SpecialistTokenSummary,
-  withdrawProjectInterestAction,
   confirmSpecialistSelectionAction,
   declineSpecialistSelectionAction,
   dismissOrderAction,
@@ -74,6 +74,7 @@ export default function SpecialistProjectFeed({
 
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ orderId: string; text: string; type: "error" | "success" } | null>(null);
+  const [expandedDescIds, setExpandedDescIds] = useState<Record<string, boolean>>({});
   const [isPending, startTransition] = useTransition();
 
   const pool = orders.filter((o) => {
@@ -142,34 +143,6 @@ export default function SpecialistProjectFeed({
         : prev
     );
     setApplyNotice("پیشنهاد ثبت شد. از این به بعد در «پروژه‌های من» پیگیری می‌شود.");
-  };
-
-  const handleWithdraw = (interestId: string, orderId: string) => {
-    setBusyActionId(interestId);
-    setActionNotice(null);
-
-    startTransition(async () => {
-      const res = await withdrawProjectInterestAction(interestId);
-      setBusyActionId(null);
-      if (!res.success) {
-        setActionNotice({ orderId, text: res.error || "خطا در لغو پیشنهاد.", type: "error" });
-      } else {
-        setActionNotice({ orderId, text: "پیشنهاد شما با موفقیت لغو شد.", type: "success" });
-        setOrders((prev) =>
-          prev.map((o) => {
-            if (o.id === orderId) {
-              return {
-                ...o,
-                hasApplied: false,
-                interestsCount: Math.max(0, o.interestsCount - 1),
-                myInterest: o.myInterest ? { ...o.myInterest, status: "WITHDRAWN" } : null,
-              };
-            }
-            return o;
-          })
-        );
-      }
-    });
   };
 
   const handleConfirm = (orderId: string) => {
@@ -559,9 +532,39 @@ export default function SpecialistProjectFeed({
                 {(order.projectDescription || order.moodboardUrls.length > 0 || order.referenceLink) && (
                   <div className="space-y-2 pt-1">
                     {order.projectDescription && (
-                      <p className="text-xs text-jar-muted leading-relaxed line-clamp-3 font-medium bg-jar-canvas p-2.5 rounded-xl border border-jar-border/60">
-                        {order.projectDescription}
-                      </p>
+                      <div className="space-y-1.5 bg-jar-canvas p-2.5 rounded-xl border border-jar-border/60">
+                        <p
+                          className={`text-xs text-jar-muted leading-relaxed font-medium whitespace-pre-wrap break-words ${
+                            expandedDescIds[order.id] ? "" : "line-clamp-3"
+                          }`}
+                        >
+                          {order.projectDescription}
+                        </p>
+                        {order.projectDescription.trim().length > 120 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedDescIds((prev) => ({
+                                ...prev,
+                                [order.id]: !prev[order.id],
+                              }))
+                            }
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-jar-logo hover:underline"
+                          >
+                            {expandedDescIds[order.id] ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                کمتر
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                مشاهده کامل
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     {order.moodboardUrls.length > 0 && (
@@ -688,41 +691,32 @@ export default function SpecialistProjectFeed({
                   order.status === "CONFIRMED" ||
                   order.status === "COMPLETED" ||
                   order.status === "IN_PROGRESS" ? (
-                  <div className="flex items-center justify-center gap-2 w-full min-h-11 px-3 py-2 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <span>
-                      {order.contact
-                        ? "پروژه قطعی شد. اطلاعات تماس در کارت بالا آمده است."
-                        : "پروژه قطعی شد. شماره و آدرس ۲۴ ساعت قبل از شروع کار آزاد می‌شود."}
-                    </span>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-center gap-2 w-full min-h-11 px-3 py-2 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span>
+                        {order.contact
+                          ? "پروژه قطعی شد. اطلاعات تماس در کارت بالا آمده است."
+                          : "پروژه قطعی شد. شماره و آدرس ۲۴ ساعت قبل از شروع کار آزاد می‌شود."}
+                      </span>
+                    </div>
+                    {order.status === "CONFIRMED" && (
+                      <Link
+                        href={`/order/${order.id}`}
+                        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full border border-jar-border bg-jar-surface text-jar-primary text-[11px] font-bold hover:bg-jar-soft"
+                      >
+                        ثبت تحویل / پیگیری تسویه
+                      </Link>
+                    )}
                   </div>
                 ) : order.myInterest?.status === "PENDING" ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 w-full p-2.5 rounded-2xl bg-jar-canvas border border-jar-border text-jar-primary text-xs font-medium">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                        <span className="truncate">
-                          {order.selectedSpecialistId
-                            ? "کارفرما در حال نهایی کردن انتخاب است"
-                            : "پیشنهاد شما ثبت شده است"}
-                        </span>
-                      </div>
-                      {!order.selectedSpecialistId && (
-                        <button
-                          type="button"
-                          onClick={() => handleWithdraw(order.myInterest!.id, order.id)}
-                          disabled={isPending && busyActionId === order.myInterest!.id}
-                          className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-jar-border bg-jar-surface hover:bg-rose-50 hover:text-rose-600 text-jar-muted text-[11px] font-medium transition-colors shrink-0 cursor-pointer disabled:opacity-50"
-                        >
-                          {isPending && busyActionId === order.myInterest!.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <RotateCcw className="h-3 w-3" />
-                          )}
-                          <span>انصراف از پیشنهاد</span>
-                        </button>
-                      )}
-                    </div>
+                  <div className="flex items-center gap-1.5 w-full p-2.5 rounded-2xl bg-jar-canvas border border-jar-border text-jar-primary text-xs font-medium">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="truncate">
+                      {order.selectedSpecialistId
+                        ? "کارفرما در حال نهایی کردن انتخاب است"
+                        : "پیشنهاد شما ثبت شده است"}
+                    </span>
                   </div>
                 ) : (
                   <div className="space-y-2">

@@ -197,6 +197,10 @@ export function specialistLandingPath(
   reviewNote?: string | null
 ): string {
   if (status === "ACTIVE") {
+    // No public marketplace presence without a profile photo.
+    if (!eligibility.hasAvatar) {
+      return "/specialist/onboarding/profile";
+    }
     // After qualitative approval, incomplete KYC nudges to identity — projects
     // stay reachable from the shell, but this is the recommended next step.
     if (kycStatus && kycStatus !== "VERIFIED" && kycStatus !== "PENDING") {

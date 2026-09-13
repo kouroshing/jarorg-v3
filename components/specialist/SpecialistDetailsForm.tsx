@@ -26,6 +26,7 @@ import {
   serializeEquipmentTags,
 } from "@/lib/equipment/catalog";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
+import ProfileEditPendingBanner from "@/components/specialist/ProfileEditPendingBanner";
 
 const SpecialistBaseMapPicker = dynamic(
   () => import("@/components/specialist/SpecialistBaseMapPicker"),
@@ -51,6 +52,8 @@ interface Props {
   hasEligiblePortfolio: boolean;
   mode?: "onboarding" | "edit";
   returnTo?: string;
+  profileEditStatus?: string | null;
+  profileEditNote?: string | null;
 }
 
 export default function SpecialistDetailsForm({
@@ -65,6 +68,8 @@ export default function SpecialistDetailsForm({
   hasEligiblePortfolio,
   mode = "onboarding",
   returnTo,
+  profileEditStatus,
+  profileEditNote,
 }: Props) {
   const router = useRouter();
   const matchedPlace = useMemo(() => matchIranPlace(initialCity), [initialCity]);
@@ -85,9 +90,11 @@ export default function SpecialistDetailsForm({
   const [baseAddress, setBaseAddress] = useState(initialBaseAddress || "");
   const [baseDistrict, setBaseDistrict] = useState("");
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapFocusToken, setMapFocusToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [toastOpen, setToastOpen] = useState(false);
+  const [pendingQueued, setPendingQueued] = useState(false);
   const [isPending, startTransition] = useTransition();
   const isEdit = mode === "edit";
 
@@ -106,7 +113,11 @@ export default function SpecialistDetailsForm({
     setCity(nextCity);
     if (!nextCity || !province) return;
     const coords = getCityCoords(province, nextCity);
-    if (coords) setMapFocus(coords);
+    if (coords) {
+      setMapFocus(coords);
+      setMapFocusToken((t) => t + 1);
+      setBaseCoords(coords);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -158,6 +169,7 @@ export default function SpecialistDetailsForm({
       if (!res.success) {
         setError(res.error || "خطایی در ثبت اطلاعات رخ داد.");
       } else if (isEdit) {
+        setPendingQueued(Boolean(res.pendingApproval));
         setSaved(true);
         setToastOpen(true);
         router.refresh();
@@ -170,6 +182,9 @@ export default function SpecialistDetailsForm({
 
   return (
     <div className="space-y-6">
+      {isEdit ? (
+        <ProfileEditPendingBanner status={profileEditStatus} note={profileEditNote} />
+      ) : null}
       <form noValidate onSubmit={handleSubmit} className="space-y-6">
         {error && (
           <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold animate-in fade-in">
@@ -227,6 +242,7 @@ export default function SpecialistDetailsForm({
                   }}
                   initialCoords={baseCoords ?? mapFocus ?? undefined}
                   focusCoords={mapFocus}
+                  focusToken={mapFocusToken}
                   showCoverage
                   radiusKm={coverageRadiusKm}
                   onChangeRadius={(km) => {
@@ -388,7 +404,7 @@ export default function SpecialistDetailsForm({
 
           <span className="text-xs text-jar-muted font-medium">
             {isEdit
-              ? "تغییر مبدأ، ایاب‌وذهاب پروژه‌های بعدی را عوض می‌کند."
+              ? "تغییرات تا تایید جار روی پروفایل عمومی اعمال نمی‌شود."
               : "گام بعدی: مطالعه و پذیرش تعهدنامه عضویت."}
           </span>
         </div>
@@ -396,7 +412,11 @@ export default function SpecialistDetailsForm({
 
       <SaveFeedbackToast
         open={toastOpen}
-        message="ذخیره شد — پروفایل کاری به‌روز شد"
+        message={
+          pendingQueued
+            ? "ارسال شد — در انتظار تایید جار"
+            : "ذخیره شد — پروفایل کاری به‌روز شد"
+        }
         onClose={() => setToastOpen(false)}
       />
     </div>

@@ -14,7 +14,7 @@ export interface UpcomingDay {
 }
 
 // Generate next 14 days in Persian calendar
-function getUpcoming14Days(): UpcomingDay[] {
+export function getUpcoming14Days(): UpcomingDay[] {
   const days: UpcomingDay[] = [];
   const now = new Date();
 

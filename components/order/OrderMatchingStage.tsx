@@ -25,6 +25,7 @@ function faNum(value: number): string {
 interface OrderMatchingStageProps {
   orderId: string;
   categoryTitle: string;
+  categorySlug?: string | null;
   districtOrCity?: string | null;
   orderStatus: string;
   initialApplicants: ApplicantSpecialistView[];
@@ -36,6 +37,7 @@ interface OrderMatchingStageProps {
 export default function OrderMatchingStage({
   orderId,
   categoryTitle,
+  categorySlug,
   districtOrCity,
   orderStatus,
   initialApplicants,
@@ -182,6 +184,8 @@ export default function OrderMatchingStage({
             isOwnerOrAdmin={isOwnerOrAdmin}
             selectedSpecialistId={selectedSpecialistId}
             agreedTotalPrice={agreedTotalPrice}
+            categoryTitle={categoryTitle}
+            categorySlug={categorySlug}
           />
         )}
       </div>

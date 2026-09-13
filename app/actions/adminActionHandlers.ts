@@ -14,6 +14,10 @@ import {
   SPECIALIST_REVIEW_PATH,
 } from "@/lib/specialists/eligibility";
 import { missingRequirementLabels } from "@/lib/specialists/review";
+import {
+  applyPendingProfileEdit,
+  parsePendingProfileEdit,
+} from "@/lib/specialists/profileEdit";
 import { parseOrderStatus, type OrderStatus } from "@/lib/orders/status";
 import { createNotification } from "@/lib/notifications";
 
@@ -426,6 +430,61 @@ export async function approvePortfolioAction(ids: (string | number)[]) {
   };
 }
 
+/**
+ * Mark / unmark portfolio items as already curated for Instagram.
+ */
+export async function setPortfolioInstagramPickedAction({
+  ids,
+  picked,
+}: {
+  ids: string[];
+  picked: boolean;
+}): Promise<AdminActionResult> {
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+
+  const stringIds = [...new Set(ids.map(String).map((id) => id.trim()).filter(Boolean))];
+  if (stringIds.length === 0) {
+    return { success: false, error: "هیچ نمونه‌کاری انتخاب نشده است." };
+  }
+  if (stringIds.length > 40) {
+    return { success: false, error: "حداکثر ۴۰ فایل در هر بار مجاز است." };
+  }
+
+  const result = await prisma.portfolioItem.updateMany({
+    where: { id: { in: stringIds } },
+    data: { instagramPickedAt: picked ? new Date() : null },
+  });
+
+  if (result.count === 0) {
+    return { success: false, error: "نمونه‌کاری به‌روز نشد." };
+  }
+
+  await Promise.all(
+    stringIds.map((id) =>
+      prisma.auditLog.create({
+        data: {
+          actorId: gate.actorId,
+          action: picked ? "PORTFOLIO_INSTAGRAM_PICKED" : "PORTFOLIO_INSTAGRAM_UNPICKED",
+          targetModel: "PortfolioItem",
+          targetId: id,
+          note: picked ? "علامت‌گذاری برای اینستا" : "برداشتن علامت اینستا",
+        },
+      })
+    )
+  );
+
+  revalidatePath("/admin/review");
+  revalidatePath("/admin/PortfolioItem");
+
+  return {
+    success: true,
+    message: picked
+      ? `${result.count.toLocaleString("fa-IR")} مورد به‌عنوان برداشته‌شده برای اینستا علامت خورد.`
+      : `علامت اینستا از ${result.count.toLocaleString("fa-IR")} مورد برداشته شد.`,
+  };
+}
+
 function revalidateSpecialistSurfaces() {
   revalidatePath("/admin/review");
   revalidatePath(SPECIALIST_REVIEW_PATH);
@@ -508,6 +567,12 @@ export async function approveSpecialistAction({
   const activationReady = coreReady && (hasMinApproved || allowUnderMinimum);
 
   if (!activationReady) {
+    if (!eligibility.hasAvatar) {
+      return {
+        success: false,
+        error: "عکس پروفایل متخصص الزامی است. بدون عکس نمی‌توان فعال کرد.",
+      };
+    }
     const missing = missingRequirementLabels({
       ...eligibility,
       submittableCategories:
@@ -548,7 +613,7 @@ export async function approveSpecialistAction({
       userId: profile.userId,
       title: "پرونده شما تایید شد",
       message:
-        "پرونده متخصص شما تایید شد. از همین حالا می‌توانید پروژه‌ها را ببینید؛ برای تسویه کیف‌پول، احراز هویت بانکی را تکمیل کنید.",
+        "پرونده متخصص شما تایید شد. از همین حالا می‌توانید پروژه‌ها را ببینید؛ برای تسویه کیف‌پول، احراز هویت را تکمیل کنید.",
       type: "SUCCESS",
       link: "/specialist/onboarding/identity",
     },
@@ -696,7 +761,7 @@ export async function setSpecialistKycStatusAction({
     await prisma.notification.create({
       data: {
         userId: profile.userId,
-        title: "احراز هویت بانکی تایید شد",
+        title: "احراز هویت تایید شد",
         message: "هویت و شبا شما تایید شد. از این پس تسویه پروژه ممکن است.",
         type: "SUCCESS",
         link: "/specialist/projects",
@@ -876,4 +941,134 @@ export async function adminSelectInterestAction({
     success: true,
     message: `متخصص «${interest.specialist.displayName || "انتخاب‌شده"}» ثبت شد؛ سفارش در انتظار پرداخت است.`,
   };
+}
+
+/** Apply a queued ACTIVE-specialist profile draft to live fields. */
+export async function approveProfileEditAction({
+  specialistId,
+}: {
+  specialistId: string;
+}): Promise<AdminActionResult> {
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
+
+  const profile = await prisma.specialistProfile.findUnique({
+    where: { id: specialistId },
+    select: {
+      id: true,
+      userId: true,
+      profileEditStatus: true,
+      pendingProfileEdit: true,
+    },
+  });
+  if (!profile) {
+    return { success: false, error: "پروفایل یافت نشد." };
+  }
+  if (profile.profileEditStatus !== "PENDING") {
+    return { success: false, error: "ویرایش در انتظاری وجود ندارد." };
+  }
+
+  const draft = parsePendingProfileEdit(profile.pendingProfileEdit);
+  if (!draft) {
+    return { success: false, error: "پیش‌نویس ویرایش نامعتبر است." };
+  }
+
+  await applyPendingProfileEdit({
+    profileId: profile.id,
+    userId: profile.userId,
+    draft,
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: profile.userId,
+      title: "ویرایش پروفایل تایید شد",
+      message: "تغییرات پروفایل کاری شما اعمال شد.",
+      type: "SUCCESS",
+      link: "/specialist/profile",
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      action: "SPECIALIST_PROFILE_EDIT_APPROVED",
+      targetModel: "SpecialistProfile",
+      targetId: specialistId,
+      note: profile.pendingProfileEdit,
+    },
+  });
+
+  revalidatePath("/admin/review");
+  revalidatePath("/specialist/profile");
+  revalidatePath("/specialist/studio");
+  revalidatePath("/specialist/portfolio");
+  revalidatePath("/profile");
+  revalidatePath(`/s/${profile.userId}`);
+
+  return { success: true, message: "ویرایش پروفایل اعمال شد." };
+}
+
+/** Reject a queued profile draft; live fields stay unchanged. */
+export async function rejectProfileEditAction({
+  specialistId,
+  reason,
+}: {
+  specialistId: string;
+  reason?: string;
+}): Promise<AdminActionResult> {
+  const gate = await requirePerm("specialists_review");
+  if (!gate.ok) return gate.error;
+  const actorId = gate.actorId;
+
+  const profile = await prisma.specialistProfile.findUnique({
+    where: { id: specialistId },
+    select: { id: true, userId: true, profileEditStatus: true },
+  });
+  if (!profile) {
+    return { success: false, error: "پروفایل یافت نشد." };
+  }
+  if (profile.profileEditStatus !== "PENDING") {
+    return { success: false, error: "ویرایش در انتظاری وجود ندارد." };
+  }
+
+  const note = reason?.trim() || "ویرایش پروفایل رد شد.";
+
+  await prisma.specialistProfile.update({
+    where: { id: specialistId },
+    data: {
+      pendingProfileEdit: null,
+      profileEditStatus: "REJECTED",
+      profileEditNote: note,
+      profileEditSubmittedAt: null,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: profile.userId,
+      title: "ویرایش پروفایل رد شد",
+      message: note,
+      type: "WARNING",
+      link: "/specialist/profile",
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorId,
+      action: "SPECIALIST_PROFILE_EDIT_REJECTED",
+      targetModel: "SpecialistProfile",
+      targetId: specialistId,
+      note,
+    },
+  });
+
+  revalidatePath("/admin/review");
+  revalidatePath("/specialist/profile");
+  revalidatePath("/specialist/studio");
+  revalidatePath("/profile");
+
+  return { success: true, message: "ویرایش پروفایل رد شد." };
 }

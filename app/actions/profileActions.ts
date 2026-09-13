@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { requireAdminPermission } from "@/lib/auth/adminAccess";
+import { queueSpecialistProfileEdit } from "@/lib/specialists/profileEdit";
 
 const nameSchema = z
   .string()
@@ -13,7 +14,7 @@ const nameSchema = z
   .max(120);
 
 export type UpdateProfileResult =
-  | { success: true }
+  | { success: true; pendingApproval?: boolean }
   | { success: false; error: string };
 
 export async function updateUserDisplayName(
@@ -32,7 +33,34 @@ export async function updateUserDisplayName(
     };
   }
 
+  if (/[0-9۰-۹٠-٩]/.test(parsed.data)) {
+    return { success: false, error: "نام نباید شامل عدد باشد." };
+  }
+
   try {
+    const specialist = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: {
+        status: true,
+        pendingProfileEdit: true,
+        city: true,
+      },
+    });
+
+    if (specialist?.status === "ACTIVE") {
+      await queueSpecialistProfileEdit({
+        userId: session.userId,
+        existingPendingRaw: specialist.pendingProfileEdit,
+        patch: { displayName: parsed.data },
+        displayNameForNotify: parsed.data,
+        cityForNotify: specialist.city,
+      });
+      revalidatePath("/profile");
+      revalidatePath("/profile/edit");
+      revalidatePath("/admin/review");
+      return { success: true, pendingApproval: true };
+    }
+
     await prisma.user.update({
       where: { id: session.userId },
       data: { displayName: parsed.data },

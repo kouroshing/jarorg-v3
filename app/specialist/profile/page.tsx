@@ -52,6 +52,8 @@ export default async function SpecialistWorkingProfilePage() {
         initialHasStudio={Boolean(state.hasStudio)}
         initialIsMobileGrapher={Boolean(state.isMobileGrapher)}
         hasEligiblePortfolio={Boolean(state.hasEligiblePortfolio)}
+        profileEditStatus={state.profileEditStatus}
+        profileEditNote={state.profileEditNote}
       />
     </SpecialistAppShell>
   );

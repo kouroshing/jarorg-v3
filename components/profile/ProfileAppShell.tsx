@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useTransition } from "react";
 import Link from "next/link";
 import {
   Briefcase,
@@ -15,8 +15,12 @@ import {
   Settings,
   ShoppingBag,
   Home,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 import BrandLogo from "@/components/BrandLogo";
+import MobileBottomNav from "@/components/MobileBottomNav";
+import { logout } from "@/app/actions/authActions";
 
 export type ProfilePanel = "customer" | "specialist";
 
@@ -24,7 +28,7 @@ export type SpecialistGate =
   | { state: "open"; href: string }
   | { state: "locked"; href: string };
 
-const SPECIALIST_DESKTOP = [
+const SPECIALIST_SECTIONS = [
   { id: "projects", href: "/specialist/projects", label: "پروژه‌های باز", icon: Briefcase },
   { id: "mine", href: "/specialist/mine", label: "پروژه‌های من", icon: ClipboardList },
   { id: "portfolio", href: "/specialist/portfolio", label: "نمونه‌کارها", icon: FolderOpen },
@@ -32,19 +36,71 @@ const SPECIALIST_DESKTOP = [
   { id: "studio", href: "/specialist/studio", label: "استودیو", icon: Building2 },
 ] as const;
 
-const SPECIALIST_MOBILE = [
-  { id: "projects", href: "/specialist/projects", label: "پروژه‌ها", icon: Briefcase },
-  { id: "mine", href: "/specialist/mine", label: "مال من", icon: ClipboardList },
-  { id: "portfolio", href: "/specialist/portfolio", label: "پورتفولیو", icon: FolderOpen },
-  { id: "profile", href: "/specialist/profile", label: "کاری", icon: MapPin },
-] as const;
+function LogoutAccountButton({
+  variant = "header",
+}: {
+  variant?: "header" | "footer" | "icon";
+}) {
+  const [isPending, startTransition] = useTransition();
 
-const CUSTOMER_MOBILE = [
-  { id: "orders", href: "/profile?role=customer", label: "سفارش‌ها", icon: ShoppingBag },
-  { id: "new", href: "/order", label: "ثبت سفارش", icon: Camera },
-  { id: "wallet", href: "/dashboard/wallet", label: "کیف پول", icon: Wallet },
-  { id: "account", href: "/profile/edit", label: "حساب", icon: Settings },
-] as const;
+  const onLogout = () => {
+    startTransition(async () => {
+      await logout();
+    });
+  };
+
+  if (variant === "icon") {
+    return (
+      <button
+        type="button"
+        onClick={onLogout}
+        disabled={isPending}
+        aria-label="خروج از حساب کاربری"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-rose-200 bg-white text-rose-600 shrink-0 transition hover:bg-rose-50 disabled:opacity-60"
+      >
+        {isPending ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <LogOut className="h-3.5 w-3.5" />
+        )}
+      </button>
+    );
+  }
+
+  if (variant === "footer") {
+    return (
+      <button
+        type="button"
+        onClick={onLogout}
+        disabled={isPending}
+        className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-rose-200 px-6 text-xs font-bold text-rose-600 transition hover:bg-rose-50 active:scale-95 disabled:opacity-60"
+      >
+        {isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <LogOut className="h-4 w-4" />
+        )}
+        خروج از حساب کاربری
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onLogout}
+      disabled={isPending}
+      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 text-xs font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
+    >
+      {isPending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <LogOut className="h-3.5 w-3.5" />
+      )}
+      خروج
+    </button>
+  );
+}
 
 function PanelSwitcher({
   panel,
@@ -108,6 +164,54 @@ function PanelSwitcher({
   );
 }
 
+function SpecialistSectionNav({
+  active,
+  mineCount,
+  className,
+}: {
+  active?: "projects" | "mine" | "portfolio" | "profile" | "studio" | "identity";
+  mineCount?: number;
+  className?: string;
+}) {
+  return (
+    <nav
+      className={className}
+      aria-label="بخش‌های متخصص"
+    >
+      {SPECIALIST_SECTIONS.map((item) => {
+        const Icon = item.icon;
+        const isActive =
+          item.id === active ||
+          (active === "studio" && item.id === "profile") ||
+          (active === "identity" && item.id === "profile");
+        return (
+          <Link
+            key={item.id}
+            href={item.href}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors shrink-0 ${
+              isActive
+                ? "bg-neutral-900 text-white shadow-sm"
+                : "border border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span>{item.label}</span>
+            {item.id === "mine" && (mineCount ?? 0) > 0 && (
+              <span
+                className={`min-w-4 rounded-full px-1 text-[10px] font-bold ${
+                  isActive ? "bg-white/20 text-white" : "bg-neutral-100 text-neutral-800"
+                }`}
+              >
+                {(mineCount ?? 0).toLocaleString("fa-IR")}
+              </span>
+            )}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default function ProfileAppShell({
   panel,
   active = "projects",
@@ -115,7 +219,6 @@ export default function ProfileAppShell({
   displayName,
   specialistGate,
   mineCount,
-  customerActive = "orders",
   children,
 }: {
   panel: ProfilePanel;
@@ -124,7 +227,6 @@ export default function ProfileAppShell({
   displayName?: string | null;
   specialistGate: SpecialistGate;
   mineCount?: number;
-  customerActive?: "orders" | "new" | "wallet" | "account";
   children: React.ReactNode;
 }) {
   const title =
@@ -134,7 +236,7 @@ export default function ProfileAppShell({
 
   return (
     <div
-      className="relative isolate min-h-screen bg-white text-neutral-900 selection:bg-neutral-900/10 pb-24 md:pb-8 overflow-x-hidden"
+      className="relative isolate min-h-screen bg-white text-neutral-900 selection:bg-neutral-900/10 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8 overflow-x-hidden"
       dir="rtl"
     >
       {/* Mobile header */}
@@ -144,14 +246,26 @@ export default function ProfileAppShell({
             <BrandLogo linked={false} />
           </Link>
           <PanelSwitcher panel={panel} specialistGate={specialistGate} />
-          <Link
-            href="/dashboard/wallet"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 shrink-0"
-            aria-label="کیف پول"
-          >
-            <Wallet className="h-3.5 w-3.5" />
-          </Link>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <LogoutAccountButton variant="icon" />
+            <Link
+              href="/dashboard/wallet"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 shrink-0"
+              aria-label="کیف پول"
+            >
+              <Wallet className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
+        {panel === "specialist" && (
+          <div className="border-t border-neutral-100 px-3 py-2 overflow-x-auto">
+            <SpecialistSectionNav
+              active={active}
+              mineCount={mineCount}
+              className="flex items-center gap-1.5 w-max"
+            />
+          </div>
+        )}
       </header>
 
       {/* Desktop header */}
@@ -173,38 +287,11 @@ export default function ProfileAppShell({
           </div>
 
           {panel === "specialist" ? (
-            <nav className="flex items-center gap-1.5 shrink-0 overflow-x-auto">
-              {SPECIALIST_DESKTOP.map((item) => {
-                const Icon = item.icon;
-                const isActive =
-                  item.id === active ||
-                  (active === "studio" && item.id === "profile") ||
-                  (active === "identity" && item.id === "profile");
-                return (
-                  <Link
-                    key={item.id}
-                    href={item.href}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors shrink-0 ${
-                      isActive
-                        ? "bg-neutral-900 text-white shadow-sm"
-                        : "border border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    <span>{item.label}</span>
-                    {item.id === "mine" && (mineCount ?? 0) > 0 && (
-                      <span
-                        className={`min-w-4 rounded-full px-1 text-[10px] font-bold ${
-                          isActive ? "bg-white/20 text-white" : "bg-neutral-100 text-neutral-800"
-                        }`}
-                      >
-                        {(mineCount ?? 0).toLocaleString("fa-IR")}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
+            <SpecialistSectionNav
+              active={active}
+              mineCount={mineCount}
+              className="flex items-center gap-1.5 shrink-0 overflow-x-auto"
+            />
           ) : (
             <nav className="flex items-center gap-1.5 shrink-0">
               <Link
@@ -246,58 +333,24 @@ export default function ProfileAppShell({
               <Wallet className="h-3.5 w-3.5" />
               کیف پول
             </Link>
+            <LogoutAccountButton variant="header" />
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 pt-16 md:pt-24 space-y-6">
+      <main
+        className={`relative z-10 max-w-6xl mx-auto px-4 sm:px-6 space-y-6 ${
+          panel === "specialist" ? "pt-[6.75rem] md:pt-24" : "pt-16 md:pt-24"
+        }`}
+      >
         {children}
+
+        <div className="flex justify-center border-t border-neutral-100 pt-6 pb-2">
+          <LogoutAccountButton variant="footer" />
+        </div>
       </main>
 
-      {/* Mobile bottom nav */}
-      <nav
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-neutral-200 bg-white/95 backdrop-blur-md md:hidden pb-[env(safe-area-inset-bottom,0px)]"
-        aria-label={panel === "specialist" ? "ناوبری متخصص" : "ناوبری مشتری"}
-      >
-        <ul className="mx-auto flex max-w-lg items-stretch justify-around px-1 py-1.5">
-          {(panel === "specialist" ? SPECIALIST_MOBILE : CUSTOMER_MOBILE).map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              panel === "specialist"
-                ? item.id === active ||
-                  (active === "studio" && item.id === "profile") ||
-                  (active === "identity" && item.id === "profile")
-                : item.id === customerActive;
-
-            return (
-              <li key={item.id} className="flex-1">
-                <Link
-                  href={item.href}
-                  className={`flex flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] font-medium transition-colors ${
-                    isActive ? "text-neutral-900" : "text-neutral-400"
-                  }`}
-                >
-                  <span
-                    className={`relative inline-flex h-8 w-8 items-center justify-center rounded-full ${
-                      isActive ? "bg-neutral-900 text-white" : "bg-transparent"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {panel === "specialist" &&
-                      item.id === "mine" &&
-                      (mineCount ?? 0) > 0 && (
-                        <span className="absolute -top-0.5 -left-0.5 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white leading-4 text-center">
-                          {(mineCount ?? 0).toLocaleString("fa-IR")}
-                        </span>
-                      )}
-                  </span>
-                  {item.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+      <MobileBottomNav isLoggedIn />
     </div>
   );
 }

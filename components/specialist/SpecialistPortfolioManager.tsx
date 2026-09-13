@@ -121,6 +121,7 @@ export default function SpecialistPortfolioManager({
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(initialSelectedCategories);
   const [isSaving, startSaveTransition] = useTransition();
   const [saveToastOpen, setSaveToastOpen] = useState(false);
+  const [saveToastPending, setSaveToastPending] = useState(false);
   const [requirementWarning, setRequirementWarning] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -237,6 +238,7 @@ export default function SpecialistPortfolioManager({
         setRequirementWarning(res.error || "خطا در ذخیره دسته‌بندی‌ها");
         setTimeout(() => setRequirementWarning(null), 5000);
       } else {
+        setSaveToastPending(Boolean(res.pendingApproval));
         setSaveToastOpen(true);
       }
     });
@@ -761,9 +763,9 @@ export default function SpecialistPortfolioManager({
                   multiple
                   accept={
                     activeCategory.mediaType === "VIDEO"
-                      ? "video/mp4,video/quicktime,video/webm"
+                      ? "video/mp4,video/webm"
                       : activeCategory.mediaType === "ALL"
-                      ? "image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+                      ? "image/jpeg,image/png,image/webp,video/mp4,video/webm"
                       : "image/jpeg,image/png,image/webp"
                   }
                   className="hidden"
@@ -1026,7 +1028,11 @@ export default function SpecialistPortfolioManager({
 
       <SaveFeedbackToast
         open={saveToastOpen}
-        message="ذخیره شد — شاخه‌های تخصصی به‌روز شد"
+        message={
+          saveToastPending
+            ? "ارسال شد — تغییر دسته‌ها در انتظار تایید جار"
+            : "ذخیره شد — شاخه‌های تخصصی به‌روز شد"
+        }
         onClose={() => setSaveToastOpen(false)}
       />
     </div>

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Building2, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import { saveSpecialistStudioAction } from "@/app/actions/specialistOnboardingActions";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
+import ProfileEditPendingBanner from "@/components/specialist/ProfileEditPendingBanner";
 
 const SpecialistBaseMapPicker = dynamic(
   () => import("@/components/specialist/SpecialistBaseMapPicker"),
@@ -25,6 +26,9 @@ type Props = {
   initialLat?: number | null;
   initialLng?: number | null;
   initialAddress?: string | null;
+  profileEditStatus?: string | null;
+  profileEditNote?: string | null;
+  requireApproval?: boolean;
 };
 
 export default function SpecialistStudioForm({
@@ -32,6 +36,9 @@ export default function SpecialistStudioForm({
   initialLat,
   initialLng,
   initialAddress,
+  profileEditStatus,
+  profileEditNote,
+  requireApproval = false,
 }: Props) {
   const router = useRouter();
   const [studioName, setStudioName] = useState(initialName || "");
@@ -45,6 +52,7 @@ export default function SpecialistStudioForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [toastOpen, setToastOpen] = useState(false);
+  const [pendingQueued, setPendingQueued] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -72,6 +80,7 @@ export default function SpecialistStudioForm({
         setError(res.error || "خطا در ذخیره.");
         return;
       }
+      setPendingQueued(Boolean(res.pendingApproval));
       setSaved(true);
       setToastOpen(true);
       router.refresh();
@@ -86,16 +95,23 @@ export default function SpecialistStudioForm({
         setError(res.error || "خطا در حذف.");
         return;
       }
-      setStudioName("");
-      setCoords(null);
-      setAddress("");
+      setPendingQueued(Boolean(res.pendingApproval));
+      if (!res.pendingApproval) {
+        setStudioName("");
+        setCoords(null);
+        setAddress("");
+      }
       setSaved(true);
+      setToastOpen(true);
       router.refresh();
     });
   };
 
   return (
     <form noValidate onSubmit={handleSubmit} className="space-y-6">
+      {requireApproval ? (
+        <ProfileEditPendingBanner status={profileEditStatus} note={profileEditNote} />
+      ) : null}
       {error && (
         <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold">
           <AlertCircle className="h-4 w-4 shrink-0" />
@@ -203,7 +219,11 @@ export default function SpecialistStudioForm({
 
       <SaveFeedbackToast
         open={toastOpen}
-        message="ذخیره شد — اطلاعات استودیو به‌روز شد"
+        message={
+          pendingQueued
+            ? "ارسال شد — در انتظار تایید جار"
+            : "ذخیره شد — اطلاعات استودیو به‌روز شد"
+        }
         onClose={() => setToastOpen(false)}
       />
     </form>

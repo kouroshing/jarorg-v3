@@ -8,6 +8,9 @@ import {
   ChevronDown,
   Clock,
   ExternalLink,
+  Film,
+  ImageIcon,
+  LayoutGrid,
   Loader2,
   MapPin,
   Maximize2,
@@ -15,22 +18,38 @@ import {
   ShieldCheck,
   Sparkles,
   UserCheck,
+  Users,
+  X,
   XCircle,
 } from "lucide-react";
 import {
   approvePortfolioAction,
+  approveProfileEditAction,
   approveSpecialistAction,
   rejectPortfolioAction,
+  rejectProfileEditAction,
   rejectSpecialistAction,
   setSpecialistKycStatusAction,
 } from "@/app/actions/adminActionHandlers";
 import type { SpecialistReviewCard } from "@/lib/specialists/review";
 import Image from "next/image";
 import EquipmentTagsDisplay from "@/components/specialist/EquipmentTagsDisplay";
+import AdminPortfolioGallery from "@/components/admin/AdminPortfolioGallery";
+import PortfolioMediaThumb from "@/components/admin/PortfolioMediaThumb";
 import {
   SPECIALIST_PROFILE_REJECTION_REASONS,
   buildSpecialistRejectionMessage,
 } from "@/lib/specialists/rejectionReasons";
+import {
+  PROFILE_EDIT_FIELD_LABELS,
+  formatPendingEditValue,
+  type PendingProfileEditDraft,
+} from "@/lib/specialists/profileEditShared";
+
+type BoardView = "dossiers" | "gallery";
+type CardMediaFilter = "ALL" | "IMAGE" | "VIDEO";
+type CardStatusFilter = "APPROVED" | "ALL" | "PENDING" | "REJECTED";
+type PreviewMedia = { fileUrl: string; mediaType: string; title?: string | null };
 
 const STATUS_LABEL: Record<string, { text: string; className: string }> = {
   PENDING_REVIEW: {
@@ -82,7 +101,10 @@ export default function SpecialistReviewBoard({
   const [rejecting, setRejecting] = useState<SpecialistReviewCard | null>(null);
   const [rejectReasonIds, setRejectReasonIds] = useState<string[]>([]);
   const [rejectExtraNote, setRejectExtraNote] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewMedia | null>(null);
+  const [boardView, setBoardView] = useState<BoardView>("dossiers");
+  const [cardMediaFilter, setCardMediaFilter] = useState<CardMediaFilter>("ALL");
+  const [cardStatusFilter, setCardStatusFilter] = useState<CardStatusFilter>("ALL");
   const [actionsMenuId, setActionsMenuId] = useState<string | null>(null);
   const [confirmActivate, setConfirmActivate] = useState<{
     card: SpecialistReviewCard;
@@ -96,6 +118,8 @@ export default function SpecialistReviewBoard({
   const [rejectItemReason, setRejectItemReason] = useState("");
   const [rejectKyc, setRejectKyc] = useState<SpecialistReviewCard | null>(null);
   const [rejectKycReason, setRejectKycReason] = useState("");
+  const [rejectProfileEdit, setRejectProfileEdit] = useState<SpecialistReviewCard | null>(null);
+  const [rejectProfileEditReason, setRejectProfileEditReason] = useState("");
   const [localCards, setLocalCards] = useState(cards);
 
   React.useEffect(() => {
@@ -103,7 +127,13 @@ export default function SpecialistReviewBoard({
   }, [cards]);
 
   const pendingCount = useMemo(
-    () => localCards.filter((c) => c.status === "PENDING_REVIEW").length,
+    () =>
+      localCards.filter(
+        (c) =>
+          c.status === "PENDING_REVIEW" ||
+          c.kycStatus === "PENDING" ||
+          c.profileEditStatus === "PENDING"
+      ).length,
     [localCards]
   );
 
@@ -305,6 +335,26 @@ export default function SpecialistReviewBoard({
     }
   };
 
+  const submitProfileEditReject = async () => {
+    if (!rejectProfileEdit) return;
+    setBusy(rejectProfileEdit.profileId);
+    try {
+      const res = await rejectProfileEditAction({
+        specialistId: rejectProfileEdit.profileId,
+        reason: rejectProfileEditReason.trim() || undefined,
+      });
+      if (res.success) announce("success", res.message || "ویرایش رد شد");
+      else announce("error", res.error);
+      setRejectProfileEdit(null);
+      setRejectProfileEditReason("");
+      refresh();
+    } catch (err: any) {
+      announce("error", err?.message || "خطای غیرمنتظره در سرور.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="w-full max-w-full space-y-5 px-3 sm:px-6 lg:px-8 py-5 pb-16 text-right font-sans" dir="rtl">
       {/* Header */}
@@ -323,7 +373,33 @@ export default function SpecialistReviewBoard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 p-0.5">
+            <button
+              type="button"
+              onClick={() => setBoardView("dossiers")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-bold transition-colors ${
+                boardView === "dossiers"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              پرونده‌ها
+            </button>
+            <button
+              type="button"
+              onClick={() => setBoardView("gallery")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-bold transition-colors ${
+                boardView === "gallery"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              گالری
+            </button>
+          </div>
           <Link
             href="/admin/review"
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
@@ -353,6 +429,16 @@ export default function SpecialistReviewBoard({
         </div>
       </div>
 
+      {boardView === "gallery" && filter === "pending" && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-[11px] text-sky-900">
+          الان فقط پرونده‌های صف بررسی را می‌بینید. برای گالری کامل اینستا،{" "}
+          <Link href="/admin/review?status=all" className="font-bold underline underline-offset-2">
+            همه متخصصان
+          </Link>{" "}
+          را باز کنید.
+        </div>
+      )}
+
       {toast && (
         <div
           role="status"
@@ -367,7 +453,20 @@ export default function SpecialistReviewBoard({
         </div>
       )}
 
-      {localCards.length === 0 ? (
+      {boardView === "gallery" ? (
+        <AdminPortfolioGallery
+          cards={localCards}
+          onFocusSpecialist={(profileId) => {
+            setBoardView("dossiers");
+            setExpanded(profileId);
+            requestAnimationFrame(() => {
+              document
+                .getElementById(`review-card-${profileId}`)
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          }}
+        />
+      ) : localCards.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
           <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
           <p className="text-sm font-bold text-slate-700">صف بررسی خالی است</p>
@@ -395,10 +494,19 @@ export default function SpecialistReviewBoard({
 
             const activationBlocked = !card.canActivateCore;
             const underMinimum = card.belowPortfolioMinimum;
+            const visibleItems = card.items.filter((item) => {
+              if (cardStatusFilter !== "ALL" && item.reviewStatus !== cardStatusFilter) {
+                return false;
+              }
+              if (cardMediaFilter === "IMAGE" && item.mediaType !== "IMAGE") return false;
+              if (cardMediaFilter === "VIDEO" && item.mediaType !== "VIDEO") return false;
+              return true;
+            });
 
             return (
               <div
                 key={card.profileId}
+                id={`review-card-${card.profileId}`}
                 className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden"
               >
                 {/* Summary row */}
@@ -420,6 +528,16 @@ export default function SpecialistReviewBoard({
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-bold text-slate-900">{card.displayName}</span>
+                        <Link
+                          href={`/s/${card.userId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-900 text-white hover:bg-slate-800"
+                        >
+                          مشاهده پروفایل
+                          <ExternalLink className="w-3 h-3" />
+                        </Link>
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${status.className}`}
                         >
@@ -441,6 +559,11 @@ export default function SpecialistReviewBoard({
                               : card.kycStatus === "PENDING"
                                 ? "در انتظار"
                                 : "رد"}
+                          </span>
+                        )}
+                        {card.profileEditStatus === "PENDING" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border bg-violet-50 text-violet-800 border-violet-200">
+                            ویرایش پروفایل در انتظار
                           </span>
                         )}
                       </div>
@@ -580,6 +703,41 @@ export default function SpecialistReviewBoard({
                               </button>
                             </>
                           )}
+                          {card.profileEditStatus === "PENDING" && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  setBusy(card.profileId);
+                                  approveProfileEditAction({ specialistId: card.profileId })
+                                    .then((res) => {
+                                      if (res.success)
+                                        announce("success", res.message || "ویرایش تایید شد");
+                                      else announce("error", res.error);
+                                      refresh();
+                                    })
+                                    .finally(() => setBusy(null));
+                                }}
+                                className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-violet-800 hover:bg-violet-50 disabled:opacity-40"
+                              >
+                                تایید ویرایش پروفایل
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => {
+                                  setActionsMenuId(null);
+                                  setRejectProfileEdit(card);
+                                  setRejectProfileEditReason("");
+                                }}
+                                className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                              >
+                                رد ویرایش پروفایل
+                              </button>
+                            </>
+                          )}
                           {card.status !== "INCOMPLETE" && (
                             <button
                               type="button"
@@ -603,6 +761,74 @@ export default function SpecialistReviewBoard({
                   <div className="mx-4 sm:mx-5 mb-3 p-2.5 rounded-xl bg-sky-50 border border-sky-100 text-[11px] text-sky-900 font-mono">
                     KYC: {[card.kycNationalIdMask, card.kycShabaMask].filter(Boolean).join(" · ")}
                     {card.kycSubmittedAt ? ` · ${formatDate(card.kycSubmittedAt)}` : ""}
+                  </div>
+                )}
+
+                {card.profileEditStatus === "PENDING" && card.pendingProfileEdit && (
+                  <div className="mx-4 sm:mx-5 mb-3 rounded-xl border border-violet-200 bg-violet-50/80 p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-black text-violet-950">
+                        پیش‌نویس ویرایش پروفایل
+                        {card.profileEditSubmittedAt
+                          ? ` · ${formatDate(card.profileEditSubmittedAt)}`
+                          : ""}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => {
+                            setBusy(card.profileId);
+                            approveProfileEditAction({ specialistId: card.profileId })
+                              .then((res) => {
+                                if (res.success)
+                                  announce("success", res.message || "ویرایش تایید شد");
+                                else announce("error", res.error);
+                                refresh();
+                              })
+                              .finally(() => setBusy(null));
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg bg-violet-700 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-violet-800 disabled:opacity-40"
+                        >
+                          <CheckCircle2 className="h-3 w-3" />
+                          اعمال ویرایش
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => {
+                            setRejectProfileEdit(card);
+                            setRejectProfileEditReason("");
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                        >
+                          <XCircle className="h-3 w-3" />
+                          رد
+                        </button>
+                      </div>
+                    </div>
+                    <ul className="space-y-1 text-[11px] text-violet-950">
+                      {(
+                        Object.entries(card.pendingProfileEdit) as [
+                          keyof PendingProfileEditDraft,
+                          unknown,
+                        ][]
+                      )
+                        .filter(([, value]) => value !== undefined)
+                        .map(([key, value]) => (
+                          <li
+                            key={key}
+                            className="flex flex-wrap gap-x-2 gap-y-0.5 rounded-lg bg-white/70 px-2 py-1.5 border border-violet-100"
+                          >
+                            <span className="font-bold">
+                              {PROFILE_EDIT_FIELD_LABELS[key] || key}:
+                            </span>
+                            <span className="font-medium break-all">
+                              {formatPendingEditValue(key, value)}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
                   </div>
                 )}
 
@@ -681,131 +907,193 @@ export default function SpecialistReviewBoard({
                     </div>
 
                     {/* Portfolio grid */}
-                    {card.items.length === 0 ? (
-                      <p className="text-xs text-slate-500 py-6 text-center">
-                        این متخصص هنوز نمونه‌کاری بارگذاری نکرده است.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                        {card.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="group relative rounded-xl overflow-hidden border border-slate-200 bg-white shadow-xs"
-                          >
-                            <div className="relative aspect-4/3 bg-slate-100">
-                              {item.mediaType === "VIDEO" ? (
-                                <video
-                                  src={item.fileUrl}
-                                  className="w-full h-full object-cover"
-                                  preload="metadata"
-                                  controls
-                                />
-                              ) : (
-                                /* eslint-disable-next-line @next/next/no-img-element */
-                                <img
-                                  src={item.fileUrl}
-                                  alt={item.title || item.categoryTitle}
-                                  loading="lazy"
-                                  className="w-full h-full object-cover"
-                                />
-                              )}
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-600">
+                          نمونه‌کارها · {visibleItems.length.toLocaleString("fa-IR")} از{" "}
+                          {card.items.length.toLocaleString("fa-IR")}
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(
+                            [
+                              ["APPROVED", "تاییدشده"],
+                              ["ALL", "همه"],
+                              ["PENDING", "در انتظار"],
+                              ["REJECTED", "ردشده"],
+                            ] as const
+                          ).map(([id, label]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => setCardStatusFilter(id)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                                cardStatusFilter === id
+                                  ? "bg-slate-900 text-white"
+                                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <span className="w-px h-5 bg-slate-200 self-center mx-0.5" />
+                          {(
+                            [
+                              ["ALL", "همه", <LayoutGrid key="a" className="w-3 h-3" />],
+                              ["IMAGE", "عکس", <ImageIcon key="i" className="w-3 h-3" />],
+                              ["VIDEO", "ویدیو", <Film key="v" className="w-3 h-3" />],
+                            ] as const
+                          ).map(([id, label, icon]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => setCardMediaFilter(id)}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                                cardMediaFilter === id
+                                  ? "bg-jar-primary text-white"
+                                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                              }`}
+                            >
+                              {icon}
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-                              <div className="absolute top-1.5 left-1.5 flex gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setPreview(item.fileUrl)}
-                                  className="p-1 rounded-md bg-black/60 text-white hover:bg-black/80"
-                                  title="بزرگ‌نمایی"
+                      {card.items.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-6 text-center">
+                          این متخصص هنوز نمونه‌کاری بارگذاری نکرده است.
+                        </p>
+                      ) : visibleItems.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-6 text-center">
+                          با این فیلتر نمونه‌کاری نیست.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                          {visibleItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="group relative flex flex-col rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-xs"
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreview({
+                                    fileUrl: item.fileUrl,
+                                    mediaType: item.mediaType,
+                                    title: item.title || item.categoryTitle,
+                                  })
+                                }
+                                className="relative aspect-square bg-slate-100 cursor-zoom-in text-right"
+                              >
+                                <PortfolioMediaThumb
+                                  fileUrl={item.fileUrl}
+                                  mediaType={item.mediaType}
+                                  alt={item.title || item.categoryTitle}
+                                />
+
+                                <div className="absolute top-1.5 left-1.5 flex gap-1 z-[1]">
+                                  <span className="p-1 rounded-md bg-black/60 text-white">
+                                    <Maximize2 className="w-3 h-3" />
+                                  </span>
+                                  <a
+                                    href={item.fileUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-1 rounded-md bg-black/60 text-white hover:bg-black/80"
+                                    title="فایل اصلی"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                </div>
+
+                                <span
+                                  className={`absolute top-1.5 right-1.5 z-[1] px-1.5 py-0.5 rounded text-[9px] font-bold text-white ${
+                                    item.reviewStatus === "APPROVED"
+                                      ? "bg-emerald-600"
+                                      : item.reviewStatus === "REJECTED"
+                                        ? "bg-rose-600"
+                                        : "bg-amber-500"
+                                  }`}
                                 >
-                                  <Maximize2 className="w-3 h-3" />
-                                </button>
-                                <a
-                                  href={item.fileUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-1 rounded-md bg-black/60 text-white hover:bg-black/80"
-                                  title="فایل اصلی"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
+                                  {item.reviewStatus === "APPROVED"
+                                    ? "تایید"
+                                    : item.reviewStatus === "REJECTED"
+                                      ? "رد"
+                                      : "در انتظار"}
+                                </span>
+                              </button>
+
+                              <div className="px-2 pt-2 pb-1">
+                                <p className="text-[11px] font-bold text-slate-800 truncate">
+                                  {card.displayName}
+                                </p>
+                                <p className="text-[10px] text-slate-500 truncate">
+                                  {item.categoryTitle}
+                                </p>
                               </div>
 
-                              <span
-                                className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-white ${
-                                  item.reviewStatus === "APPROVED"
-                                    ? "bg-emerald-600"
-                                    : item.reviewStatus === "REJECTED"
-                                    ? "bg-rose-600"
-                                    : "bg-amber-500"
-                                }`}
-                              >
-                                {item.reviewStatus === "APPROVED"
-                                  ? "تایید"
-                                  : item.reviewStatus === "REJECTED"
-                                  ? "رد"
-                                  : "در انتظار"}
-                              </span>
-                            </div>
+                              <div className="p-1.5 flex items-center gap-1">
+                                {item.reviewStatus === "PENDING" && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      void handleItemDecision(card, item.id, "APPROVE");
+                                    }}
+                                    disabled={busy === item.id}
+                                    className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                  >
+                                    {busy === item.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      "تایید"
+                                    )}
+                                  </button>
+                                )}
+                                {item.reviewStatus === "PENDING" && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      void handleItemDecision(card, item.id, "REJECT");
+                                    }}
+                                    disabled={busy === item.id}
+                                    className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                  >
+                                    رد
+                                  </button>
+                                )}
+                                {item.reviewStatus === "APPROVED" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleItemDecision(card, item.id, "REJECT")}
+                                    disabled={busy === item.id}
+                                    className="flex-1 inline-flex items-center justify-center py-1 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                  >
+                                    رد
+                                  </button>
+                                )}
+                                {item.reviewStatus === "REJECTED" && (
+                                  <span className="flex-1 text-center text-[9px] font-bold text-rose-700 py-1">
+                                    رد شده — غیرقابل تایید مجدد
+                                  </span>
+                                )}
+                              </div>
 
-                            <div className="p-1.5 flex items-center gap-1">
-                              {item.reviewStatus === "PENDING" && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    void handleItemDecision(card, item.id, "APPROVE");
-                                  }}
-                                  disabled={busy === item.id}
-                                  className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  {busy === item.id ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    "تایید"
-                                  )}
-                                </button>
-                              )}
-                              {item.reviewStatus === "PENDING" && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    void handleItemDecision(card, item.id, "REJECT");
-                                  }}
-                                  disabled={busy === item.id}
-                                  className="flex-1 inline-flex items-center justify-center py-1.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  رد
-                                </button>
-                              )}
-                              {item.reviewStatus === "APPROVED" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleItemDecision(card, item.id, "REJECT")}
-                                  disabled={busy === item.id}
-                                  className="flex-1 inline-flex items-center justify-center py-1 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  رد
-                                </button>
-                              )}
-                              {item.reviewStatus === "REJECTED" && (
-                                <span className="flex-1 text-center text-[9px] font-bold text-rose-700 py-1">
-                                  رد شده — غیرقابل تایید مجدد
-                                </span>
+                              {item.rejectionReason && (
+                                <p className="px-1.5 pb-1.5 text-[9px] text-rose-700 leading-3">
+                                  {item.rejectionReason}
+                                </p>
                               )}
                             </div>
-
-                            {item.rejectionReason && (
-                              <p className="px-1.5 pb-1.5 text-[9px] text-rose-700 leading-3">
-                                {item.rejectionReason}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1063,18 +1351,86 @@ export default function SpecialistReviewBoard({
         </div>
       )}
 
+      {rejectProfileEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitProfileEditReject();
+            }}
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-right"
+          >
+            <h4 className="text-sm font-bold text-slate-900">
+              رد ویرایش پروفایل «{rejectProfileEdit.displayName}»
+            </h4>
+            <textarea
+              rows={3}
+              value={rejectProfileEditReason}
+              onChange={(e) => setRejectProfileEditReason(e.target.value)}
+              placeholder="علت رد ویرایش (اختیاری)…"
+              className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 focus:outline-none"
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectProfileEdit(null);
+                  setRejectProfileEditReason("");
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200"
+              >
+                انصراف
+              </button>
+              <button
+                type="submit"
+                disabled={busy === rejectProfileEdit.profileId}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+              >
+                رد ویرایش
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Lightbox */}
       {preview && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 cursor-zoom-out"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
           onClick={() => setPreview(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="بزرگ‌نمایی نمونه‌کار"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={preview}
-            alt="بزرگ‌نمایی نمونه‌کار"
-            className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
-          />
+          <button
+            type="button"
+            onClick={() => setPreview(null)}
+            className="absolute top-4 left-4 p-2 rounded-xl bg-white/10 text-white hover:bg-white/20"
+            aria-label="بستن"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div
+            className="max-w-5xl w-full flex justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {preview.mediaType === "VIDEO" ? (
+              <video
+                src={preview.fileUrl}
+                controls
+                autoPlay
+                className="max-w-full max-h-[90vh] rounded-xl shadow-2xl bg-black"
+              />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={preview.fileUrl}
+                alt={preview.title || "بزرگ‌نمایی نمونه‌کار"}
+                className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+              />
+            )}
+          </div>
         </div>
       )}
     </div>
