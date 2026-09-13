@@ -58,7 +58,7 @@ async function zohalPost(
 ): Promise<ZohalCallResult<Record<string, unknown>>> {
   const token = getToken();
   if (!token) {
-    return { ok: false, error: "توکن زحل پیکربندی نشده است." };
+    return { ok: false, error: "سرویس استعلام موقتاً در دسترس نیست." };
   }
 
   let response: Response;
@@ -75,7 +75,7 @@ async function zohalPost(
     });
   } catch (err) {
     console.error("[zohal] network error", path, err);
-    return { ok: false, error: "اتصال به سرویس زحل برقرار نشد." };
+    return { ok: false, error: "اتصال به سرویس استعلام برقرار نشد." };
   }
 
   let body: ZohalEnvelope | null = null;
@@ -87,7 +87,7 @@ async function zohalPost(
 
   if (!response.ok) {
     const message =
-      body?.response_body?.message || `خطای زحل (HTTP ${response.status}).`;
+      body?.response_body?.message || `خطای سرویس استعلام (HTTP ${response.status}).`;
     return {
       ok: false,
       error: message,
@@ -183,7 +183,7 @@ export async function verifySpecialistKycWithZohal(
   if (!isZohalConfigured()) {
     return {
       status: "PENDING",
-      reason: "توکن زحل روی سرور تنظیم نشده؛ در صف بررسی دستی ادمین.",
+      reason: "سرویس استعلام روی سرور آماده نیست؛ در صف بررسی دستی ادمین.",
     };
   }
 
@@ -203,7 +203,7 @@ export async function verifySpecialistKycWithZohal(
   if (!shahkar.data.matched) {
     return {
       status: "FAILED",
-      reason: "شماره موبایل حساب با کد ملی مطابقت ندارد (شاهکار).",
+      reason: "شماره موبایل حساب با کد ملی مطابقت ندارد.",
     };
   }
 
@@ -222,6 +222,7 @@ export async function verifySpecialistKycWithZohal(
     };
   }
 
+  // Only spend the optional bank-name inquiry after a successful match.
   let bankName: string | null = null;
   const ibanInfo = await zohalIbanInfo(input.shaba);
   if (ibanInfo.ok) {

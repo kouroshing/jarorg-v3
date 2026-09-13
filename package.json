@@ -13,7 +13,13 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "db:wal": "node scripts/set-wal.js"
+    "db:wal": "node scripts/set-wal.js",
+    "cron:auto-release": "node scripts/auto-release-escrow.mjs",
+    "cron:auto-release:apply": "node scripts/auto-release-escrow.mjs --apply",
+    "cron:order-timeouts": "node scripts/order-timeouts.mjs",
+    "cron:order-timeouts:apply": "node scripts/order-timeouts.mjs --apply",
+    "cron:reveal-contacts": "node scripts/reveal-contacts.mjs",
+    "cron:reveal-contacts:apply": "node scripts/reveal-contacts.mjs --apply"
   },
   "engines": {
     "node": ">=18.17.0"

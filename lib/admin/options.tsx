@@ -68,6 +68,7 @@ export const options: NextAdminOptions = {
         contactPhone: "شماره تماس کارفرما",
         adminCancelNote: "یادداشت لغو اداری",
         adminNote: "پیام ویرایش برای کارفرما",
+        publishFlags: "پرچم‌های بررسی خودکار",
         projectDescription: "توضیحات و سناریو",
         referenceLink: "لینک رفرنس",
         moodboardUrls: "مودبورد تصاویر",
@@ -155,6 +156,7 @@ export const options: NextAdminOptions = {
           "status",
           "adminNote",
           "adminCancelNote",
+          "publishFlags",
           "hourlyRate",
           "durationHours",
           "totalEstimatedPrice",
@@ -187,6 +189,10 @@ export const options: NextAdminOptions = {
           },
           moodboardUrls: {
             format: "json",
+          },
+          publishFlags: {
+            format: "json",
+            helperText: "خروجی سیستم بررسی خودکار — معمولاً نیازی به ویرایش دستی نیست.",
           },
         },
         hooks: {
@@ -436,7 +442,7 @@ export const options: NextAdminOptions = {
       },
     },
     PortfolioItem: {
-      title: "نمونه‌کارهای متخصصان (Portfolio)",
+      title: "گالری نمونه‌کارها",
       icon: "PhotoIcon",
       aliases: {
         id: "شناسه",
@@ -450,6 +456,7 @@ export const options: NextAdminOptions = {
         reviewStatus: "وضعیت بررسی",
         rejectionReason: "علت رد اثر",
         createdAt: "تاریخ بارگذاری",
+        instagramPickedAt: "برداشته‌شده اینستا",
       },
       actions: [
         {

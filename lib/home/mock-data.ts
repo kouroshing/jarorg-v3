@@ -16,7 +16,7 @@ export const HOME_CATEGORIES: HomeCategory[] = [
   {
     id: "portrait",
     title: "عکاسی پرتره",
-    href: "/create-project?offering=personal_portrait",
+    href: "/order",
     className: "col-span-2 row-span-2 min-h-[280px] sm:min-h-[320px]",
     imageUrl:
       "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=800&auto=format&fit=crop",
@@ -25,7 +25,7 @@ export const HOME_CATEGORIES: HomeCategory[] = [
   {
     id: "product-video",
     title: "فیلم‌برداری محصول",
-    href: "/create-project?offering=commercial_reels",
+    href: "/order",
     className: "col-span-1 row-span-1 min-h-[140px]",
     imageUrl:
       "https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=800&auto=format&fit=crop",
@@ -34,7 +34,7 @@ export const HOME_CATEGORIES: HomeCategory[] = [
   {
     id: "modeling",
     title: "مدلینگ",
-    href: "/create-project?offering=commercial_fashion",
+    href: "/order",
     className: "col-span-1 row-span-1 min-h-[140px]",
     imageUrl:
       "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=800&auto=format&fit=crop&crop=faces",
@@ -44,7 +44,7 @@ export const HOME_CATEGORIES: HomeCategory[] = [
   {
     id: "commercial-photo",
     title: "عکاسی تجاری",
-    href: "/create-project?offering=commercial_product",
+    href: "/order",
     className: "col-span-2 row-span-1 min-h-[150px] sm:col-span-1 sm:row-span-2 sm:min-h-0",
     imageUrl:
       "https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=800&auto=format&fit=crop",
@@ -53,7 +53,7 @@ export const HOME_CATEGORIES: HomeCategory[] = [
   {
     id: "event",
     title: "رویداد و مراسم",
-    href: "/create-project?offering=commercial_event",
+    href: "/order",
     className: "col-span-2 row-span-1 min-h-[130px] sm:col-span-2 sm:min-h-[140px]",
     imageUrl:
       "https://images.unsplash.com/photo-1511578314322-379afb476865?q=80&w=800&auto=format&fit=crop",

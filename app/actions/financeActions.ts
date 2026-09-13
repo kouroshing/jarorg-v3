@@ -163,7 +163,7 @@ export async function createWithdrawalRequest(
       return {
         success: false,
         error:
-          "برای تسویه حساب ابتدا احراز هویت بانکی (شاهکار + شبا) را تکمیل کنید.",
+          "برای تسویه حساب ابتدا احراز هویت (شاهکار + شبا) را تکمیل کنید.",
       };
     }
 

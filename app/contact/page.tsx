@@ -1,10 +1,9 @@
-"use client";
-
 import Link from "next/link";
 import { Mail, Phone } from "lucide-react";
-
-const SUPPORT_TEL = "tel:02166468626";
-const SUPPORT_DISPLAY = "۰۲۱-۶۶۴۶۸۶۲۶";
+import {
+  SUPPORT_PHONE_DISPLAY,
+  SUPPORT_PHONE_TEL,
+} from "@/lib/support/contact";
 
 export default function ContactPage() {
   return (
@@ -20,7 +19,7 @@ export default function ContactPage() {
 
       <div className="space-y-4">
         <a
-          href={SUPPORT_TEL}
+          href={SUPPORT_PHONE_TEL}
           className="flex items-center gap-4 rounded-2xl border border-[#E5E0D8] bg-white p-5 shadow-xs transition-all hover:border-[#141413]/40 cursor-pointer"
         >
           <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#CC785C]/10 text-[#CC785C] border border-[#CC785C]/20 shrink-0">
@@ -29,7 +28,7 @@ export default function ContactPage() {
           <div className="text-right">
             <p className="text-sm font-bold text-[#141413]">تلفن پشتیبانی</p>
             <p className="mt-0.5 text-sm text-[#66605B] font-mono" dir="ltr">
-              {SUPPORT_DISPLAY}
+              {SUPPORT_PHONE_DISPLAY}
             </p>
           </div>
         </a>

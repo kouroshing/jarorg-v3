@@ -19,6 +19,7 @@ import {
   Loader2,
   Filter,
 } from "lucide-react";
+import AdminConfirmDialog from "@/components/admin/AdminConfirmDialog";
 
 interface PortfolioItemData {
   id: string;
@@ -47,6 +48,7 @@ export default function SpecialistPortfolioReviewWidget({ item, mode }: CustomIn
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [notificationMsg, setNotificationMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
 
   const fetchItems = useCallback(async () => {
     if (!specialistId) return;
@@ -144,11 +146,17 @@ export default function SpecialistPortfolioReviewWidget({ item, mode }: CustomIn
   const handleApproveAllPending = async () => {
     const pendingIds = items.filter((i) => i.reviewStatus === "PENDING").map((i) => i.id);
     if (pendingIds.length === 0) return;
+    setBulkConfirmOpen(true);
+  };
 
-    if (!confirm(`آیا از تایید هم‌زمان ${pendingIds.length} نمونه‌کار در انتظار بررسی مطمئن هستید؟`)) {
+  const confirmApproveAllPending = async () => {
+    const pendingIds = items.filter((i) => i.reviewStatus === "PENDING").map((i) => i.id);
+    if (pendingIds.length === 0) {
+      setBulkConfirmOpen(false);
       return;
     }
 
+    setBulkConfirmOpen(false);
     setLoading(true);
     try {
       const res = await approvePortfolioAction(pendingIds);
@@ -556,6 +564,29 @@ export default function SpecialistPortfolioReviewWidget({ item, mode }: CustomIn
           </div>
         </div>
       )}
+
+      <AdminConfirmDialog
+        open={bulkConfirmOpen}
+        title="تایید همگانی نمونه‌کارها؟"
+        description={
+          <>
+            همه{" "}
+            <strong>
+              {items
+                .filter((i) => i.reviewStatus === "PENDING")
+                .length.toLocaleString("fa-IR")}
+            </strong>{" "}
+            نمونه‌کار در انتظار، یکجا تایید می‌شوند.
+          </>
+        }
+        confirmLabel="تایید همه"
+        tone="warning"
+        loading={loading}
+        onCancel={() => setBulkConfirmOpen(false)}
+        onConfirm={() => {
+          void confirmApproveAllPending();
+        }}
+      />
     </div>
   );
 }

@@ -162,8 +162,8 @@ export default function PhotographerWalletPage() {
                 <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4 text-[11px] font-bold text-amber-900 space-y-2 leading-relaxed">
                   <p>
                     {kycStatus === "PENDING"
-                      ? "احراز هویت بانکی در صف بررسی است. تا تایید نهایی امکان تسویه وجود ندارد."
-                      : "برای تسویه حساب، ابتدا احراز هویت بانکی (کد ملی + شبا) را تکمیل کنید."}
+                      ? "احراز هویت در صف بررسی است. تا تایید نهایی امکان تسویه وجود ندارد."
+                      : "برای تسویه حساب، ابتدا احراز هویت (کد ملی + شبا) را تکمیل کنید."}
                   </p>
                   <Link
                     href="/specialist/onboarding/identity"

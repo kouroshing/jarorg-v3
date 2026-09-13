@@ -13,7 +13,8 @@ yarn-error.log*
 /prisma/*.db-*
 package-lock.json
 # local-only / non-app artifacts (kept out of Liara archive)
-android/
+# Capacitor native project only — bare "android/" also dropped public/android favicons
+/android/
 .chrome-profile-data/
 .chrome-user-data/
 project.zip

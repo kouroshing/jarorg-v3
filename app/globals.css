@@ -213,7 +213,29 @@
     animation: halo-float-breeze 8.5s cubic-bezier(0.42, 0, 0.58, 1) infinite;
     will-change: transform;
   }
+
+  @keyframes coverage-pulse {
+    0% {
+      transform: scale(0.65);
+      opacity: 0.55;
+    }
+    70% {
+      transform: scale(2.1);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(2.1);
+      opacity: 0;
+    }
+  }
+
+  .animate-coverage-pulse {
+    animation: coverage-pulse 2.8s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
 }
+
 
 
 

@@ -11,6 +11,7 @@ import {
   BarChart3,
   MessageSquare,
   Shield,
+  Images,
 } from "lucide-react";
 import type { AdminPermission } from "@/lib/auth/adminPermissions";
 
@@ -34,6 +35,15 @@ const LINKS: Array<{
     icon: UserCheck,
     permission: "specialists_review",
     match: (p) => p.startsWith("/admin/review"),
+  },
+  {
+    href: "/admin/PortfolioItem",
+    label: "گالری نمونه‌کار",
+    icon: Images,
+    permission: "specialists_review",
+    match: (p) =>
+      p.toLowerCase().startsWith("/admin/portfolioitem") ||
+      p.startsWith("/admin/portfolio"),
   },
   {
     href: "/admin/message",

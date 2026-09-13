@@ -15,8 +15,11 @@ import SpecialistPortfolioReviewWidget from "@/components/admin/SpecialistPortfo
 import OrderApplicantsAdminWidget from "@/components/admin/OrderApplicantsAdminWidget";
 import AdminDashboard, { DashboardData } from "@/components/admin/AdminDashboard";
 import AdminBrandHeader from "@/components/admin/AdminBrandHeader";
+import AdminPortfolioCuratePage from "@/components/admin/AdminPortfolioCuratePage";
+import { getAdminPortfolioGalleryItems } from "@/lib/admin/portfolioGalleryData";
 import { persianTranslations } from "@/lib/admin/translations";
 import { storedValuesFor } from "@/lib/orders/status";
+import { parsePublishFlags } from "@/lib/orders/publishGate";
 import type { NextAdminOptions } from "@premieroctet/next-admin";
 
 function filterOptionsForAccess(
@@ -53,6 +56,19 @@ export default async function AdminPage({
   const modelSegment = segments[0];
   if (modelSegment && !canAccessNextAdminModel(access, modelSegment)) {
     redirect("/admin");
+  }
+
+  // Replace the raw PortfolioItem table with the curation gallery.
+  // Keep /admin/PortfolioItem/[id] edit on NextAdmin.
+  const isPortfolioList =
+    segments.length === 1 &&
+    String(segments[0]).toLowerCase() === "portfolioitem";
+  if (isPortfolioList) {
+    if (!hasAdminPermission(access, "specialists_review")) {
+      redirect("/admin");
+    }
+    const portfolioItems = await getAdminPortfolioGalleryItems();
+    return <AdminPortfolioCuratePage items={portfolioItems} />;
   }
 
   const scopedOptions = filterOptionsForAccess(options, (model) =>
@@ -92,12 +108,16 @@ export default async function AdminPage({
       pendingReviewCount,
       matchingStuckCount,
       awaitingPaymentCount,
+      openDisputeCount,
       pendingPortfolioCount,
       pendingSpecialistCount,
       pendingWithdrawalCount,
       triageRaw,
       matchingRaw,
+      paymentRaw,
+      disputeRaw,
       withdrawalsRaw,
+      auditsRaw,
     ] = await Promise.all([
       canOrders
         ? prisma.order.count({
@@ -120,6 +140,15 @@ export default async function AdminPage({
       canOrders
         ? prisma.order.count({
             where: { status: { in: storedValuesFor("AWAITING_PAYMENT") } },
+          })
+        : Promise.resolve(0),
+      canOrders
+        ? prisma.order.count({
+            where: {
+              disputedAt: { not: null },
+              disputeResolvedAt: null,
+              settledAt: null,
+            },
           })
         : Promise.resolve(0),
       canReview
@@ -146,6 +175,7 @@ export default async function AdminPage({
               createdAt: true,
               contactName: true,
               contactPhone: true,
+              publishFlags: true,
               _count: { select: { interests: true } },
             },
           })
@@ -173,6 +203,45 @@ export default async function AdminPage({
             },
           })
         : Promise.resolve([]),
+      canOrders
+        ? prisma.order.findMany({
+            where: { status: { in: storedValuesFor("AWAITING_PAYMENT") } },
+            orderBy: { createdAt: "asc" },
+            take: 10,
+            select: {
+              id: true,
+              categoryTitle: true,
+              status: true,
+              totalEstimatedPrice: true,
+              createdAt: true,
+              contactName: true,
+              contactPhone: true,
+              _count: { select: { interests: true } },
+            },
+          })
+        : Promise.resolve([]),
+      canOrders
+        ? prisma.order.findMany({
+            where: {
+              disputedAt: { not: null },
+              disputeResolvedAt: null,
+              settledAt: null,
+            },
+            orderBy: { disputedAt: "asc" },
+            take: 8,
+            select: {
+              id: true,
+              categoryTitle: true,
+              status: true,
+              totalEstimatedPrice: true,
+              createdAt: true,
+              contactName: true,
+              contactPhone: true,
+              disputeReason: true,
+              _count: { select: { interests: true } },
+            },
+          })
+        : Promise.resolve([]),
       canFinance
         ? prisma.withdrawalRequest.findMany({
             where: { status: "PENDING" },
@@ -183,9 +252,52 @@ export default async function AdminPage({
             },
           })
         : Promise.resolve([]),
+      prisma.auditLog.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 12,
+        select: {
+          id: true,
+          action: true,
+          targetModel: true,
+          targetId: true,
+          note: true,
+          createdAt: true,
+          actorId: true,
+        },
+      }),
     ]);
 
-    const mapOrder = (o: (typeof triageRaw)[number]) => ({
+    const actorIds = [
+      ...new Set(
+        auditsRaw.map((a) => a.actorId).filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const actors =
+      actorIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: actorIds } },
+            select: { id: true, displayName: true, phone: true },
+          })
+        : [];
+    const actorMap = new Map(
+      actors.map((u) => [
+        u.id,
+        u.displayName || u.phone || u.id.slice(0, 8),
+      ])
+    );
+
+    const mapOrder = (o: {
+      id: string;
+      categoryTitle: string | null;
+      status: string;
+      totalEstimatedPrice: number;
+      createdAt: Date;
+      contactName: string | null;
+      contactPhone: string | null;
+      _count: { interests: number };
+      publishFlags?: string | null;
+      disputeReason?: string | null;
+    }) => ({
       id: o.id,
       categoryTitle: o.categoryTitle,
       status: o.status,
@@ -194,6 +306,8 @@ export default async function AdminPage({
       contactName: o.contactName,
       contactPhone: o.contactPhone,
       applicantCount: o._count.interests,
+      publishFlags: parsePublishFlags(o.publishFlags),
+      disputeReason: o.disputeReason ?? null,
     });
 
     const permissions = Array.from(access.permissions) as AdminPermission[];
@@ -202,11 +316,14 @@ export default async function AdminPage({
       pendingReviewCount,
       matchingStuckCount,
       awaitingPaymentCount,
+      openDisputeCount,
       pendingPortfolioCount,
       pendingSpecialistCount,
       pendingWithdrawalCount,
       triageOrders: triageRaw.map(mapOrder),
       matchingOrders: matchingRaw.map(mapOrder),
+      paymentOrders: paymentRaw.map(mapOrder),
+      disputeOrders: disputeRaw.map(mapOrder),
       withdrawals: withdrawalsRaw.map((w) => ({
         id: w.id,
         amount: w.amount,
@@ -214,6 +331,15 @@ export default async function AdminPage({
         createdAt: w.createdAt.toISOString(),
         displayName: w.user.displayName,
         phone: w.user.phone,
+      })),
+      recentAudits: auditsRaw.map((a) => ({
+        id: a.id,
+        action: a.action,
+        targetModel: a.targetModel,
+        targetId: a.targetId,
+        note: a.note,
+        createdAt: a.createdAt.toISOString(),
+        actorLabel: a.actorId ? actorMap.get(a.actorId) || null : null,
       })),
     };
 

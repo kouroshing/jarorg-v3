@@ -108,13 +108,19 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     icons: {
       icon: [
-        { url: "/android/launchericon-192x192.png", sizes: "192x192", type: "image/png" },
-        { url: "/android/launchericon-512x512.png", sizes: "512x512", type: "image/png" },
+        { url: "/favicon-32x32.png?v=orange", sizes: "32x32", type: "image/png" },
+        { url: "/favicon-16x16.png?v=orange", sizes: "16x16", type: "image/png" },
+        { url: "/favicon.ico?v=orange", sizes: "any" },
+        { url: "/icon-192.png?v=orange", sizes: "192x192", type: "image/png" },
+        { url: "/icon-512.png?v=orange", sizes: "512x512", type: "image/png" },
+        { url: "/brand-icons/launchericon-192x192.png?v=orange", sizes: "192x192", type: "image/png" },
+        { url: "/brand-icons/launchericon-512x512.png?v=orange", sizes: "512x512", type: "image/png" },
       ],
+      shortcut: "/favicon-32x32.png?v=orange",
       apple: [
-        { url: "/ios/180.png", sizes: "180x180", type: "image/png" },
-        { url: "/ios/152.png", sizes: "152x152", type: "image/png" },
-        { url: "/ios/120.png", sizes: "120x120", type: "image/png" },
+        { url: "/ios/180.png?v=orange", sizes: "180x180", type: "image/png" },
+        { url: "/ios/152.png?v=orange", sizes: "152x152", type: "image/png" },
+        { url: "/ios/120.png?v=orange", sizes: "120x120", type: "image/png" },
       ],
     },
     other: {

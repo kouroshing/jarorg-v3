@@ -8,6 +8,8 @@ import {
   ArrowTopRightOnSquareIcon,
   BanknotesIcon,
   MagnifyingGlassIcon,
+  CreditCardIcon,
+  ClockIcon,
 } from "@heroicons/react/24/outline";
 import AdminOrderTriageQueue, {
   type TriageOrderRow,
@@ -15,19 +17,26 @@ import AdminOrderTriageQueue, {
 import AdminWithdrawalQueue, {
   type WithdrawalRow,
 } from "@/components/admin/AdminWithdrawalQueue";
-import { formatJalaliDate } from "@/lib/date/jalali";
+import AdminFollowUpQueue from "@/components/admin/AdminFollowUpQueue";
+import AdminAuditStrip, {
+  type AuditRow,
+} from "@/components/admin/AdminAuditStrip";
 import type { AdminPermission } from "@/lib/auth/adminPermissions";
 
 export interface DashboardData {
   pendingReviewCount: number;
   matchingStuckCount: number;
   awaitingPaymentCount: number;
+  openDisputeCount: number;
   pendingSpecialistCount: number;
   pendingPortfolioCount: number;
   pendingWithdrawalCount: number;
   triageOrders: TriageOrderRow[];
   matchingOrders: TriageOrderRow[];
+  paymentOrders: TriageOrderRow[];
+  disputeOrders: TriageOrderRow[];
   withdrawals: WithdrawalRow[];
+  recentAudits: AuditRow[];
 }
 
 export default function AdminDashboard({
@@ -45,6 +54,7 @@ export default function AdminDashboard({
   const canReview = can("specialists_review");
   const canFinance = can("finance_manage");
   const canStats = can("stats_view");
+  const canDashboard = can("dashboard");
 
   return (
     <div className="w-full max-w-full space-y-6 px-3 sm:px-6 lg:px-8 py-5 pb-16 overflow-hidden text-right" dir="rtl">
@@ -112,16 +122,25 @@ export default function AdminDashboard({
         )}
         {canOrders && (
           <Kpi
-            href="/admin/Order"
+            href="#payment"
             label="در انتظار پرداخت"
             value={data.awaitingPaymentCount}
             tone="indigo"
             hint="AWAITING_PAYMENT"
           />
         )}
+        {canOrders && (
+          <Kpi
+            href="#disputes"
+            label="اعتراض باز"
+            value={data.openDisputeCount}
+            tone="rose"
+            hint="تسویه متوقف"
+          />
+        )}
         {canReview && (
           <Kpi
-            href="/admin/review"
+            href="/admin/PortfolioItem"
             label="نمونه‌کار معوق"
             value={data.pendingPortfolioCount}
             tone="purple"
@@ -199,32 +218,73 @@ export default function AdminDashboard({
               {data.matchingOrders.length.toLocaleString("fa-IR")} مورد
             </span>
           </div>
-          {data.matchingOrders.length === 0 ? (
+          <AdminFollowUpQueue orders={data.matchingOrders} mode="matching" />
+        </section>
+      )}
+
+      {canOrders && (
+        <section id="payment" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <CreditCardIcon className="w-5 h-5 text-indigo-600" />
+              پرداخت‌های گیرکرده
+            </h2>
+            <span className="text-[11px] font-bold text-slate-400">
+              {data.paymentOrders.length.toLocaleString("fa-IR")} مورد
+            </span>
+          </div>
+          <AdminFollowUpQueue orders={data.paymentOrders} mode="payment" />
+        </section>
+      )}
+
+      {canOrders && (
+        <section id="disputes" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <ExclamationTriangleIcon className="w-5 h-5 text-rose-500" />
+              اعتراض‌های باز
+            </h2>
+            <span className="text-[11px] font-bold text-slate-400">
+              {data.disputeOrders.length.toLocaleString("fa-IR")} مورد
+            </span>
+          </div>
+          {data.disputeOrders.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-xs text-slate-500">
-              سفارش گیرکرده‌ای در تطبیق نیست.
+              اعتراض بازی نیست.
             </div>
           ) : (
             <div className="space-y-2">
-              {data.matchingOrders.map((ord) => (
+              {data.disputeOrders.map((ord) => (
                 <Link
                   key={ord.id}
-                  href={`/admin/Order/${ord.id}`}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:bg-slate-50"
+                  href={`/order/${ord.id}`}
+                  className="block rounded-2xl border border-rose-200 bg-rose-50/60 p-4 hover:bg-rose-50"
                 >
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">
-                      {ord.categoryTitle || "پروژه"}
-                    </p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {(ord.applicantCount ?? 0).toLocaleString("fa-IR")} متقاضی ·{" "}
-                      {formatJalaliDate(new Date(ord.createdAt))}
-                    </p>
-                  </div>
-                  <span className="text-[11px] font-bold text-indigo-600">باز کردن ←</span>
+                  <p className="text-sm font-bold text-rose-950">
+                    {ord.categoryTitle || "پروژه"}
+                  </p>
+                  <p className="text-[11px] text-rose-900/80 mt-1 leading-relaxed">
+                    {ord.disputeReason || "بدون توضیح"} · باز کردن برای آزادسازی یا عودت
+                  </p>
                 </Link>
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {canDashboard && (
+        <section id="audit" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <ClockIcon className="w-5 h-5 text-slate-500" />
+              آخرین اقدامات حسابرسی
+            </h2>
+            <Link href="/admin/AuditLog" className="text-[11px] font-bold text-indigo-600">
+              آرشیو کامل
+            </Link>
+          </div>
+          <AdminAuditStrip rows={data.recentAudits} />
         </section>
       )}
 

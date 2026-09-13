@@ -349,7 +349,7 @@ export default function StepCategory({
           filteredCategories.map((cat) => {
             const isSelected = selectedSlug === cat.slug;
             const visual = CATEGORY_VISUAL_MAP[cat.slug] || {
-              imageUrl: "https://images.unsplash.com/photo-1452587925148-ce544e77e70d?q=80&w=600&auto=format&fit=crop",
+              imageUrl: "/images/categories/personal-other.jpg",
               tag: "خدمات تخصصی تصویربرداری و عکاسی",
             };
 

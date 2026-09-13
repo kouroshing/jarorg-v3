@@ -62,7 +62,7 @@ export async function markOrderPaid(orderId: string, refId: string): Promise<boo
     await createNotification({
       userId: applied.selectedSpecialistId,
       title: "پروژه قطعی شد",
-      message: `کارفرما هزینه پروژه «${applied.categoryTitle || "عکاسی"}» را پرداخت کرد. از همین حالا می‌توانید در گفتگوی پروژه هماهنگ کنید؛ شماره تماس و نشانی دقیق ۲۴ ساعت پیش از شروع پروژه در اختیارتان قرار می‌گیرد.`,
+      message: `کارفرما هزینه پروژه «${applied.categoryTitle || "عکاسی"}» را پرداخت کرد. هماهنگی را از صفحه سفارش پیگیری کنید؛ شماره تماس و نشانی دقیق ۲۴ ساعت پیش از شروع پروژه در اختیارتان قرار می‌گیرد.`,
       type: "SUCCESS",
       link: "/specialist/mine",
     });

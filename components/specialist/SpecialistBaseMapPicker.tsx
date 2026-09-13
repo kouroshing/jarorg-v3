@@ -7,6 +7,7 @@ import {
   COVERAGE_RADIUS_BOUNDS,
   describeCoverageRadius,
 } from "@/lib/geo/iranPlaces";
+import { zoomForCoverageRadiusKm } from "@/lib/geo/cityCenters";
 
 export interface Coordinates {
   lat: number;
@@ -20,8 +21,10 @@ export interface SpecialistBaseMapPickerProps {
   onChangeAddress: (val: string) => void;
   onChangeCoords?: (coords: Coordinates) => void;
   initialCoords?: Coordinates;
-  /** When city/province changes, pan the map to this center once. */
+  /** When city/province changes, pan the map to this center. */
   focusCoords?: Coordinates | null;
+  /** Bump when the same city is re-selected so the map still recenters. */
+  focusToken?: number;
   /** Center-pin badge label. */
   pinLabel?: string;
   districtFieldLabel?: string;
@@ -55,6 +58,7 @@ export default function SpecialistBaseMapPicker({
   onChangeCoords,
   initialCoords = DEFAULT_CENTER,
   focusCoords = null,
+  focusToken = 0,
   pinLabel = "محل شروع حرکت",
   districtFieldLabel = "منطقه / محله",
   addressFieldLabel = "آدرس تقریبی مبدأ",
@@ -86,6 +90,9 @@ export default function SpecialistBaseMapPicker({
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reverseGeocodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const programmaticMoveRef = useRef(false);
+  const safeRadiusRef = useRef(safeRadius);
+  safeRadiusRef.current = safeRadius;
 
   const showToast = useCallback((msg: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -205,6 +212,9 @@ export default function SpecialistBaseMapPicker({
           if (circleRef.current) {
             circleRef.current.setLatLng([center.lat, center.lng]);
           }
+          if (programmaticMoveRef.current) {
+            return;
+          }
           updateLocationFromCoords(center.lat, center.lng);
         } catch {
           /* ignore */
@@ -283,25 +293,59 @@ export default function SpecialistBaseMapPicker({
 
   useEffect(() => {
     if (!mapReady || !focusCoords || !mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
     const { lat, lng } = focusCoords;
-    mapInstanceRef.current.setView([lat, lng], showCoverage ? 12 : 13, { animate: true });
+    const zoom = showCoverage
+      ? zoomForCoverageRadiusKm(safeRadiusRef.current)
+      : 14;
+
+    try {
+      map.invalidateSize();
+    } catch {
+      /* ignore */
+    }
+
+    programmaticMoveRef.current = true;
+    if (typeof map.flyTo === "function") {
+      map.flyTo([lat, lng], zoom, { animate: true, duration: 0.65 });
+    } else {
+      map.setView([lat, lng], zoom, { animate: true });
+    }
     if (circleRef.current) {
       circleRef.current.setLatLng([lat, lng]);
+      circleRef.current.setRadius(safeRadiusRef.current * 1000);
     }
     updateLocationFromCoords(lat, lng, true);
-  }, [mapReady, focusCoords?.lat, focusCoords?.lng, updateLocationFromCoords, showCoverage]);
+    const unlock = window.setTimeout(() => {
+      programmaticMoveRef.current = false;
+    }, 800);
+    return () => window.clearTimeout(unlock);
+  }, [
+    mapReady,
+    focusCoords?.lat,
+    focusCoords?.lng,
+    focusToken,
+    updateLocationFromCoords,
+    showCoverage,
+  ]);
 
   useEffect(() => {
-    if (!mapReady || !showCoverage || !circleRef.current || !mapInstanceRef.current) return;
+    if (!mapReady || !showCoverage || !circleRef.current || !mapInstanceRef.current) {
+      return;
+    }
+    const map = mapInstanceRef.current;
     circleRef.current.setRadius(safeRadius * 1000);
     try {
-      const center = mapInstanceRef.current.getCenter();
+      const center = map.getCenter();
       circleRef.current.setLatLng([center.lat, center.lng]);
-      mapInstanceRef.current.fitBounds(circleRef.current.getBounds(), {
-        padding: [36, 36],
-        maxZoom: 14,
-        animate: true,
-      });
+      const nextZoom = zoomForCoverageRadiusKm(safeRadius);
+      if (Math.abs(map.getZoom() - nextZoom) >= 1) {
+        programmaticMoveRef.current = true;
+        map.setView([center.lat, center.lng], nextZoom, { animate: true });
+        window.setTimeout(() => {
+          programmaticMoveRef.current = false;
+        }, 500);
+      }
     } catch {
       /* ignore */
     }

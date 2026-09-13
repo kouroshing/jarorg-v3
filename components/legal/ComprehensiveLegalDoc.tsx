@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { SUPPORT_PHONE_DISPLAY_PLAIN } from "@/lib/support/contact";
 
 interface ComprehensiveLegalDocProps {
   initialFocus?: "privacy" | "terms";
@@ -341,7 +342,7 @@ export function ComprehensiveLegalDoc({ initialFocus = "privacy" }: Comprehensiv
           <footer className="mt-12 pt-8 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-500">
             <div>
               <p className="font-bold text-slate-700">پلتفرم هوشمند خدمات بصری جار (Jarorg)</p>
-              <p className="mt-0.5">پشتیبانی و امور قراردادها: ۰۹۱۰۰۱۳۸۳۸۳</p>
+              <p className="mt-0.5">پشتیبانی و امور قراردادها: {SUPPORT_PHONE_DISPLAY_PLAIN}</p>
             </div>
             <div className="text-slate-400">
               نسخه معتبر و مصوب سامانه

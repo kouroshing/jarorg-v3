@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { updateWithdrawalStatus } from "@/app/actions/financeActions";
 import { formatJalaliDate } from "@/lib/date/jalali";
+import AdminConfirmDialog from "@/components/admin/AdminConfirmDialog";
 
 export type WithdrawalRow = {
   id: string;
@@ -25,6 +26,7 @@ export default function AdminWithdrawalQueue({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trackingById, setTrackingById] = useState<Record<string, string>>({});
+  const [rejectId, setRejectId] = useState<string | null>(null);
 
   const run = (
     id: string,
@@ -36,6 +38,7 @@ export default function AdminWithdrawalQueue({
     startTransition(async () => {
       const res = await updateWithdrawalStatus(id, status, trackingCode);
       setBusyId(null);
+      setRejectId(null);
       if (!res.success) {
         setError(res.error || "خطا در بروزرسانی تسویه");
         return;
@@ -51,6 +54,8 @@ export default function AdminWithdrawalQueue({
       </div>
     );
   }
+
+  const rejectRow = requests.find((r) => r.id === rejectId);
 
   return (
     <div className="space-y-3" dir="rtl">
@@ -111,16 +116,7 @@ export default function AdminWithdrawalQueue({
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      "رد تسویه باعث بازگشت مبلغ به کیف پول متخصص می‌شود. ادامه؟"
-                    )
-                  ) {
-                    return;
-                  }
-                  run(row.id, "REJECTED");
-                }}
+                onClick={() => setRejectId(row.id)}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 text-[11px] font-bold text-rose-800 disabled:opacity-50"
               >
                 <XCircle className="h-3.5 w-3.5" />
@@ -130,6 +126,27 @@ export default function AdminWithdrawalQueue({
           </div>
         );
       })}
+
+      <AdminConfirmDialog
+        open={Boolean(rejectId)}
+        title="رد درخواست تسویه؟"
+        description={
+          <>
+            مبلغ{" "}
+            <strong>
+              {(rejectRow?.amount ?? 0).toLocaleString("fa-IR")} تومان
+            </strong>{" "}
+            به کیف پول متخصص برمی‌گردد و درخواست رد می‌شود.
+          </>
+        }
+        confirmLabel="رد و بازگشت به کیف پول"
+        tone="danger"
+        loading={Boolean(rejectId && busyId === rejectId && isPending)}
+        onCancel={() => setRejectId(null)}
+        onConfirm={() => {
+          if (rejectId) run(rejectId, "REJECTED");
+        }}
+      />
     </div>
   );
 }

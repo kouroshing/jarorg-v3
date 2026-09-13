@@ -17,6 +17,7 @@ import {
 } from "@/app/actions/adminStaffActions";
 import { CheckCircle2, Loader2, Shield, UserPlus, Ban } from "lucide-react";
 import { toPersianDigits } from "@/lib/date/jalali";
+import AdminConfirmDialog from "@/components/admin/AdminConfirmDialog";
 
 type StaffRow = {
   id: string;
@@ -49,6 +50,7 @@ export default function AdminStaffManager() {
   const [roleKey, setRoleKey] = useState<AdminRoleKey>("OPS");
   const [customPerms, setCustomPerms] = useState<AdminPermission[]>([]);
   const [note, setNote] = useState("");
+  const [deactivateId, setDeactivateId] = useState<string | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -104,10 +106,16 @@ export default function AdminStaffManager() {
   };
 
   const deactivate = (id: string) => {
-    if (!window.confirm("دسترسی این ادمین غیرفعال شود؟")) return;
+    setDeactivateId(id);
+  };
+
+  const confirmDeactivate = () => {
+    if (!deactivateId) return;
+    const id = deactivateId;
     setError(null);
     startTransition(async () => {
       const res = await deactivateAdminStaffAction(id);
+      setDeactivateId(null);
       if (!res.success) {
         setError(res.error);
         return;
@@ -283,6 +291,17 @@ export default function AdminStaffManager() {
           </ul>
         )}
       </div>
+
+      <AdminConfirmDialog
+        open={Boolean(deactivateId)}
+        title="غیرفعال‌کردن دسترسی ادمین؟"
+        description="این کاربر دیگر به پنل ادمین دسترسی نخواهد داشت. برای پاک شدن نقش از نشست، یک‌بار خروج/ورود لازم است."
+        confirmLabel="غیرفعال کن"
+        tone="danger"
+        loading={isPending && Boolean(deactivateId)}
+        onCancel={() => setDeactivateId(null)}
+        onConfirm={confirmDeactivate}
+      />
     </div>
   );
 }

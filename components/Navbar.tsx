@@ -18,10 +18,10 @@ import {
   Calendar,
   Layers,
   ArrowLeft,
-  Briefcase,
 } from "lucide-react";
 import { BrandLogo } from "@/components/BrandLogo";
 import NotificationBell from "@/components/NotificationBell";
+import MobileBottomNav from "@/components/MobileBottomNav";
 
 export type AuthStatus = "guest" | "user" | "admin";
 
@@ -135,7 +135,7 @@ export function Navbar({ initialAuth }: NavbarProps) {
               aria-current={isActive("/order") ? "page" : undefined}
               className={desktopLinkClass(isActive("/order"))}
             >
-              ثبت پروژه و سفارش
+              ثبت سفارش
             </Link>
 
             <Link
@@ -345,79 +345,7 @@ export function Navbar({ initialAuth }: NavbarProps) {
         </div>
       )}
 
-      {/* 3. Floating Glassmorphic Mobile Bottom App Bar */}
-      <nav
-        className="fixed bottom-3 inset-x-4 z-40 md:hidden flex justify-center pointer-events-none"
-        aria-label="منوی دسترسی سریع موبایل"
-        dir="rtl"
-      >
-        <ul className="pointer-events-auto grid grid-cols-4 h-16 w-full max-w-md items-center rounded-full border border-jar-border bg-jar-canvas/90 px-2 py-1 shadow-[0_8px_30px_rgba(31,30,29,0.06)] backdrop-blur-xl">
-          <li className="flex justify-center">
-            <Link
-              href="/"
-              aria-current={isActive("/") ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
-                isActive("/") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
-              }`}
-            >
-              <Home className="h-5 w-5" strokeWidth={isActive("/") ? 2.5 : 2} />
-              <span>خانه</span>
-            </Link>
-          </li>
-
-          <li className="flex justify-center">
-            <Link
-              href="/order"
-              aria-current={isActive("/order") ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
-                isActive("/order") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
-              }`}
-            >
-              <Briefcase className="h-5 w-5" strokeWidth={isActive("/order") ? 2.5 : 2} />
-              <span>پروژه‌ها</span>
-            </Link>
-          </li>
-
-          <li className="flex justify-center">
-            <Link
-              href="/tools"
-              aria-current={isActive("/tools") ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
-                isActive("/tools") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
-              }`}
-            >
-              <Wrench className="h-5 w-5" strokeWidth={isActive("/tools") ? 2.5 : 2} />
-              <span>ابزارها</span>
-            </Link>
-          </li>
-
-          <li className="flex justify-center">
-            {isLoggedIn ? (
-              <Link
-                href="/profile"
-                aria-current={isActive("/profile") ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
-                  isActive("/profile") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
-                }`}
-              >
-                <User className="h-5 w-5" strokeWidth={isActive("/profile") ? 2.5 : 2} />
-                <span>پروفایل</span>
-              </Link>
-            ) : (
-              <Link
-                href="/login"
-                aria-current={isActive("/login") ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 px-3 py-1 text-[11px] font-bold transition-all duration-300 ease-out ${
-                  isActive("/login") ? "text-jar-primary scale-105" : "text-jar-muted hover:text-jar-primary"
-                }`}
-              >
-                <LogIn className="h-5 w-5" strokeWidth={isActive("/login") ? 2.5 : 2} />
-                <span>ورود</span>
-              </Link>
-            )}
-          </li>
-        </ul>
-      </nav>
+      <MobileBottomNav isLoggedIn={isLoggedIn} />
     </>
   );
 }

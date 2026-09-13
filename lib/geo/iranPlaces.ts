@@ -1,4 +1,5 @@
 import iranData from "@/lib/geo/iranProvincesCities.json";
+import { lookupCityCenter } from "@/lib/geo/cityCenters";
 
 export type IranCity = {
   name: string;
@@ -106,9 +107,19 @@ export function getCityCoords(
   provinceName: string,
   cityName: string
 ): { lat: number; lng: number } | null {
+  // Curated centers first — JSON lat/lng is often wrong or missing.
+  const curated = lookupCityCenter(cityName);
+  if (curated) return curated;
+
   const city = getCitiesForProvince(provinceName).find((c) => c.name === cityName);
   if (city?.lat != null && city?.lng != null) {
-    return { lat: city.lat, lng: city.lng };
+    // Reject clearly absurd points for known city names that slipped past curation
+    // (e.g. legacy تهران at ~31.9 near اصفهان).
+    const lat = city.lat;
+    const lng = city.lng;
+    if (lat >= 24.5 && lat <= 40 && lng >= 44 && lng <= 63.5) {
+      return { lat, lng };
+    }
   }
   return null;
 }

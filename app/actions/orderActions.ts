@@ -2,6 +2,7 @@
 
 import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
+import { resolveAdminAccess } from "@/lib/auth/adminAccess";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
 import {
@@ -10,9 +11,12 @@ import {
   storedValuesFor,
   type OrderStatus,
 } from "@/lib/orders/status";
+import { evaluateOrderPublishGate, serializePublishFlags } from "@/lib/orders/publishGate";
 import { resolveScheduledAt } from "@/lib/date/jalali";
 import { revalidatePath } from "next/cache";
 import { snapHourlyRate, getGoldenIndex, resolveHourlyRate } from "@/lib/pricing/budgetStops";
+import { createNotification } from "@/lib/notifications";
+import { MIN_PROJECT_DESCRIPTION_LENGTH } from "@/lib/orders/descriptionLimits";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -105,10 +109,10 @@ export async function createOrderAction(input: CreateOrderInput) {
     }
 
     const projectDescription = (input.projectDescription || "").trim();
-    if (projectDescription.length < 120) {
+    if (projectDescription.length < MIN_PROJECT_DESCRIPTION_LENGTH) {
       return {
         success: false,
-        error: "توضیحات پروژه باید حداقل ۱۲۰ حرف باشد.",
+        error: `توضیحات پروژه باید حداقل ${MIN_PROJECT_DESCRIPTION_LENGTH} حرف باشد.`,
       };
     }
 
@@ -125,6 +129,45 @@ export async function createOrderAction(input: CreateOrderInput) {
 
     const categoryDef = CATEGORIES_BY_SLUG[input.categorySlug];
     const categoryTitle = categoryDef ? categoryDef.title : input.categorySlug;
+
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [priorOrderCount, recentOrderCount24h] = await Promise.all([
+      prisma.order.count({
+        where: {
+          OR: [
+            { userId: session.userId },
+            ...(session.phone ? [{ contactPhone: session.phone }] : []),
+          ],
+        },
+      }),
+      prisma.order.count({
+        where: {
+          createdAt: { gte: dayAgo },
+          OR: [
+            { userId: session.userId },
+            ...(session.phone ? [{ contactPhone: session.phone }] : []),
+          ],
+        },
+      }),
+    ]);
+
+    const gate = evaluateOrderPublishGate({
+      categorySlug: input.categorySlug,
+      projectDescription,
+      locationType: input.locationType,
+      locationAddress: input.locationAddress,
+      districtOrCity: input.districtOrCity,
+      locationLat: input.locationLat,
+      locationLng: input.locationLng,
+      referenceLink: input.referenceLink,
+      moodboardUrls: input.moodboardUrls,
+      isFlexibleSchedule,
+      bookingDate: input.bookingDate,
+      timeSlot: input.timeSlot,
+      hourlyRate,
+      priorOrderCount,
+      recentOrderCount24h,
+    });
 
     const order = await prisma.order.create({
       data: {
@@ -152,14 +195,35 @@ export async function createOrderAction(input: CreateOrderInput) {
         hourlyRate,
         totalEstimatedPrice,
         depositAmount,
-        // Always land in admin review before the specialist board.
-        status: "PENDING_REVIEW" satisfies OrderStatus,
+        status: gate.status satisfies OrderStatus,
+        publishFlags: serializePublishFlags(gate.flags),
         contactName,
         // Ownership phone must come from the verified session — never trust client input.
         contactPhone: session.phone || null,
         userId: session.userId,
       },
     });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.phone || session.userId,
+        action: gate.autoPublish ? "ORDER_AUTO_PUBLISHED" : "ORDER_HELD_FOR_REVIEW",
+        targetModel: "Order",
+        targetId: order.id,
+        note: gate.summary.slice(0, 500),
+      },
+    });
+
+    if (gate.autoPublish) {
+      void createNotification({
+        userId: session.userId,
+        title: "پروژه شما منتشر شد",
+        message: `پروژه «${categoryTitle}» برای متخصصان واجد شرایط نمایش داده شد.`,
+        type: "SUCCESS",
+        link: `/order/${order.id}`,
+      });
+      revalidatePath("/specialist/projects");
+    }
 
     // Non-blocking fire-and-forget SMS notification to admin 09100138383
     sendOrderCreatedSmsNotification({
@@ -182,6 +246,8 @@ export async function createOrderAction(input: CreateOrderInput) {
       orderId: order.id,
       totalEstimatedPrice,
       depositAmount: 0,
+      status: gate.status,
+      autoPublished: gate.autoPublish,
     };
   } catch (error: any) {
     console.error("Failed to create order:", error);
@@ -227,9 +293,11 @@ export async function getOrderById(orderId: string) {
     const isOwner =
       (order.userId && order.userId === session.userId) ||
       (order.contactPhone && order.contactPhone === session.phone);
-    const isAdmin = session.role === "admin";
+    const isSelectedSpecialist = order.selectedSpecialistId === session.userId;
+    const access = await resolveAdminAccess(session);
+    const isAdmin = Boolean(access);
 
-    if (!isOwner && !isAdmin) {
+    if (!isOwner && !isAdmin && !isSelectedSpecialist) {
       return { success: false, error: "سفارش موردنظر یافت نشد." };
     }
 
@@ -280,6 +348,7 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
         contactPhone: true,
         status: true,
         categorySlug: true,
+        categoryTitle: true,
         hourlyRate: true,
       },
     });
@@ -311,10 +380,10 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
     }
 
     const projectDescription = input.projectDescription.trim();
-    if (projectDescription.length < 120) {
+    if (projectDescription.length < MIN_PROJECT_DESCRIPTION_LENGTH) {
       return {
         success: false,
-        error: "توضیحات پروژه باید حداقل ۱۲۰ حرف باشد.",
+        error: `توضیحات پروژه باید حداقل ${MIN_PROJECT_DESCRIPTION_LENGTH} حرف باشد.`,
       };
     }
 
@@ -324,6 +393,41 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
 
     const isFlexibleSchedule = input.isFlexibleSchedule ?? true;
     const totalEstimatedPrice = order.hourlyRate * input.durationHours;
+
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const ownerFilter = {
+      OR: [
+        ...(order.userId ? [{ userId: order.userId }] : []),
+        ...(order.contactPhone ? [{ contactPhone: order.contactPhone }] : []),
+        { userId: session.userId },
+        ...(session.phone ? [{ contactPhone: session.phone }] : []),
+      ],
+    };
+    const [priorOrderCount, recentOrderCount24h] = await Promise.all([
+      prisma.order.count({ where: ownerFilter }),
+      prisma.order.count({
+        where: { ...ownerFilter, createdAt: { gte: dayAgo }, NOT: { id: order.id } },
+      }),
+    ]);
+
+    const gate = evaluateOrderPublishGate({
+      categorySlug: order.categorySlug,
+      projectDescription,
+      locationType: input.locationType,
+      locationAddress: input.locationAddress,
+      districtOrCity: input.districtOrCity,
+      locationLat: input.locationLat,
+      locationLng: input.locationLng,
+      referenceLink: input.referenceLink,
+      moodboardUrls: input.moodboardUrls,
+      isFlexibleSchedule,
+      bookingDate: input.bookingDate,
+      timeSlot: input.timeSlot,
+      hourlyRate: order.hourlyRate,
+      // After first order exists, prior count includes this one — treat as returning.
+      priorOrderCount: Math.max(0, priorOrderCount - 1),
+      recentOrderCount24h,
+    });
 
     await prisma.order.update({
       where: { id: order.id },
@@ -348,16 +452,40 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
           ? JSON.stringify(input.moodboardUrls)
           : null,
         totalEstimatedPrice,
-        status: "PENDING_REVIEW" satisfies OrderStatus,
+        status: gate.status satisfies OrderStatus,
+        publishFlags: serializePublishFlags(gate.flags),
         adminNote: null,
       },
     });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.phone || session.userId,
+        action: gate.autoPublish
+          ? "ORDER_AUTO_PUBLISHED_AFTER_EDIT"
+          : "ORDER_HELD_FOR_REVIEW_AFTER_EDIT",
+        targetModel: "Order",
+        targetId: order.id,
+        note: gate.summary.slice(0, 500),
+      },
+    });
+
+    if (gate.autoPublish && order.userId) {
+      void createNotification({
+        userId: order.userId,
+        title: "پروژه شما منتشر شد",
+        message: `پروژه «${order.categoryTitle || "عکاسی"}» پس از ویرایش برای متخصصان منتشر شد.`,
+        type: "SUCCESS",
+        link: `/order/${order.id}`,
+      });
+      revalidatePath("/specialist/projects");
+    }
 
     revalidatePath(`/order/${order.id}`);
     revalidatePath("/admin");
     revalidatePath("/admin/Order");
 
-    return { success: true };
+    return { success: true, status: gate.status, autoPublished: gate.autoPublish };
   } catch (error) {
     console.error("Failed to update order:", error);
     return { success: false, error: "خطا در ذخیره ویرایش سفارش." };

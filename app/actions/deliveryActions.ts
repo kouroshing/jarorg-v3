@@ -8,6 +8,7 @@ import { createNotification } from "@/lib/notifications";
 import { parseOrderStatus } from "@/lib/orders/status";
 import { AUTO_RELEASE_DAYS, settleOrder } from "@/lib/orders/settlement";
 import { settlementAmount } from "@/lib/orders/settings";
+import { resolveAdminAccess, hasAdminPermission } from "@/lib/auth/adminAccess";
 
 /**
  * Closing out a paid project.
@@ -120,7 +121,8 @@ export async function confirmDeliveryAction(orderId: string): Promise<DeliveryRe
   const isOwner =
     (order.userId && order.userId === session.userId) ||
     (order.contactPhone && order.contactPhone === session.phone);
-  const isAdmin = session.role === "admin";
+  const adminAccess = await resolveAdminAccess(session);
+  const isAdmin = Boolean(adminAccess && hasAdminPermission(adminAccess, "orders_manage"));
 
   if (!isOwner && !isAdmin) {
     return { success: false, error: "شما مجاز به تأیید این سفارش نیستید." };
@@ -148,7 +150,8 @@ export async function confirmDeliveryAction(orderId: string): Promise<DeliveryRe
 /** Admin releases escrow without waiting on the client. */
 export async function adminReleaseEscrowAction(orderId: string): Promise<DeliveryResult> {
   const session = await getSession();
-  if (session?.role !== "admin") {
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
     return { success: false, error: "دسترسی ادمین الزامی است." };
   }
 
@@ -333,7 +336,8 @@ export async function resolveDisputeAction(
   note?: string
 ): Promise<DeliveryResult> {
   const session = await getSession();
-  if (session?.role !== "admin") {
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
     return { success: false, error: "دسترسی ادمین الزامی است." };
   }
 

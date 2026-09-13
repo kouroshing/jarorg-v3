@@ -87,8 +87,8 @@ export default async function SpecialistOnboardingSubscriptionPage() {
             با کدام سطح وارد جار می‌شوید؟
           </h1>
           <p className="max-w-2xl text-xs sm:text-sm text-jar-muted leading-relaxed font-medium">
-            بیسیک همین الان رایگان و دائمی است. پرو و اولترا را ببینید؛ خریدشان به‌زودی باز
-            می‌شود. بعد از انتخاب، محل فعالیت را تکمیل می‌کنید.
+            بیسیک رایگان و دائمی است. پلن‌های پولی بعداً فعال می‌شوند. بعد از ادامه، محل
+            فعالیت را تکمیل می‌کنید.
           </p>
         </div>
       </section>

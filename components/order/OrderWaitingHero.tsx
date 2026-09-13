@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Radio,
 } from "lucide-react";
+import { SUPPORT_PHONE_TEL } from "@/lib/support/contact";
 
 interface OrderWaitingHeroProps {
   order: {
@@ -305,7 +306,7 @@ export default function OrderWaitingHero({ order }: OrderWaitingHeroProps) {
             </Link>
 
             <a
-              href="tel:09100138383"
+              href={SUPPORT_PHONE_TEL}
               className="inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-full border border-[#E5E0D8] bg-white hover:bg-[#F3F1EC] text-xs font-bold text-[#141413] transition-colors shadow-xs"
               title="پشتیبانی تلفنی"
             >

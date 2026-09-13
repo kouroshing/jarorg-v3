@@ -76,7 +76,7 @@ export default function OrderAdminPending({
             <p className="text-xs sm:text-sm text-neutral-500 leading-relaxed font-medium">
               {needsEdit
                 ? "کارشناسان جار از شما خواسته‌اند قبل از انتشار برای متخصصان، اطلاعات را اصلاح کنید."
-                : "پس از تایید تیم جار، پروژه برای متخصصان واجد شرایط منتشر می‌شود."}
+                : "سفارش‌های کامل معمولاً سریع منتشر می‌شوند؛ این مورد برای کنترل کیفیت توسط تیم جار در صف بررسی است."}
             </p>
           </div>
         </div>

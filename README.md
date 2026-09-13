@@ -71,8 +71,20 @@ npm run dev
 
 ## ساختار مهم
 
-- `app/create-project` — فرم ثبت لید
-- `app/admin` — پنل لید و متخصصان
+- `app/order` — ثبت و پیگیری سفارش مارکت‌پلیس
+- `app/specialist` — آنبوردینگ و کارتابل متخصص
+- `app/admin` — داشبورد عملیاتی + RBAC
 - `lib/auth` — OTP و سشن
 - `liara.json` — تنظیمات Liara + mount دیسک
-- `prisma/migrations` — تاریخچه migrationهای SQLite
+
+## کرون‌های مارکت‌پلیس
+
+روی Liara به‌صورت Job روزانه/ساعتی تنظیم کنید (اول dry-run، بعد `--apply`):
+
+```bash
+npm run cron:auto-release:apply    # تسویه خودکار بعد از تحویل بدون تایید مشتری
+npm run cron:order-timeouts:apply  # تایم‌اوت مراحل سفارش
+npm run cron:reveal-contacts:apply # افشای تماس نزدیک زمان پروژه
+```
+
+بدون `--apply` فقط گزارش می‌دهند.

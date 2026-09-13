@@ -27,6 +27,12 @@ export type TriageOrderRow = {
   contactName: string | null;
   contactPhone: string | null;
   applicantCount?: number;
+  disputeReason?: string | null;
+  publishFlags?: Array<{
+    code: string;
+    severity: "hard" | "soft";
+    label: string;
+  }>;
 };
 
 export default function AdminOrderTriageQueue({
@@ -82,6 +88,7 @@ export default function AdminOrderTriageQueue({
         const busy = busyId === ord.id || (isPending && busyId === ord.id);
         const canApprove =
           ord.status === "PENDING_REVIEW" || ord.status === "NEEDS_CLIENT_EDIT";
+        const flags = ord.publishFlags || [];
 
         return (
           <div
@@ -120,6 +127,29 @@ export default function AdminOrderTriageQueue({
                 <ExternalLink className="h-3 w-3" />
               </Link>
             </div>
+
+            {flags.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold text-slate-400">
+                  چرا در صف بررسی است
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {flags.map((flag) => (
+                    <span
+                      key={`${ord.id}-${flag.code}`}
+                      className={`inline-flex items-center rounded-lg border px-2 py-1 text-[10px] font-bold ${
+                        flag.severity === "hard"
+                          ? "border-rose-200 bg-rose-50 text-rose-800"
+                          : "border-amber-200 bg-amber-50 text-amber-900"
+                      }`}
+                      title={flag.severity === "hard" ? "پرچم سخت" : "پرچم نرم"}
+                    >
+                      {flag.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {editOpenId === ord.id ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
