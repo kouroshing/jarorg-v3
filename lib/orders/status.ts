@@ -19,6 +19,7 @@ export const ORDER_STATUSES = [
   "DEPOSIT_PAID",
   "MATCHING",
   "HAS_APPLICANTS",
+  "NO_MATCH",
   "AWAITING_PAYMENT",
   "AWAITING_SPECIALIST_CONFIRMATION",
   "CONFIRMED",
@@ -98,6 +99,7 @@ export const CLIENT_CANCELLABLE_STATUSES = [
   "DEPOSIT_PAID",
   "MATCHING",
   "HAS_APPLICANTS",
+  "NO_MATCH",
   "AWAITING_PAYMENT",
   "AWAITING_SPECIALIST_CONFIRMATION",
 ] as const satisfies readonly OrderStatus[];
@@ -115,6 +117,7 @@ export const ACTIVE_CLIENT_ORDER_STATUSES = [
   "DEPOSIT_PAID",
   "MATCHING",
   "HAS_APPLICANTS",
+  "NO_MATCH",
   "AWAITING_PAYMENT",
   "AWAITING_SPECIALIST_CONFIRMATION",
   "CONFIRMED",
@@ -140,8 +143,9 @@ export const MATCHED_STATUSES = [
 ] as const satisfies readonly OrderStatus[];
 
 /**
- * Payment has cleared into escrow. Contact details are released and the two
- * sides may talk; before this the specialist has never seen a phone number.
+ * Payment has cleared into escrow and the order is CONFIRMED.
+ * Contact phone/address still wait for the timed reveal; coordination starts
+ * from the order page.
  */
 export const PAID_STATUSES = [
   "CONFIRMED",
@@ -175,7 +179,12 @@ export function isAdminTriage(status: string): boolean {
 }
 
 export function needsClientEdit(status: string): boolean {
-  return parseOrderStatus(status) === "NEEDS_CLIENT_EDIT";
+  const s = parseOrderStatus(status);
+  return s === "NEEDS_CLIENT_EDIT" || s === "NO_MATCH";
+}
+
+export function isNoMatch(status: string): boolean {
+  return parseOrderStatus(status) === "NO_MATCH";
 }
 
 export function isPendingAdminReview(status: string): boolean {
@@ -268,6 +277,12 @@ export const ORDER_STATUS_PRESENTATION: Record<OrderStatus, OrderStatusPresentat
     badgeBg: "bg-indigo-100 text-indigo-900 border-indigo-300",
     textColor: "text-indigo-800",
   },
+  NO_MATCH: {
+    label: "متخصصی پیدا نشد",
+    adminLabel: "تعلیق — بدون متخصص",
+    badgeBg: "bg-slate-100 text-slate-800 border-slate-300",
+    textColor: "text-slate-700",
+  },
   AWAITING_PAYMENT: {
     label: "در انتظار پرداخت شما",
     adminLabel: "متخصص انتخاب شده، در انتظار پرداخت",
@@ -275,8 +290,8 @@ export const ORDER_STATUS_PRESENTATION: Record<OrderStatus, OrderStatusPresentat
     textColor: "text-amber-800",
   },
   AWAITING_SPECIALIST_CONFIRMATION: {
-    label: "در انتظار تأیید متخصص منتخب",
-    adminLabel: "در انتظار تایید متخصص",
+    label: "در انتظار تأیید متخصص (سفارش قدیمی)",
+    adminLabel: "لگسی: در انتظار تایید متخصص",
     badgeBg: "bg-purple-100 text-purple-900 border-purple-300",
     textColor: "text-purple-800",
   },

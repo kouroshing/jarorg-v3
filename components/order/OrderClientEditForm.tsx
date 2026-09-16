@@ -14,12 +14,25 @@ import {
 } from "lucide-react";
 import { updateOrderByClientAction } from "@/app/actions/orderActions";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
+import OrderBudgetAdjuster from "@/components/order/OrderBudgetAdjuster";
+import { parseOrderStatus } from "@/lib/orders/status";
+import {
+  getBudgetStops,
+  getGoldenIndex,
+  snapHourlyRate,
+} from "@/lib/pricing/budgetStops";
 import {
   MIN_PROJECT_DESCRIPTION_LENGTH,
   PROJECT_DESCRIPTION_SOFT_GOOD,
   isValidPersonName,
   sanitizePersonName,
 } from "@/components/order/steps/StepFinalize";
+
+function budgetIndexForRate(rate: number): number {
+  const stops = getBudgetStops();
+  const snapped = snapHourlyRate(rate);
+  return stops.find((s) => s.rate === snapped)?.index ?? getGoldenIndex(stops);
+}
 
 export interface OrderEditInitial {
   id: string;
@@ -38,6 +51,7 @@ export interface OrderEditInitial {
   referenceLink: string | null;
   moodboardUrls: string[];
   adminNote: string | null;
+  hourlyRate: number;
 }
 
 interface OrderClientEditFormProps {
@@ -63,6 +77,9 @@ export default function OrderClientEditForm({
     order.projectDescription || ""
   );
   const [durationHours, setDurationHours] = useState(order.durationHours);
+  const [budgetIndex, setBudgetIndex] = useState(() =>
+    budgetIndexForRate(order.hourlyRate || 0)
+  );
   const [locationType, setLocationType] = useState(order.locationType);
   const [districtOrCity, setDistrictOrCity] = useState(order.districtOrCity || "");
   const [locationAddress, setLocationAddress] = useState(order.locationAddress || "");
@@ -122,6 +139,9 @@ export default function OrderClientEditForm({
     }
 
     startTransition(async () => {
+      const hourlyRate = snapHourlyRate(
+        getBudgetStops()[budgetIndex]?.rate ?? order.hourlyRate
+      );
       const res = await updateOrderByClientAction({
         orderId: order.id,
         contactName: contactName.trim(),
@@ -130,6 +150,7 @@ export default function OrderClientEditForm({
         bookingDate: order.bookingDate,
         timeSlot: order.timeSlot,
         durationHours,
+        hourlyRate,
         locationType: locationType as
           | "CLIENT_LOCATION"
           | "SPECIALIST_ADVICE"
@@ -152,6 +173,8 @@ export default function OrderClientEditForm({
     });
   };
 
+  const isNoMatch = parseOrderStatus(order.status) === "NO_MATCH";
+
   return (
     <form
       onSubmit={handleSubmit}
@@ -159,15 +182,25 @@ export default function OrderClientEditForm({
       dir="rtl"
     >
       <div className="space-y-1">
-        <h2 className="text-lg font-black text-neutral-900">ویرایش درخواست پروژه</h2>
-        <p className="text-xs text-neutral-500">
-          پس از ذخیره، دوباره برای تایید تیم جار ارسال می‌شود. برای لغو کل رزرو از نوار پایین استفاده کنید.
+        <h2 className="text-lg font-black text-neutral-900">
+          {isNoMatch ? "متأسفانه متخصصی پیدا نشد" : "ویرایش درخواست پروژه"}
+        </h2>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          {isNoMatch
+            ? "با ویرایش بودجه، زمان یا جزئیات و انتشار دوباره، شانس دریافت پیشنهاد بیشتر می‌شود. پس از ذخیره، دوباره برای بررسی جار می‌رود."
+            : "پس از ذخیره، دوباره برای تایید تیم جار ارسال می‌شود. برای لغو کل رزرو از نوار پایین استفاده کنید."}
         </p>
       </div>
 
       {order.adminNote && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 leading-relaxed whitespace-pre-wrap">
-          <span className="font-black">پیام ادمین: </span>
+        <div
+          className={`rounded-xl border p-3 text-xs leading-relaxed whitespace-pre-wrap ${
+            isNoMatch
+              ? "border-slate-200 bg-slate-50 text-slate-800"
+              : "border-amber-200 bg-amber-50 text-amber-950"
+          }`}
+        >
+          <span className="font-black">{isNoMatch ? "پیام جار: " : "پیام ادمین: "}</span>
           {order.adminNote}
         </div>
       )}
@@ -213,6 +246,17 @@ export default function OrderClientEditForm({
           </select>
         </div>
       </div>
+
+      <OrderBudgetAdjuster
+        selectedIndex={budgetIndex}
+        onSelectIndex={setBudgetIndex}
+        durationHours={Math.max(1, durationHours)}
+      />
+      {isNoMatch && (
+        <p className="text-[11px] text-slate-600 leading-relaxed -mt-2">
+          بودجه جذاب‌تر معمولاً پیشنهادهای بیشتری می‌آورد — کمی بالاتر از قبل امتحان کنید.
+        </p>
+      )}
 
       {locationType === "CLIENT_LOCATION" && (
         <>
@@ -331,7 +375,9 @@ export default function OrderClientEditForm({
           className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          ذخیره شد — درخواست دوباره برای تایید تیم جار ارسال شد.
+          {isNoMatch
+            ? "ذخیره شد — درخواست دوباره برای بررسی و انتشار ارسال شد. با بودجه بهتر شانس بیشتری دارید."
+            : "ذخیره شد — درخواست دوباره برای تایید تیم جار ارسال شد."}
         </div>
       )}
 

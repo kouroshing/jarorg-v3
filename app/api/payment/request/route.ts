@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
 
     const zarinpalBody = {
       merchant_id: merchantId,
-      amount: finalAmount,
+      amount: tomanToRial(finalAmount),
       callback_url: callbackUrl,
       description: `خرید اشتراک پلتفرم جار: ${plan.nameFa} (${isAnnual ? "یک ساله" : "سه ماهه"})`,
       metadata: {

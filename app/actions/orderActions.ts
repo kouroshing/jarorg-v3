@@ -4,6 +4,7 @@ import { prisma, ensurePrismaSchemaReady } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { resolveAdminAccess } from "@/lib/auth/adminAccess";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
+import { isCategoryOrderable } from "@/lib/orders/availableCategories";
 import { sendOrderCreatedSmsNotification } from "@/lib/sms/order-created";
 import {
   ACTIVE_CLIENT_ORDER_STATUSES,
@@ -17,6 +18,7 @@ import { revalidatePath } from "next/cache";
 import { snapHourlyRate, getGoldenIndex, resolveHourlyRate } from "@/lib/pricing/budgetStops";
 import { createNotification } from "@/lib/notifications";
 import { MIN_PROJECT_DESCRIPTION_LENGTH } from "@/lib/orders/descriptionLimits";
+import { isNearJarLocationPin } from "@/lib/locations/photoLocation";
 
 export interface CreateOrderInput {
   categorySlug: string;
@@ -29,6 +31,8 @@ export interface CreateOrderInput {
   districtOrCity?: string;
   locationLat?: number | null;
   locationLng?: number | null;
+  /** When the client picked a جار لوکیشن catalog pin. */
+  photoLocationId?: string | null;
   referenceLink?: string;
   moodboardUrls?: string[];
   projectDescription?: string;
@@ -36,6 +40,44 @@ export interface CreateOrderInput {
   hourlyRate: number;
   contactName?: string;
   contactPhone?: string;
+}
+
+async function resolveOrderPhotoLocationId(input: {
+  photoLocationId?: string | null;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  locationType: string;
+}): Promise<string | null> {
+  if (input.locationType === "SPECIALIST_ADVICE") return null;
+
+  const explicit = input.photoLocationId?.trim() || null;
+  if (explicit) {
+    const row = await prisma.photoLocation.findFirst({
+      where: { id: explicit, status: "APPROVED" },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  const lat = input.locationLat;
+  const lng = input.locationLng;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    return null;
+  }
+
+  // Soft-match catalog if the pin lands on an approved جار لوکیشن.
+  const nearby = await prisma.photoLocation.findMany({
+    where: { status: "APPROVED" },
+    select: { id: true, lat: true, lng: true },
+    take: 500,
+  });
+  const hit = nearby.find((r) => isNearJarLocationPin({ lat, lng }, r));
+  return hit?.id ?? null;
 }
 
 /** Open / in-flight project for this client, if any. */
@@ -84,6 +126,14 @@ export async function createOrderAction(input: CreateOrderInput) {
       return { success: false, error: "لطفاً دسته‌بندی خدمت را انتخاب کنید." };
     }
 
+    if (!(await isCategoryOrderable(input.categorySlug))) {
+      return {
+        success: false,
+        error:
+          "این شاخه فعلاً متخصص فعال ندارد. لطفاً یکی از خدمات موجود در فرم را انتخاب کنید.",
+      };
+    }
+
     const isFlexibleSchedule = input.isFlexibleSchedule ?? true;
 
     // Only validate specific date/timeslot if user chose custom scheduling
@@ -98,6 +148,22 @@ export async function createOrderAction(input: CreateOrderInput) {
 
     if (input.durationHours < 1) {
       return { success: false, error: "مدت زمان پروژه باید حداقل ۱ ساعت باشد." };
+    }
+
+    if (input.locationType === "CLIENT_LOCATION") {
+      const lat = input.locationLat;
+      const lng = input.locationLng;
+      if (
+        typeof lat !== "number" ||
+        typeof lng !== "number" ||
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+      ) {
+        return {
+          success: false,
+          error: "برای لوکیشن اختصاصی خودتان باید نقطه را روی نقشه پین کنید.",
+        };
+      }
     }
 
     const contactName = (input.contactName || "").trim();
@@ -169,6 +235,13 @@ export async function createOrderAction(input: CreateOrderInput) {
       recentOrderCount24h,
     });
 
+    const photoLocationId = await resolveOrderPhotoLocationId({
+      photoLocationId: input.photoLocationId,
+      locationLat: input.locationLat,
+      locationLng: input.locationLng,
+      locationType: input.locationType,
+    });
+
     const order = await prisma.order.create({
       data: {
         categorySlug: input.categorySlug,
@@ -188,6 +261,7 @@ export async function createOrderAction(input: CreateOrderInput) {
         districtOrCity: input.districtOrCity || null,
         locationLat: input.locationLat ?? null,
         locationLng: input.locationLng ?? null,
+        photoLocationId,
         referenceLink: input.referenceLink || null,
         moodboardUrls: input.moodboardUrls ? JSON.stringify(input.moodboardUrls) : null,
         projectDescription,
@@ -197,6 +271,8 @@ export async function createOrderAction(input: CreateOrderInput) {
         depositAmount,
         status: gate.status satisfies OrderStatus,
         publishFlags: serializePublishFlags(gate.flags),
+        publishedAt: gate.status === "MATCHING" ? new Date() : null,
+        noMatchAt: null,
         contactName,
         // Ownership phone must come from the verified session — never trust client input.
         contactPhone: session.phone || null,
@@ -322,11 +398,14 @@ export interface UpdateOrderByClientInput {
   bookingDate?: string | null;
   timeSlot?: string | null;
   durationHours: number;
+  /** Optional budget refresh when republishing after NO_MATCH. */
+  hourlyRate?: number;
   locationType: "CLIENT_LOCATION" | "SPECIALIST_ADVICE" | "JAR_STUDIO";
   locationAddress?: string;
   districtOrCity?: string;
   locationLat?: number | null;
   locationLng?: number | null;
+  photoLocationId?: string | null;
   referenceLink?: string;
   moodboardUrls?: string[];
 }
@@ -364,7 +443,10 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
       return { success: false, error: "دسترسی ندارید." };
     }
 
-    if (parseOrderStatus(order.status) !== "NEEDS_CLIENT_EDIT") {
+    if (
+      parseOrderStatus(order.status) !== "NEEDS_CLIENT_EDIT" &&
+      parseOrderStatus(order.status) !== "NO_MATCH"
+    ) {
       return {
         success: false,
         error: "این سفارش در حال حاضر قابل ویرایش نیست.",
@@ -391,8 +473,29 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
       return { success: false, error: "مدت زمان پروژه باید حداقل ۱ ساعت باشد." };
     }
 
+    if (input.locationType === "CLIENT_LOCATION") {
+      const lat = input.locationLat;
+      const lng = input.locationLng;
+      if (
+        typeof lat !== "number" ||
+        typeof lng !== "number" ||
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+      ) {
+        return {
+          success: false,
+          error: "برای لوکیشن اختصاصی خودتان باید نقطه را روی نقشه پین کنید.",
+        };
+      }
+    }
+
+    const hourlyRate =
+      typeof input.hourlyRate === "number" && input.hourlyRate > 0
+        ? snapHourlyRate(input.hourlyRate)
+        : order.hourlyRate;
+
     const isFlexibleSchedule = input.isFlexibleSchedule ?? true;
-    const totalEstimatedPrice = order.hourlyRate * input.durationHours;
+    const totalEstimatedPrice = hourlyRate * input.durationHours;
 
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const ownerFilter = {
@@ -423,7 +526,7 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
       isFlexibleSchedule,
       bookingDate: input.bookingDate,
       timeSlot: input.timeSlot,
-      hourlyRate: order.hourlyRate,
+      hourlyRate: hourlyRate,
       // After first order exists, prior count includes this one — treat as returning.
       priorOrderCount: Math.max(0, priorOrderCount - 1),
       recentOrderCount24h,
@@ -447,14 +550,24 @@ export async function updateOrderByClientAction(input: UpdateOrderByClientInput)
         districtOrCity: input.districtOrCity || null,
         locationLat: input.locationLat ?? null,
         locationLng: input.locationLng ?? null,
+        photoLocationId: await resolveOrderPhotoLocationId({
+          photoLocationId: input.photoLocationId,
+          locationLat: input.locationLat,
+          locationLng: input.locationLng,
+          locationType: input.locationType,
+        }),
         referenceLink: input.referenceLink || null,
         moodboardUrls: input.moodboardUrls
           ? JSON.stringify(input.moodboardUrls)
           : null,
+        hourlyRate,
         totalEstimatedPrice,
+        depositAmount: Math.round(totalEstimatedPrice / 2),
         status: gate.status satisfies OrderStatus,
         publishFlags: serializePublishFlags(gate.flags),
         adminNote: null,
+        publishedAt: gate.status === "MATCHING" ? new Date() : null,
+        noMatchAt: null,
       },
     });
 

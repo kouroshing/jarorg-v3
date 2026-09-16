@@ -12,6 +12,8 @@ import {
   Layers,
   Sparkles,
   CreditCard,
+  Home,
+  GraduationCap,
 } from "lucide-react";
 import { getSession } from "@/lib/auth/session";
 import { getSpecialistOnboardingStateAction } from "@/app/actions/specialistOnboardingActions";
@@ -62,8 +64,8 @@ export default async function SpecialistReviewWaitingPage() {
     { icon: Layers, label: "دسته‌بندی‌ها", done: Boolean(state.hasCategories) },
     {
       icon: Images,
-      label: "نمونه‌کارها",
-      done: (state.maxPortfolioInCategory ?? 0) >= 10,
+      label: "نمونه‌کارها (۱۰ در هر دسته)",
+      done: Boolean(state.hasEligiblePortfolio),
     },
     { icon: CreditCard, label: "اشتراک", done: Boolean(state.hasPlan) },
     {
@@ -196,6 +198,23 @@ export default async function SpecialistReviewWaitingPage() {
               {needsRevision && <ResubmitSpecialistButton />}
             </div>
           )}
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 pt-2">
+            <Link
+              href="/"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-jar-border bg-jar-canvas px-6 text-xs font-bold text-jar-primary transition-colors hover:bg-jar-soft"
+            >
+              <Home className="h-4 w-4 shrink-0" />
+              بازگشت به خانه
+            </Link>
+            <Link
+              href="/jaramooz"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-jar-primary px-6 text-xs font-bold text-white transition-colors hover:bg-jar-primaryHover"
+            >
+              <GraduationCap className="h-4 w-4 shrink-0" />
+              ورود به جارآموز و آموزش
+            </Link>
+          </div>
         </div>
       </section>
     </SpecialistOnboardingShell>

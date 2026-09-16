@@ -12,6 +12,8 @@
  * is ready for review".
  */
 
+import { isKycDeadlineSuspension } from "@/lib/kyc/gates";
+
 export const MIN_PORTFOLIO_ITEMS_PER_CATEGORY = 10;
 export const MIN_SELECTED_CATEGORIES = 3;
 
@@ -123,6 +125,10 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     .filter((slug) => (uploaded[slug] || 0) < MIN_PORTFOLIO_ITEMS_PER_CATEGORY)
     .map((slug) => ({ slug, count: uploaded[slug] || 0 }));
 
+  /** Every declared category must reach the per-category upload bar. */
+  const portfolioUploadComplete =
+    hasCategories && incompleteCategories.length === 0;
+
   const hasDisplayName = Boolean(input.displayName && input.displayName.trim().length >= 2);
   const hasAvatar = Boolean(input.avatarUrl && input.avatarUrl.trim().length > 0);
   const hasCity = Boolean(input.city && input.city.trim().length > 0);
@@ -138,7 +144,7 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
     hasDisplayName &&
     hasAvatar &&
     hasCategories &&
-    submittableCategories.length > 0 &&
+    portfolioUploadComplete &&
     hasPlan &&
     hasCity &&
     hasBaseLocation &&
@@ -153,7 +159,7 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
   } else if (!hasCategories) {
     nextStep = "/specialist/onboarding/categories";
     currentStepId = "categories";
-  } else if (submittableCategories.length === 0) {
+  } else if (!portfolioUploadComplete) {
     nextStep = "/specialist/onboarding/portfolio";
     currentStepId = "portfolio";
   } else if (!hasPlan) {
@@ -201,12 +207,13 @@ export function specialistLandingPath(
     if (!eligibility.hasAvatar) {
       return "/specialist/onboarding/profile";
     }
-    // After qualitative approval, incomplete KYC nudges to identity — projects
-    // stay reachable from the shell, but this is the recommended next step.
-    if (kycStatus && kycStatus !== "VERIFIED" && kycStatus !== "PENDING") {
-      return "/specialist/onboarding/identity";
-    }
+    // Browse projects even without KYC; apply is hard-gated until VERIFIED.
+    // Soft nudge to identity lives on the projects feed banner.
     return "/specialist/projects";
+  }
+  // KYC-deadline suspension: send them to finish identity, not the waiting room.
+  if (status === "SUSPENDED" && isKycDeadlineSuspension(reviewNote)) {
+    return "/specialist/onboarding/identity";
   }
   if (status === "PENDING_REVIEW" || status === "SUSPENDED") return SPECIALIST_REVIEW_PATH;
 
@@ -244,4 +251,20 @@ export function resolveOnboardingStatus(
 
 export function stepIndex(stepId: OnboardingStepId): number {
   return ONBOARDING_STEPS.findIndex((s) => s.id === stepId);
+}
+
+/** Every selected category has enough non-rejected uploads. */
+export function isPortfolioUploadComplete(eligibility: EligibilityResult): boolean {
+  return eligibility.hasCategories && eligibility.incompleteCategories.length === 0;
+}
+
+/** Every selected category has enough APPROVED items (admin activation bar). */
+export function isPortfolioApprovalComplete(eligibility: EligibilityResult): boolean {
+  if (!eligibility.hasCategories) return false;
+  const declaredCount =
+    eligibility.submittableCategories.length + eligibility.incompleteCategories.length;
+  return (
+    declaredCount > 0 &&
+    eligibility.qualifiedCategories.length === declaredCount
+  );
 }

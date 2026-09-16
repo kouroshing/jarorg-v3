@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { triggerEvent } from "@/lib/jarchiEngine";
+import { tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
       const verifyUrl = "https://payment.zarinpal.com/pg/v4/payment/verify.json";
       const zarinpalBody = {
         merchant_id: merchantId,
-        amount: transaction.amount,
+        amount: tomanToRial(transaction.amount),
         authority: authority,
       };
 

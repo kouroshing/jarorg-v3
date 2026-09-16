@@ -40,11 +40,9 @@ let runtimeSchemaSync: Promise<void> | null = null;
 
 function ensureRuntimeDatabaseSync(client: PrismaClient) {
   if (runtimeSchemaSync) return runtimeSchemaSync;
-  if (
-    process.env.NEXT_PHASE === "phase-production-build" ||
-    process.env.IS_BUILD === "true" ||
-    process.env.NODE_ENV !== "production"
-  ) {
+  // Dev uses `prisma db push` locally. Production runtime and `next build`
+  // (Liara has no Prisma CLI) both sync from scripts/schema-bootstrap.sql.
+  if (process.env.NODE_ENV !== "production") {
     runtimeSchemaSync = Promise.resolve();
     return runtimeSchemaSync;
   }

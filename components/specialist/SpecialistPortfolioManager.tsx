@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition, useRef, useMemo } from "react";
+import React, { useState, useTransition, useRef, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Heart,
@@ -39,10 +39,8 @@ import {
   Eye,
   Play,
   Camera,
-  ArrowLeft,
   Lock,
-  ArrowUpRight,
-  ShieldCheck,
+  ChevronDown,
 } from "lucide-react";
 import {
   PERSONAL_CATEGORIES,
@@ -63,10 +61,11 @@ import {
   processSinglePortfolioFile,
   isVideoFile,
   isImageFile,
+  isAllowedPortfolioVideo,
   MAX_IMAGE_RAW_SIZE_BYTES,
   MAX_VIDEO_RAW_SIZE_BYTES,
 } from "@/lib/clientImageCompression";
-import { MIN_SELECTED_CATEGORIES } from "@/lib/specialists/eligibility";
+import { MIN_SELECTED_CATEGORIES, MIN_PORTFOLIO_ITEMS_PER_CATEGORY } from "@/lib/specialists/eligibility";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -107,6 +106,8 @@ interface Props {
   initialPortfolioItems: PortfolioItemData[];
   /** Onboarding: continue to details. Manage: hide submit-for-review CTA. */
   mode?: "onboarding" | "manage";
+  /** Instagram-like denser grid + quieter chrome when embedded in profile studio. */
+  layout?: "default" | "instagram";
   continueHref?: string;
 }
 
@@ -114,6 +115,7 @@ export default function SpecialistPortfolioManager({
   initialSelectedCategories,
   initialPortfolioItems,
   mode = "onboarding",
+  layout = "default",
   continueHref = "/specialist/onboarding/subscription",
 }: Props) {
   const router = useRouter();
@@ -129,11 +131,13 @@ export default function SpecialistPortfolioManager({
     redirect: string | null;
     message: string | null;
   } | null>(null);
+  const [editCategoriesOpen, setEditCategoriesOpen] = useState(
+    initialSelectedCategories.length === 0
+  );
 
-  // Must pick at least MIN_SELECTED_CATEGORIES specialties, but only one of
-  // them needs a full 10-item portfolio to submit for review.
-  const MIN_FULFILLED_CATEGORIES = 1;
-  const MIN_ITEMS_PER_CATEGORY = 10;
+  // Must pick at least MIN_SELECTED_CATEGORIES specialties, and every selected
+  // specialty needs a full MIN_ITEMS_PER_CATEGORY portfolio to continue.
+  const MIN_ITEMS_PER_CATEGORY = MIN_PORTFOLIO_ITEMS_PER_CATEGORY;
 
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItemData[]>(initialPortfolioItems);
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>(
@@ -148,6 +152,25 @@ export default function SpecialistPortfolioManager({
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const studioRef = useRef<HTMLDivElement | null>(null);
+  const dropzoneRef = useRef<HTMLDivElement | null>(null);
+
+  // Force specialty editor open when nothing is selected.
+  useEffect(() => {
+    if (selectedSlugs.length === 0) setEditCategoriesOpen(true);
+  }, [selectedSlugs.length]);
+
+  const scrollToStudio = () => {
+    const el = dropzoneRef.current || studioRef.current;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const focusCategoryStudio = (slug: string) => {
+    setActiveCategorySlug(slug);
+    requestAnimationFrame(() => {
+      scrollToStudio();
+    });
+  };
 
   // Group portfolio items by category slug (rejected files do not count toward the 10).
   const itemsByCategory = useMemo(() => {
@@ -173,7 +196,6 @@ export default function SpecialistPortfolioManager({
 
   const totalContent = portfolioItems.filter((i) => i.reviewStatus !== "REJECTED").length;
 
-  // Validation: Every selected category must have at least 10 items
   const incompleteCategories = useMemo(() => {
     return selectedSlugs
       .map((slug) => ({
@@ -189,22 +211,23 @@ export default function SpecialistPortfolioManager({
     [selectedSlugs, itemsByCategory]
   );
 
-  const isEveryCategoryFulfilled = fulfilledCategories.length >= MIN_FULFILLED_CATEGORIES;
+  const isEveryCategoryFulfilled =
+    selectedSlugs.length >= MIN_SELECTED_CATEGORIES &&
+    fulfilledCategories.length === selectedSlugs.length;
 
-  // Progress percentage calculation
   const overallProgressPercent = useMemo(() => {
     if (selectedSlugs.length === 0) return 0;
-    const best = Math.max(
-      0,
-      ...selectedSlugs.map((slug) => itemsByCategory[slug]?.length || 0)
-    );
-    return Math.min(100, Math.round((best / MIN_ITEMS_PER_CATEGORY) * 100));
+    const cappedSum = selectedSlugs.reduce((sum, slug) => {
+      const count = itemsByCategory[slug]?.length || 0;
+      return sum + Math.min(count, MIN_ITEMS_PER_CATEGORY);
+    }, 0);
+    const needed = selectedSlugs.length * MIN_ITEMS_PER_CATEGORY;
+    return Math.min(100, Math.round((cappedSum / needed) * 100));
   }, [selectedSlugs, itemsByCategory]);
 
   const hasMinSelectedCategories = selectedSlugs.length >= MIN_SELECTED_CATEGORIES;
   const isReadyToSubmit = hasMinSelectedCategories && isEveryCategoryFulfilled;
 
-  // Toggle or uncheck category freely with auto-save
   const handleToggleCategory = (slug: string) => {
     const exists = selectedSlugs.includes(slug);
 
@@ -223,14 +246,14 @@ export default function SpecialistPortfolioManager({
     setSelectedSlugs(updated);
     setRequirementWarning(null);
 
-    // If added, set as active studio category
     if (!exists) {
       setActiveCategorySlug(slug);
+      setEditCategoriesOpen(false);
+      requestAnimationFrame(() => scrollToStudio());
     } else if (activeCategorySlug === slug && updated.length > 0) {
       setActiveCategorySlug(updated[0]);
     }
 
-    // Auto-save to server
     startSaveTransition(async () => {
       const res = await updateSpecialistCategories(updated);
       if (!res.success) {
@@ -244,13 +267,13 @@ export default function SpecialistPortfolioManager({
     });
   };
 
-  // Continue onboarding or (manage mode) re-submit for review.
   const handleFinalPublish = async () => {
     if (!hasMinSelectedCategories) {
       setRequirementWarning(
         `ابتدا حداقل ${MIN_SELECTED_CATEGORIES} شاخه تخصصی را انتخاب کنید.`
       );
       setTimeout(() => setRequirementWarning(null), 7000);
+      setEditCategoriesOpen(true);
       return;
     }
 
@@ -260,13 +283,13 @@ export default function SpecialistPortfolioManager({
         .join("، ");
 
       setRequirementWarning(
-        `برای ادامه باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار (غیرردشده) کامل داشته باشید. وضعیت فعلی: ${details}`
+        `برای ادامه باید در هر دسته‌بندی انتخاب‌شده ${MIN_ITEMS_PER_CATEGORY} نمونه‌کار (غیرردشده) داشته باشید. ناقص: ${details}`
       );
       setTimeout(() => setRequirementWarning(null), 7000);
+      if (incompleteCategories[0]) focusCategoryStudio(incompleteCategories[0].slug);
       return;
     }
 
-    // Onboarding: go to location/details — do not submit for admin review here.
     if (mode === "onboarding") {
       router.push(continueHref);
       router.refresh();
@@ -299,7 +322,6 @@ export default function SpecialistPortfolioManager({
     }
   };
 
-  // Upload handler with sequential processing and strict MIME-based rules
   const handleUploadFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -316,9 +338,17 @@ export default function SpecialistPortfolioManager({
 
     const fileList = Array.from(files);
 
-    // 1. Pre-validation loop: enforce 40MB for videos and 25MB for images
     for (const file of fileList) {
       if (isVideoFile(file)) {
+        if (!isAllowedPortfolioVideo(file)) {
+          setUploadError(
+            `فقط ویدیوی MP4 مجاز است. «${file.name}» را به MP4 تبدیل کنید و دوباره بارگذاری کنید.`
+          );
+          setIsUploading(false);
+          setUploadProgressText(null);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+          return;
+        }
         if (file.size > MAX_VIDEO_RAW_SIZE_BYTES) {
           setUploadError(`حجم ویدیو نباید بیشتر از ۴۰ مگابایت باشد (فایل: «${file.name}»).`);
           setIsUploading(false);
@@ -337,7 +367,6 @@ export default function SpecialistPortfolioManager({
       }
     }
 
-    // Ensure category is in selectedSlugs
     if (!selectedSlugs.includes(activeCategorySlug)) {
       const updated = [...selectedSlugs, activeCategorySlug];
       setSelectedSlugs(updated);
@@ -348,7 +377,6 @@ export default function SpecialistPortfolioManager({
       const total = fileList.length;
       let currentIndex = 0;
 
-      // 2. Sequential processing loop (for...of) to protect mobile RAM and Safari from crashing
       for (const file of fileList) {
         setUploadProgressText(
           isVideoFile(file)
@@ -393,7 +421,6 @@ export default function SpecialistPortfolioManager({
     }
   };
 
-  // Delete Item
   const handleDeleteItem = async (itemId: string) => {
     setPortfolioItems((prev) => prev.filter((item) => item.id !== itemId));
     if (previewMedia?.id === itemId) {
@@ -403,14 +430,13 @@ export default function SpecialistPortfolioManager({
     try {
       await deletePortfolioItem(itemId);
     } catch {
-      // Revert if error
+      // ignore
     }
   };
 
   const currentCategoryList =
     activeTab === "PERSONAL" ? PERSONAL_CATEGORIES : COMMERCIAL_CATEGORIES;
 
-  // Selected categories definitions for studio tabs
   const selectedCategoriesList = useMemo(() => {
     return selectedSlugs
       .map((slug) => CATEGORIES_BY_SLUG[slug])
@@ -425,137 +451,51 @@ export default function SpecialistPortfolioManager({
   const activeCount = countingItems.length;
   const isActiveFulfilled = activeCount >= MIN_ITEMS_PER_CATEGORY;
   const activeRemaining = Math.max(0, MIN_ITEMS_PER_CATEGORY - activeCount);
-  const activePercent = Math.min(100, Math.round((activeCount / MIN_ITEMS_PER_CATEGORY) * 100));
   const rejectedInActive = rejectedByCategory[activeCategorySlug] || 0;
+  const canUpload = selectedCategoriesList.length > 0 && Boolean(activeCategory);
+  const mustPickCategories = selectedSlugs.length === 0;
 
-  return (
-    <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300 pb-20" dir="rtl">
-      
-      {/* 1. Sleek Floating / Sticky Progress Bar */}
-      <div className="sticky top-20 z-40">
-        <div className="mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl sm:rounded-full border border-jar-border bg-jar-surface/90 px-4 sm:px-6 py-2.5 sm:py-3 backdrop-blur-xl shadow-xs">
-          
-          {/* Status Metric */}
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <span
-                className={`flex h-2.5 w-2.5 shrink-0 rounded-full ${
-                  isEveryCategoryFulfilled
-                    ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
-                    : "bg-jar-logo animate-pulse"
-                }`}
-              />
-              <span className="text-xs font-bold text-jar-primary truncate">
-                {isEveryCategoryFulfilled ? (
-                  <>
-                    {mode === "onboarding" ? "آماده رفتن به محل فعالیت" : "پرونده آماده ارسال برای بررسی است"}
-                    <span className="hidden sm:inline text-emerald-700 font-bold mr-1.5">
-                      ({fulfilledCategories.length} شاخه کامل)
-                    </span>
-                  </>
-                ) : selectedSlugs.length === 0 ? (
-                  "یک شاخه تخصصی انتخاب کنید"
-                ) : (
-                  <>
-                    <span className="font-mono">{overallProgressPercent}</span>٪ تا تکمیل اولین شاخه
-                    <span className="hidden sm:inline text-jar-logo font-bold mr-1.5">
-                      (۱۰ فایل در یک شاخه کافی است)
-                    </span>
-                  </>
-                )}
-              </span>
-            </div>
-
-            {/* Mini Inline Progress Bar */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="h-2 w-16 sm:w-28 overflow-hidden rounded-full bg-jar-canvas border border-jar-border/60">
-                <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    isEveryCategoryFulfilled ? "bg-emerald-500" : "bg-jar-primary"
-                  }`}
-                  style={{ width: `${overallProgressPercent}%` }}
-                />
-              </div>
-              <span className="font-mono text-[11px] font-bold text-jar-muted">
-                {overallProgressPercent}٪
-              </span>
-            </div>
+  const categoriesEditor = (
+    <div className="rounded-3xl border border-jar-border bg-jar-surface backdrop-blur-xl shadow-xs overflow-hidden">
+      <button
+        type="button"
+        onClick={() => {
+          if (mustPickCategories) return;
+          setEditCategoriesOpen((o) => !o);
+        }}
+        className={`flex w-full items-center justify-between gap-3 px-5 sm:px-7 py-4 text-right transition-colors ${
+          mustPickCategories ? "cursor-default" : "cursor-pointer hover:bg-jar-soft/40"
+        }`}
+        aria-expanded={editCategoriesOpen}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-base sm:text-lg font-bold text-jar-primary">
+              {mustPickCategories ? "انتخاب شاخه‌های تخصصی" : "ویرایش شاخه‌ها"}
+            </h2>
+            <span className="rounded-full bg-jar-canvas border border-jar-border px-2.5 py-0.5 text-[11px] font-medium text-jar-muted">
+              {selectedSlugs.length.toLocaleString("fa-IR")} انتخاب‌شده
+            </span>
+            {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-jar-muted" />}
           </div>
-
-          {/* Action Button — onboarding continues; manage mode has no publish CTA here */}
-          {mode === "onboarding" && (
-          <button
-            type="button"
-            onClick={handleFinalPublish}
-            disabled={isPublishing}
-            title={
-              !isReadyToSubmit
-                ? "برای ادامه، حداقل ۳ شاخه و ۱۰ نمونه‌کار در یک شاخه لازم است."
-                : "ادامه به گام محل فعالیت"
-            }
-            className={`w-full sm:w-auto inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 text-xs font-medium transition-colors cursor-pointer ${
-              isReadyToSubmit
-                ? "bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
-                : "bg-jar-canvas text-jar-muted border border-jar-border hover:bg-jar-soft hover:text-jar-primary"
+          <p className="text-xs text-jar-muted mt-0.5 font-medium">
+            {mustPickCategories
+              ? `حداقل ${MIN_SELECTED_CATEGORIES} شاخه انتخاب کنید تا استودیوی آپلود فعال شود.`
+              : "شاخه‌ها از قبل انتخاب شده‌اند؛ در صورت نیاز اینجا تغییر دهید."}
+          </p>
+        </div>
+        {!mustPickCategories && (
+          <ChevronDown
+            className={`h-5 w-5 shrink-0 text-jar-muted transition-transform ${
+              editCategoriesOpen ? "rotate-180" : ""
             }`}
-          >
-            {isPublishing ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>در حال ادامه...</span>
-              </>
-            ) : isReadyToSubmit ? (
-              <>
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>ادامه به محل فعالیت</span>
-              </>
-            ) : (
-              <>
-                <Lock className="h-3 w-3" />
-                <span>ادامه (الزامات ناقص)</span>
-              </>
-            )}
-          </button>
-          )}
+          />
+        )}
+      </button>
 
-        </div>
-      </div>
-
-      {/* Floating Warning Toast */}
-      {requirementWarning && (
-        <div className="fixed top-32 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900/95 text-white border border-amber-400/80 px-5 py-3 shadow-2xl backdrop-blur-md text-xs font-bold animate-in fade-in duration-200 max-w-md text-center">
-          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
-          <span>{requirementWarning}</span>
-          <button
-            onClick={() => setRequirementWarning(null)}
-            className="mr-auto text-slate-400 hover:text-white p-0.5"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* 2. Category Selector Pills */}
-      <div className="rounded-3xl border border-jar-border bg-jar-surface p-5 sm:p-7 backdrop-blur-xl shadow-xs space-y-4">
-        
-        {/* Header & Segmented Tab Switcher */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-jar-border">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-bold text-jar-primary">
-                تخصص‌های شما
-              </h2>
-              <span className="rounded-full bg-jar-canvas border border-jar-border px-2.5 py-0.5 text-[11px] font-medium text-jar-muted">
-                {selectedSlugs.length} شاخه انتخاب شده
-              </span>
-            </div>
-            <p className="text-xs text-jar-muted mt-0.5 font-medium">
-              برای افزودن یا لغو هر شاخه، روی تگ آن کلیک کنید (حداقل ۳ شاخه؛ برای ارسال، ۱۰ نمونه‌کار در یک شاخه کافی است).
-            </p>
-          </div>
-
-          {/* Segmented Control Switcher */}
-          <div className="flex w-full sm:w-auto rounded-full bg-jar-canvas p-1 border border-jar-border">
+      {editCategoriesOpen && (
+        <div className="space-y-4 px-5 sm:px-7 pb-5 sm:pb-7 border-t border-jar-border pt-4">
+          <div className="flex w-full sm:w-auto rounded-full bg-jar-canvas p-1 border border-jar-border sm:ml-auto sm:mr-0 max-w-xs">
             <button
               type="button"
               onClick={() => setActiveTab("PERSONAL")}
@@ -579,75 +519,257 @@ export default function SpecialistPortfolioManager({
               تجاری ({COMMERCIAL_CATEGORIES.length})
             </button>
           </div>
-        </div>
 
-        {/* The Pills Grid */}
-        <div className="flex flex-wrap gap-2 pt-1">
-          {currentCategoryList.map((cat) => {
-            const Icon = CATEGORY_ICON_MAP[cat.slug] || getCategoryIcon(cat.iconName);
-            const isSelected = selectedSlugs.includes(cat.slug);
-            const count = itemsByCategory[cat.slug]?.length || 0;
-            const isCompleted = count >= MIN_ITEMS_PER_CATEGORY;
+          <div className="flex flex-wrap gap-2">
+            {currentCategoryList.map((cat) => {
+              const Icon = CATEGORY_ICON_MAP[cat.slug] || getCategoryIcon(cat.iconName);
+              const isSelected = selectedSlugs.includes(cat.slug);
+              const count = itemsByCategory[cat.slug]?.length || 0;
+              const isCompleted = count >= MIN_ITEMS_PER_CATEGORY;
 
-            return (
-              <button
-                key={cat.slug}
-                type="button"
-                onClick={() => handleToggleCategory(cat.slug)}
-                className={`group inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium transition-colors cursor-pointer select-none ${
-                  isSelected
-                    ? "bg-jar-primary text-white shadow-xs hover:bg-jar-primaryHover"
-                    : "border border-jar-border bg-jar-surface text-jar-primary hover:bg-jar-soft"
-                }`}
-              >
-                <Icon className={`h-3.5 w-3.5 ${isSelected ? "text-jar-logo" : "text-jar-muted"}`} />
-                <span>{cat.title}</span>
+              return (
+                <button
+                  key={cat.slug}
+                  type="button"
+                  onClick={() => handleToggleCategory(cat.slug)}
+                  className={`group inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium transition-colors cursor-pointer select-none ${
+                    isSelected
+                      ? "bg-jar-primary text-white shadow-xs hover:bg-jar-primaryHover"
+                      : "border border-jar-border bg-jar-surface text-jar-primary hover:bg-jar-soft"
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 ${isSelected ? "text-jar-logo" : "text-jar-muted"}`} />
+                  <span>{cat.title}</span>
 
-                {/* Status Indicator */}
-                {isSelected ? (
-                  <span
-                    className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.2 text-[10px] font-mono font-bold ${
-                      isCompleted
-                        ? "bg-emerald-500/25 text-emerald-300"
-                        : "bg-jar-logo/30 text-jar-logo"
-                    }`}
-                  >
-                    {isCompleted ? (
-                      <>
-                        <Check className="h-2.5 w-2.5 stroke-[3]" />
-                        <span>{count}</span>
-                      </>
-                    ) : (
-                      <span>{count}/۱۰</span>
-                    )}
-                  </span>
-                ) : (
-                  <Plus className="h-3 w-3 text-jar-muted opacity-60 group-hover:opacity-100" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-      </div>
-
-      {/* 3. Studio Workspace (Only for Selected Categories) */}
-      <div className="space-y-4">
-        
-        {selectedCategoriesList.length === 0 ? (
-          /* Empty State */
-          <div className="rounded-[28px] border border-dashed border-slate-200 bg-white/60 p-10 text-center space-y-3">
-            <Camera className="h-10 w-10 text-slate-300 mx-auto" />
-            <h3 className="text-sm font-black text-slate-800">
-              هنوز تخصص فعالی انتخاب نشده است
-            </h3>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              برای فعال‌شدن استودیوی آپلود، حداقل یک تخصص را از بخش تگ‌های بالا انتخاب کنید؛ برای ارسال پرونده حداقل ۳ شاخه لازم است.
-            </p>
+                  {isSelected ? (
+                    <span
+                      className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.2 text-[10px] font-mono font-bold ${
+                        isCompleted
+                          ? "bg-emerald-500/25 text-emerald-300"
+                          : "bg-jar-logo/30 text-jar-logo"
+                      }`}
+                    >
+                      {isCompleted ? (
+                        <>
+                          <Check className="h-2.5 w-2.5 stroke-[3]" />
+                          <span>{count}</span>
+                        </>
+                      ) : (
+                        <span>{count}/۱۰</span>
+                      )}
+                    </span>
+                  ) : (
+                    <Plus className="h-3 w-3 text-jar-muted opacity-60 group-hover:opacity-100" />
+                  )}
+                </button>
+              );
+            })}
           </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300 pb-28 sm:pb-20" dir="rtl">
+      {/* 1. Sticky progress + upload CTA */}
+      {!(layout === "instagram" && mode === "manage" && isEveryCategoryFulfilled) && (
+      <div className="sticky top-20 z-40 space-y-2">
+        <div className="mx-auto flex flex-col gap-2.5 rounded-2xl border border-jar-border bg-jar-surface/90 px-4 sm:px-6 py-2.5 sm:py-3 backdrop-blur-xl shadow-xs">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className={`flex h-2.5 w-2.5 shrink-0 rounded-full ${
+                    isEveryCategoryFulfilled
+                      ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
+                      : "bg-jar-logo animate-pulse"
+                  }`}
+                />
+                <span className="text-xs font-bold text-jar-primary truncate">
+                  {isEveryCategoryFulfilled ? (
+                    <>
+                      {mode === "onboarding"
+                        ? "آماده رفتن به مرحله بعد"
+                        : "پرونده آماده ارسال برای بررسی است"}
+                      <span className="hidden sm:inline text-emerald-700 font-bold mr-1.5">
+                        ({fulfilledCategories.length.toLocaleString("fa-IR")} از{" "}
+                        {selectedSlugs.length.toLocaleString("fa-IR")} دسته کامل)
+                      </span>
+                    </>
+                  ) : selectedSlugs.length === 0 ? (
+                    "یک شاخه تخصصی انتخاب کنید"
+                  ) : (
+                    <>
+                      <span className="font-mono">{overallProgressPercent}</span>٪ تا تکمیل همه دسته‌ها
+                      <span className="hidden sm:inline text-jar-logo font-bold mr-1.5">
+                        ({fulfilledCategories.length.toLocaleString("fa-IR")}/
+                        {selectedSlugs.length.toLocaleString("fa-IR")} دسته · ۱۰ فایل در هر دسته)
+                      </span>
+                    </>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="h-2 w-16 sm:w-28 overflow-hidden rounded-full bg-jar-canvas border border-jar-border/60">
+                  <div
+                    className={`h-full transition-all duration-500 rounded-full ${
+                      isEveryCategoryFulfilled ? "bg-emerald-500" : "bg-jar-primary"
+                    }`}
+                    style={{ width: `${overallProgressPercent}%` }}
+                  />
+                </div>
+                <span className="font-mono text-[11px] font-bold text-jar-muted">
+                  {overallProgressPercent}٪
+                </span>
+              </div>
+            </div>
+
+            <div className="flex w-full sm:w-auto items-center gap-2">
+              {canUpload && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    scrollToStudio();
+                    fileInputRef.current?.click();
+                  }}
+                  disabled={isUploading}
+                  className="hidden sm:inline-flex h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-full bg-jar-primary px-4 text-xs font-medium text-white hover:bg-jar-primaryHover transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" />
+                  )}
+                  <span>افزودن نمونه‌کار</span>
+                </button>
+              )}
+
+              {mode === "onboarding" && (
+                <button
+                  type="button"
+                  onClick={handleFinalPublish}
+                  disabled={isPublishing || isUploading}
+                  title={
+                    isUploading
+                      ? uploadProgressText || "در حال آپلود نمونه‌کار..."
+                      : !isReadyToSubmit
+                        ? `برای ادامه، حداقل ${MIN_SELECTED_CATEGORIES} شاخه و ${MIN_ITEMS_PER_CATEGORY} نمونه‌کار در هر شاخه لازم است.`
+                        : "مرحله بعد"
+                  }
+                  className={`relative w-full sm:w-auto overflow-hidden inline-flex h-9 min-w-[9.5rem] items-center justify-center gap-2 rounded-full px-5 text-xs font-medium transition-colors ${
+                    isUploading
+                      ? "bg-jar-primary text-white cursor-wait"
+                      : isReadyToSubmit
+                        ? "bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 cursor-pointer"
+                        : "bg-jar-canvas text-jar-muted border border-jar-border hover:bg-jar-soft cursor-pointer"
+                  }`}
+                >
+                  {isUploading ? (
+                    <>
+                      <span
+                        className="absolute inset-y-0 right-0 bg-white/25 transition-[width] duration-300"
+                        style={{ width: `${Math.max(4, uploadProgressPercent)}%` }}
+                        aria-hidden
+                      />
+                      <span className="relative z-10 inline-flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span className="font-mono tabular-nums">
+                          {uploadProgressPercent.toLocaleString("fa-IR")}٪
+                        </span>
+                        <span className="hidden sm:inline">آپلود نمونه‌کار</span>
+                      </span>
+                    </>
+                  ) : isPublishing ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>در حال ادامه...</span>
+                    </>
+                  ) : isReadyToSubmit ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 stroke-[2.5]" />
+                      <span>مرحله بعد</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="h-3 w-3" />
+                      <span>مرحله بعد</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {incompleteCategories.length > 0 && selectedSlugs.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5 -mx-0.5 px-0.5">
+              <span className="shrink-0 text-[10px] font-bold text-jar-muted">
+                {isReadyToSubmit ? "بعداً:" : "ناقص:"}
+              </span>
+              {incompleteCategories.map((c) => (
+                <button
+                  key={c.slug}
+                  type="button"
+                  onClick={() => focusCategoryStudio(c.slug)}
+                  className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold transition-colors cursor-pointer ${
+                    activeCategorySlug === c.slug
+                      ? "border-jar-logo bg-jar-soft text-jar-primary"
+                      : "border-jar-border bg-jar-canvas text-jar-muted hover:text-jar-primary hover:bg-jar-soft"
+                  }`}
+                >
+                  <span>{c.title}</span>
+                  <span className="font-mono text-jar-logo">
+                    {c.count}/۱۰
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+
+      {requirementWarning && (
+        <div className="fixed top-32 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900/95 text-white border border-amber-400/80 px-5 py-3 shadow-2xl backdrop-blur-md text-xs font-bold animate-in fade-in duration-200 max-w-md text-center">
+          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+          <span>{requirementWarning}</span>
+          <button
+            onClick={() => setRequirementWarning(null)}
+            className="mr-auto text-slate-400 hover:text-white p-0.5"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Edge case: no specialties yet → editor first */}
+      {mustPickCategories && categoriesEditor}
+
+      {/* 2. Upload studio first */}
+      <div ref={studioRef} className="space-y-4">
+        {selectedCategoriesList.length === 0 ? (
+          !mustPickCategories ? (
+            <div className="rounded-[28px] border border-dashed border-slate-200 bg-white/60 p-10 text-center space-y-3">
+              <Camera className="h-10 w-10 text-slate-300 mx-auto" />
+              <h3 className="text-sm font-black text-slate-800">
+                هنوز تخصص فعالی انتخاب نشده است
+              </h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                برای فعال‌شدن استودیوی آپلود، حداقل یک تخصص را از بخش ویرایش شاخه‌ها انتخاب کنید.
+              </p>
+              <button
+                type="button"
+                onClick={() => setEditCategoriesOpen(true)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-jar-primary px-4 text-xs font-medium text-white"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                انتخاب شاخه
+              </button>
+            </div>
+          ) : null
         ) : (
           <>
-            {/* Horizontal Segmented Tabs for Active Categories ONLY */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
               {selectedCategoriesList.map((cat) => {
                 const Icon = CATEGORY_ICON_MAP[cat.slug] || getCategoryIcon(cat.iconName);
@@ -685,14 +807,11 @@ export default function SpecialistPortfolioManager({
               })}
             </div>
 
-            {/* Dedicated Active Studio Container */}
             {activeCategory && (
               <div className="rounded-3xl border border-jar-border bg-jar-surface p-5 sm:p-7 backdrop-blur-xl shadow-xs space-y-5">
-                
-                {/* Studio Mini Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-jar-border">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-bold text-jar-primary">
                         {activeCategory.title}
                       </h3>
@@ -711,19 +830,20 @@ export default function SpecialistPortfolioManager({
                         ) : (
                           <>
                             <AlertCircle className="h-3 w-3 text-jar-logo" />
-                            <span>{activeCount}/۱۰ نمونه‌کار — {activeRemaining} فایل دیگر لازم است</span>
+                            <span>
+                              {activeCount}/۱۰ نمونه‌کار — {activeRemaining} فایل دیگر لازم است
+                            </span>
                           </>
                         )}
                       </span>
                     </div>
                     <p className="text-[11px] text-jar-muted">
                       {activeCategory.mediaType === "VIDEO"
-                        ? "فرمت‌های ویدیویی (MP4, MOV, WebM) — حداکثر ۴۰ مگابایت"
+                        ? "فقط ویدیوی MP4 — حداکثر ۴۰ مگابایت (MOV و سایر فرمت‌ها مجاز نیست)"
                         : "عکس و تصویر (تبدیل خودکار به WebP زیر ۷۰۰KB) — حداکثر ۲۵ مگابایت"}
                     </p>
                   </div>
 
-                  {/* Top Actions: Add & Uncheck */}
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -756,23 +876,21 @@ export default function SpecialistPortfolioManager({
                   </div>
                 </div>
 
-                {/* Hidden File Input */}
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
                   accept={
                     activeCategory.mediaType === "VIDEO"
-                      ? "video/mp4,video/webm"
+                      ? "video/mp4,.mp4"
                       : activeCategory.mediaType === "ALL"
-                      ? "image/jpeg,image/png,image/webp,video/mp4,video/webm"
+                      ? "image/jpeg,image/png,image/webp,video/mp4,.mp4"
                       : "image/jpeg,image/png,image/webp"
                   }
                   className="hidden"
                   onChange={(e) => handleUploadFiles(e.target.files)}
                 />
 
-                {/* Upload Error Banner */}
                 {uploadError && (
                   <div className="flex items-center gap-2 rounded-2xl bg-red-50 border border-red-200 p-3 text-xs font-bold text-red-700 animate-in fade-in">
                     <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
@@ -780,7 +898,6 @@ export default function SpecialistPortfolioManager({
                   </div>
                 )}
 
-                {/* Live Upload Progress Indicator */}
                 {isUploading && (
                   <div className="rounded-2xl border border-jar-border bg-jar-canvas p-3.5 shadow-xs animate-in fade-in space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-jar-primary">
@@ -799,8 +916,8 @@ export default function SpecialistPortfolioManager({
                   </div>
                 )}
 
-                {/* Clean Dropzone */}
                 <div
+                  ref={dropzoneRef}
                   onDragOver={(e) => {
                     e.preventDefault();
                     setIsDragging(true);
@@ -827,17 +944,16 @@ export default function SpecialistPortfolioManager({
                   </div>
                   <h4 className="mt-2.5 text-xs font-bold text-jar-primary">
                     {isUploading
-                      ? (uploadProgressText || "در حال بهینه‌سازی و آپلود...")
+                      ? uploadProgressText || "در حال بهینه‌سازی و آپلود..."
                       : "برای بارگذاری کلیک کنید یا فایل‌ها را اینجا رها نمایید"}
                   </h4>
                   <p className="mt-0.5 text-[11px] text-jar-muted">
                     {isUploading
                       ? `${uploadProgressPercent}٪ پردازش شد`
-                      : "فشرده‌سازی هوشمند خودکار به WebP (زیر ۷۰۰KB) • سقف ویدیو ۴۰MB"}
+                      : "فشرده‌سازی هوشمند خودکار به WebP (زیر ۷۰۰KB) • ویدیو فقط MP4 تا ۴۰MB"}
                   </p>
                 </div>
 
-                {/* Gallery Thumbnail Grid */}
                 <div className="space-y-3 pt-2">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-black text-slate-700">
@@ -862,11 +978,21 @@ export default function SpecialistPortfolioManager({
                       </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                    <div
+                      className={
+                        layout === "instagram"
+                          ? "grid grid-cols-3 gap-0.5 sm:gap-1"
+                          : "grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"
+                      }
+                    >
                       {activeItems.map((item) => (
                         <div
                           key={item.id}
-                          className="group relative aspect-square overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-900 shadow-2xs"
+                          className={`group relative aspect-square overflow-hidden bg-slate-900 ${
+                            layout === "instagram"
+                              ? "rounded-none sm:rounded-md border-0"
+                              : "rounded-2xl border border-slate-200/80 shadow-2xs"
+                          }`}
                         >
                           {item.reviewStatus === "REJECTED" && (
                             <span className="absolute top-1.5 right-1.5 z-10 rounded-md bg-rose-600 px-1.5 py-0.5 text-[8px] font-bold text-white">
@@ -905,7 +1031,6 @@ export default function SpecialistPortfolioManager({
                             />
                           )}
 
-                          {/* Hover Actions */}
                           <div className="absolute inset-0 flex items-center justify-center gap-1.5 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-2xs">
                             <button
                               type="button"
@@ -930,15 +1055,37 @@ export default function SpecialistPortfolioManager({
                     </div>
                   )}
                 </div>
-
               </div>
             )}
           </>
         )}
-
       </div>
 
-      {/* 4. Media Lightbox Preview Modal */}
+      {/* 3. Collapsed specialty catalog after studio */}
+      {!mustPickCategories && categoriesEditor}
+
+      {/* Mobile sticky upload CTA */}
+      {canUpload && (
+        <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-jar-border bg-jar-surface/95 backdrop-blur-xl px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={() => {
+              scrollToStudio();
+              fileInputRef.current?.click();
+            }}
+            disabled={isUploading}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-jar-primary text-sm font-bold text-white disabled:opacity-50"
+          >
+            {isUploading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <UploadCloud className="h-4 w-4" />
+            )}
+            {isUploading ? "در حال آپلود..." : "افزودن نمونه‌کار"}
+          </button>
+        </div>
+      )}
+
       {previewMedia && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md animate-in fade-in"
@@ -974,7 +1121,6 @@ export default function SpecialistPortfolioManager({
         </div>
       )}
 
-      {/* 5. Celebration Success Modal */}
       {showSuccessModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-in fade-in"

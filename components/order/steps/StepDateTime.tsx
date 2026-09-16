@@ -109,7 +109,7 @@ export default function StepDateTime({
             زمان و تاریخ پروژه
           </h3>
           <span className="text-[11px] text-[#A8A29A] font-mono">
-            {isScheduleDefault ? "هماهنگی توافقی" : (bookingDate ? `${bookingDate}` : "انتخاب تاریخ")}
+            {isScheduleDefault ? "توافق با متخصص" : (bookingDate ? `${bookingDate}` : "انتخاب تاریخ")}
           </span>
         </div>
 
@@ -163,7 +163,7 @@ export default function StepDateTime({
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs sm:text-sm font-bold text-jar-primary transition-colors">
-                  سریع‌ترین زمان با هماهنگی توافقی
+                  بهترین زمان با توافق متخصص
                 </span>
                 <span
                   className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
@@ -177,7 +177,7 @@ export default function StepDateTime({
               </div>
             </div>
             <p className="text-[11px] sm:text-xs text-jar-muted leading-relaxed">
-              روز و ساعت دقیق، پس از ثبت سفارش به صورت توافقی بین شما و عکاس هماهنگ می‌شود.
+              روز و ساعت دقیق را بعد از انتخاب متخصص، با هم هماهنگ می‌کنید — لازم نیست الان تاریخ قطعی بگذارید.
             </p>
           </div>
         </div>

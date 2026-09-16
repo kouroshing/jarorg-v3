@@ -1,20 +1,13 @@
 /**
  * Keeps orders from sitting on the board forever.
  *
- * Two different failures, two different remedies:
+ *   nobody applied (early)  -> flag for the team + soft client (still live).
+ *   proposals unanswered    -> remind the client to pick someone.
+ *   matching past N days    -> NO_MATCH: leave the specialist board, one
+ *                              client notif encouraging budget/detail edit,
+ *                              cancel pending interests. Visible mainly in admin.
  *
- *   nobody applied      -> flag it for the team and tell the client we are
- *                          still looking. No money has moved, so there is
- *                          nothing to unwind; the risk is a client who feels
- *                          ignored and never comes back.
- *
- *   applied, no choice  -> the client has proposals and has not picked one.
- *                          This one costs other people: several specialists are
- *                          holding a date for an order that may never happen.
- *                          Remind, then close and free them.
- *
- * Thresholds come from the admin panel (PwaSettings), so they can be tuned
- * without a deploy.
+ * Thresholds come from PwaSettings (matchingTimeoutDays default 7).
  *
  * Dry run by default. Pass --apply to write. Run daily.
  */
@@ -28,7 +21,20 @@ const FALLBACK = {
   noApplicantTimeoutHours: 48,
   selectionReminderHours: 72,
   selectionTimeoutDays: 7,
+  matchingTimeoutDays: 7,
 };
+
+/** Mirrors lib/orders/noMatch.ts — keep copy in sync. */
+const NO_MATCH_ADMIN_NOTE =
+  "متأسفانه برای این پروژه متخصص مناسبی پیدا نشد. پیشنهاد می‌کنیم بودجه یا جزئیات را کمی ویرایش کنید (مثلاً افزایش قیمت، انعطاف در زمان/محل) و دوباره منتشر کنید تا شانس بیشتری داشته باشید.";
+
+const NO_MATCH_NOTIF_TITLE = "متأسفانه متخصصی پیدا نشد";
+
+function noMatchNotifMessage(categoryTitle) {
+  return `برای سفارش «${
+    categoryTitle || "عکاسی"
+  }» ظرف مهلت جستجو متخصص مناسبی اعلام آمادگی نکرد. می‌توانید قیمت یا جزئیات را ویرایش کنید و دوباره منتشر کنید — این کار معمولاً پیشنهادهای بیشتری می‌آورد.`;
+}
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000);
 const daysAgo = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
@@ -44,16 +50,23 @@ async function main() {
         noApplicantTimeoutHours: true,
         selectionReminderHours: true,
         selectionTimeoutDays: true,
+        matchingTimeoutDays: true,
       },
     })) ?? FALLBACK;
 
+  const matchingTimeoutDays =
+    settings.matchingTimeoutDays ?? FALLBACK.matchingTimeoutDays;
+
   console.log(
     `thresholds: no applicants ${settings.noApplicantTimeoutHours}h, ` +
-      `reminder ${settings.selectionReminderHours}h, close ${settings.selectionTimeoutDays}d\n`
+      `reminder ${settings.selectionReminderHours}h, ` +
+      `selection close ${settings.selectionTimeoutDays}d, ` +
+      `matching suspend ${matchingTimeoutDays}d\n`
   );
 
   await handleNoApplicants(settings);
   await handleUnansweredProposals(settings);
+  await handleMatchingTimeout({ ...settings, matchingTimeoutDays });
 }
 
 /** Orders on the board that nobody has applied to. */
@@ -106,7 +119,9 @@ async function handleNoApplicants(settings) {
   console.log(`   flagged ${stale.length}`);
 }
 
-/** Orders with live proposals that the client has not answered. */
+/** Orders with live proposals that the client has not answered — remind only.
+ * Hard close / suspend is handled by handleMatchingTimeout → NO_MATCH so the
+ * client can edit budget and republish instead of losing the order. */
 async function handleUnansweredProposals(settings) {
   const needsReminder = await prisma.order.findMany({
     where: {
@@ -119,31 +134,15 @@ async function handleUnansweredProposals(settings) {
     select: { id: true, categoryTitle: true, createdAt: true, userId: true },
   });
 
-  const dueToClose = await prisma.order.findMany({
-    where: {
-      status: "HAS_APPLICANTS",
-      createdAt: { lte: daysAgo(settings.selectionTimeoutDays) },
-      selectedSpecialistId: null,
-      interests: { some: { status: "PENDING" } },
-    },
-    select: { id: true, categoryTitle: true, createdAt: true, userId: true },
-  });
-
-  const closingIds = new Set(dueToClose.map((o) => o.id));
-  const remindOnly = needsReminder.filter((o) => !closingIds.has(o.id));
-
   console.log(`\n── proposals waiting on the client`);
-  console.log(`   remind: ${remindOnly.length}   close: ${dueToClose.length}`);
-  for (const o of remindOnly) {
+  console.log(`   remind: ${needsReminder.length}`);
+  for (const o of needsReminder) {
     console.log(`   remind  ${o.id.slice(0, 8)}  ${String(ageInHours(o.createdAt)).padStart(4)}h`);
   }
-  for (const o of dueToClose) {
-    console.log(`   close   ${o.id.slice(0, 8)}  ${String(ageInHours(o.createdAt)).padStart(4)}h`);
-  }
 
-  if (!APPLY) return;
+  if (!APPLY || needsReminder.length === 0) return;
 
-  for (const o of remindOnly) {
+  for (const o of needsReminder) {
     await prisma.order.update({
       where: { id: o.id },
       data: { clientRemindedAt: new Date() },
@@ -155,7 +154,7 @@ async function handleUnansweredProposals(settings) {
           title: "متخصصان منتظر پاسخ شما هستند",
           message: `برای سفارش «${
             o.categoryTitle || "عکاسی"
-          }» پیشنهادهایی ثبت شده است. تا ${settings.selectionTimeoutDays} روز فرصت دارید یکی را انتخاب کنید؛ پس از آن سفارش بسته می‌شود.`,
+          }» پیشنهادهایی ثبت شده است. لطفاً یکی را انتخاب کنید؛ در غیر این صورت پس از مهلت جستجو سفارش از بورد خارج می‌شود و می‌توانید با ویرایش بودجه دوباره منتشر کنید.`,
           type: "WARNING",
           link: `/order/${o.id}`,
         },
@@ -163,15 +162,57 @@ async function handleUnansweredProposals(settings) {
     }
   }
 
-  for (const o of dueToClose) {
-    // Closing frees every specialist who was holding this date. The client can
-    // post again; the specialists get their availability back either way.
+  console.log(`   reminded ${needsReminder.length}`);
+}
+
+/**
+ * After matchingTimeoutDays from publish (fallback: createdAt), unpaid matching
+ * orders leave the specialist board as NO_MATCH — one client notif, admin note,
+ * pending interests cancelled. Idempotent via noMatchAt.
+ */
+async function handleMatchingTimeout(settings) {
+  const cutoff = daysAgo(settings.matchingTimeoutDays);
+  const candidates = await prisma.order.findMany({
+    where: {
+      status: { in: ["MATCHING", "HAS_APPLICANTS"] },
+      selectedSpecialistId: null,
+      paidAt: null,
+      noMatchAt: null,
+      OR: [
+        { publishedAt: { lte: cutoff } },
+        { AND: [{ publishedAt: null }, { createdAt: { lte: cutoff } }] },
+      ],
+    },
+    select: {
+      id: true,
+      categoryTitle: true,
+      createdAt: true,
+      publishedAt: true,
+      userId: true,
+      districtOrCity: true,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  console.log(`\n── matching timeout → NO_MATCH (${candidates.length})`);
+  for (const o of candidates) {
+    const anchor = o.publishedAt || o.createdAt;
+    console.log(
+      `   ${o.id.slice(0, 8)}  ${String(ageInHours(anchor)).padStart(4)}h since publish  ` +
+        `${o.districtOrCity || "—"}  ${o.categoryTitle || "—"}`
+    );
+  }
+
+  if (!APPLY || candidates.length === 0) return;
+
+  for (const o of candidates) {
     await prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: o.id },
         data: {
-          status: "CANCELLED",
-          adminCancelNote: `بسته شد: کارفرما ظرف ${settings.selectionTimeoutDays} روز متخصصی انتخاب نکرد.`,
+          status: "NO_MATCH",
+          noMatchAt: new Date(),
+          adminNote: NO_MATCH_ADMIN_NOTE,
         },
       });
 
@@ -180,42 +221,52 @@ async function handleUnansweredProposals(settings) {
         select: { specialistId: true },
       });
 
-      await tx.projectInterest.updateMany({
-        where: { orderId: o.id, status: "PENDING" },
-        data: { status: "CANCELLED" },
-      });
-
-      for (const { specialistId } of freed) {
-        await tx.notification.create({
-          data: {
-            userId: specialistId,
-            title: "سفارش بسته شد",
-            message: `کارفرمای پروژه «${
-              o.categoryTitle || "عکاسی"
-            }» در مهلت مقرر متخصصی انتخاب نکرد و سفارش بسته شد. زمان شما آزاد است.`,
-            type: "INFO",
-            link: "/specialist/projects",
-          },
+      if (freed.length > 0) {
+        await tx.projectInterest.updateMany({
+          where: { orderId: o.id, status: "PENDING" },
+          data: { status: "CANCELLED" },
         });
+
+        for (const { specialistId } of freed) {
+          await tx.notification.create({
+            data: {
+              userId: specialistId,
+              title: "پروژه از بورد خارج شد",
+              message: `مهلت جستجوی پروژه «${
+                o.categoryTitle || "عکاسی"
+              }» به پایان رسید و از بورد فعال خارج شد. زمان شما آزاد است.`,
+              type: "INFO",
+              link: "/specialist/projects",
+            },
+          });
+        }
       }
 
       if (o.userId) {
         await tx.notification.create({
           data: {
             userId: o.userId,
-            title: "سفارش شما بسته شد",
-            message: `سفارش «${
-              o.categoryTitle || "عکاسی"
-            }» به دلیل عدم انتخاب متخصص بسته شد. هر زمان خواستید می‌توانید دوباره ثبت کنید.`,
+            title: NO_MATCH_NOTIF_TITLE,
+            message: noMatchNotifMessage(o.categoryTitle),
             type: "INFO",
-            link: "/order",
+            link: `/order/${o.id}`,
           },
         });
       }
+
+      await tx.auditLog.create({
+        data: {
+          actorId: "cron:order-timeouts",
+          action: "ORDER_NO_MATCH",
+          targetModel: "Order",
+          targetId: o.id,
+          note: `matching timeout after ${settings.matchingTimeoutDays}d`,
+        },
+      });
     });
   }
 
-  console.log(`\n   reminded ${remindOnly.length}, closed ${dueToClose.length}`);
+  console.log(`   suspended ${candidates.length}`);
 }
 
 main()

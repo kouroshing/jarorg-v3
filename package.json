@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && node scripts/sync-schema-build.mjs && next build",
     "start": "npx prisma db push && next start",
     "start:standalone": "npx prisma db push && node server.js",
     "start:next": "next start",

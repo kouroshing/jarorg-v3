@@ -9,6 +9,7 @@ import { ALL_CATEGORIES, CATEGORIES_BY_SLUG, CategoryType, MediaType } from "@/l
 import { getUploadRoot, resolveUploadDiskPath } from "@/lib/storage/uploads";
 import {
   evaluateEligibility,
+  isPortfolioUploadComplete,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
   MIN_SELECTED_CATEGORIES,
   SPECIALIST_REVIEW_PATH,
@@ -239,13 +240,15 @@ export async function uploadPortfolioItem(
       "image/heic-sequence",
       "image/heif-sequence",
     ];
-    const allowedVideoMimes = [
-      "video/mp4",
+    /** Portfolio videos: MP4 only (admin preview + consistent playback). */
+    const allowedVideoMimes = ["video/mp4"];
+    const blockedNonMp4Video = [
+      "video/quicktime",
       "video/webm",
       "video/mpeg",
+      "video/x-m4v",
+      "video/x-msvideo",
     ];
-    // MOV often uploads OK but Chrome desktop cannot preview it in admin.
-    const blockedAppleVideo = ["video/quicktime"];
 
     const lowerName = file.name.toLowerCase();
     if (
@@ -258,22 +261,26 @@ export async function uploadPortfolioItem(
           "فرمت HEIC/HEIF آیفون در مرورگر و پنل ادمین نمایش داده نمی‌شود. لطفاً از Photos گزینهٔ «Most Compatible» را بزنید یا فایل را به JPG تبدیل کنید.",
       };
     }
-    if (blockedAppleVideo.includes(mimeType) || /\.mov$/i.test(lowerName)) {
+    if (
+      blockedNonMp4Video.includes(mimeType) ||
+      /\.(mov|webm|mpeg|mpg|avi|m4v)$/i.test(lowerName)
+    ) {
       return {
         success: false,
         error:
-          "فایل MOV روی پنل ادمین درست پیش‌نمایش نمی‌شود. لطفاً ویدیو را به MP4 تبدیل کنید و دوباره بارگذاری کنید.",
+          "فقط ویدیوی MP4 مجاز است. لطفاً فایل را به MP4 تبدیل کنید و دوباره بارگذاری کنید.",
       };
     }
 
     if (allowedImageMimes.includes(mimeType)) {
       mediaType = "IMAGE";
-    } else if (allowedVideoMimes.includes(mimeType)) {
+    } else if (allowedVideoMimes.includes(mimeType) || /\.mp4$/i.test(lowerName)) {
       mediaType = "VIDEO";
     } else {
       return {
         success: false,
-        error: "فرمت فایل پشتیبانی نمی‌شود. لطفاً فایل عکس (JPG, PNG, WebP) یا ویدیو (MP4, WebM) بارگذاری کنید.",
+        error:
+          "فرمت فایل پشتیبانی نمی‌شود. لطفاً عکس (JPG, PNG, WebP) یا ویدیو (فقط MP4) بارگذاری کنید.",
       };
     }
 
@@ -449,7 +456,7 @@ export async function publishSpecialistProfile(): Promise<{
       hasPlan: Boolean(specialist.user?.planId),
     });
 
-    if (eligibility.submittableCategories.length === 0) {
+    if (!isPortfolioUploadComplete(eligibility)) {
       const details = eligibility.incompleteCategories
         .map((c) => `«${CATEGORIES_BY_SLUG[c.slug]?.title || c.slug}» (${c.count}/۱۰ فایل)`)
         .join("، ");
@@ -457,8 +464,8 @@ export async function publishSpecialistProfile(): Promise<{
       return {
         success: false,
         error: details
-          ? `برای ارسال پرونده باید حداقل یک شاخه تخصصی با ۱۰ نمونه‌کار کامل داشته باشید. وضعیت فعلی: ${details}`
-          : `برای ارسال پرونده ابتدا حداقل ${MIN_SELECTED_CATEGORIES} شاخه انتخاب و در یکی از آن‌ها ۱۰ نمونه‌کار بارگذاری کنید.`,
+          ? `برای ارسال پرونده باید در هر دسته ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار داشته باشید. ناقص: ${details}`
+          : `برای ارسال پرونده ابتدا حداقل ${MIN_SELECTED_CATEGORIES} شاخه انتخاب و در هر کدام ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار بارگذاری کنید.`,
       };
     }
 

@@ -15,6 +15,7 @@ import { NavbarWrapper } from "@/components/NavbarWrapper";
 import { MainLayout } from "@/components/Navbar";
 import IosInstallPrompt from "@/components/IosInstallPrompt";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import VpnSlowBanner from "@/components/VpnSlowBanner";
 import { getPwaSettings } from "@/app/actions/pwaActions";
 import ReactGrab from "@/components/ReactGrab";
 
@@ -165,6 +166,7 @@ export default async function RootLayout({
       </head>
       <body className="min-h-dvh bg-jar-canvas font-sans antialiased text-jar-primary">
         {process.env.NODE_ENV === "development" && <ReactGrab />}
+        <VpnSlowBanner />
         <NavbarWrapper />
 
         <MainLayout>

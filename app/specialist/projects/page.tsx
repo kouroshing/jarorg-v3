@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default async function SpecialistProjectsFeedPage() {
   const session = await getSession();
   if (!session || !session.userId) {
-    redirect(encodeURI("/login?redirect=/specialist/projects"));
+    redirect("/join");
   }
 
   await repairOrphanSpecialistRole(session.userId);
@@ -60,6 +60,13 @@ export default async function SpecialistProjectsFeedPage() {
         initialTokens={result.tokens}
         authError={authError}
         redirectTo={redirectTo}
+        kycReady={result.kycReady !== false}
+        kycStatus={result.kycStatus ?? null}
+        kycDeadlineDaysLeft={result.kycDeadlineDaysLeft ?? null}
+        kycDeadlineExpired={Boolean(result.kycDeadlineExpired)}
+        kycDeadlineMessage={result.kycDeadlineMessage ?? null}
+        specialistCity={result.specialistCity ?? null}
+        specialistHasBase={Boolean(result.specialistHasBase)}
       />
     </SpecialistAppShell>
   );

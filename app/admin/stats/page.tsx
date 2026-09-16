@@ -10,6 +10,10 @@ import {
 import { prisma } from "@/lib/prisma";
 import { formatJalaliChartDay } from "@/lib/date/jalali";
 import { storedValuesFor } from "@/lib/orders/status";
+import {
+  funnelPercents,
+  getSpecialistFunnelSnapshot,
+} from "@/lib/admin/specialistFunnel";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +44,7 @@ export default async function AdminStatsPage() {
     jaramoozRevenue,
     planRevenue,
     ordersLast30Days,
+    funnel,
   ] = await Promise.all([
     prisma.order.count({ where: { createdAt: { gte: startOfToday } } }),
     prisma.order.count({ where: { createdAt: { gte: sevenDaysAgo } } }),
@@ -71,7 +76,10 @@ export default async function AdminStatsPage() {
       select: { createdAt: true },
       orderBy: { createdAt: "asc" },
     }),
+    getSpecialistFunnelSnapshot(thirtyDaysAgo),
   ]);
+
+  const rates = funnelPercents(funnel);
 
   const dailyMap = new Map<string, number>();
   for (let i = 29; i >= 0; i--) {
@@ -95,7 +103,7 @@ export default async function AdminStatsPage() {
         <div>
           <h1 className="text-lg sm:text-xl font-black text-slate-900">آمار و گزارش‌ها</h1>
           <p className="text-xs text-slate-500 mt-1">
-            جدا از کار امروز — حجم سفارش، درآمد و وضعیت متخصصان
+            جدا از کار امروز — حجم سفارش، قیف متخصص، درآمد و وضعیت بازار
           </p>
         </div>
         <Link
@@ -121,6 +129,88 @@ export default async function AdminStatsPage() {
           href="/admin/Purchase"
         />
       </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-black text-slate-900">قیف متخصص · سلامت تبدیل</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+              موجودی وضعیت‌ها + نرخ تبدیل فعال‌ها به اولین اعلام آمادگی و اولین پروژه
+              تکمیل‌شده
+            </p>
+          </div>
+          <Link
+            href="/admin/review"
+            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+          >
+            صف بررسی متخصصان
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <MiniStat label="ناقص" value={funnel.incomplete} />
+          <MiniStat label="صف بررسی" value={funnel.pendingReview} href="/admin/review" />
+          <MiniStat label="فعال" value={funnel.active} />
+          <MiniStat label="فعال + KYC" value={funnel.activeKycVerified} />
+          <MiniStat label="KYC در صف" value={funnel.activeKycPending} />
+          <MiniStat label="بدون KYC / رد" value={funnel.activeKycMissing} />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <ConversionCard
+            title="احراز هویت تاییدشده"
+            part={funnel.activeKycVerified}
+            whole={funnel.active}
+            percent={rates.kycRate}
+            hint="از متخصصان فعال"
+          />
+          <ConversionCard
+            title="حداقل یک اعلام آمادگی"
+            part={funnel.withAtLeastOneApply}
+            whole={funnel.active}
+            percent={rates.applyRate}
+            hint="از متخصصان فعال"
+          />
+          <ConversionCard
+            title="حداقل یک پروژه تکمیل‌شده"
+            part={funnel.withAtLeastOneCompleted}
+            whole={funnel.active}
+            percent={rates.completeRate}
+            hint="از متخصصان فعال"
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100">
+          <MiniStat label="پروفایل جدید ۳۰روز" value={funnel.profilesCreated30d} />
+          <MiniStat label="اعلام آمادگی ۳۰روز" value={funnel.applies30d} />
+          <MiniStat
+            label="تکمیل با متخصص ۳۰روز"
+            value={funnel.completedWithSpecialist30d}
+          />
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-sm font-black text-slate-900">توکن ماهانه · تنظیمات زنده</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              نرخ‌ها از PwaSettings خوانده می‌شود؛ برای تغییر اینجا بروید
+            </p>
+          </div>
+          <Link
+            href="/admin/PwaSettings"
+            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+          >
+            ویرایش تنظیمات بازار
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <MiniStat label="توکن رایگان / ماه" value={funnel.freeMonthlyTokens} />
+          <MiniStat label="هزینه اعلام آمادگی" value={funnel.tokenCostApply} />
+          <MiniStat label="هزینه رد کردن پروژه" value={funnel.tokenCostDismiss} />
+        </div>
+      </section>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -191,5 +281,63 @@ function StatCard({
   }
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">{inner}</div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: number;
+  href?: string;
+}) {
+  const inner = (
+    <>
+      <p className="text-[10px] font-bold text-slate-500 leading-snug">{label}</p>
+      <p className="text-lg font-black text-slate-900 mt-1 tabular-nums">
+        {value.toLocaleString("fa-IR")}
+      </p>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 hover:bg-slate-100"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">{inner}</div>
+  );
+}
+
+function ConversionCard({
+  title,
+  part,
+  whole,
+  percent,
+  hint,
+}: {
+  title: string;
+  part: number;
+  whole: number;
+  percent: number | null;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1">
+      <p className="text-[11px] font-black text-slate-900">{title}</p>
+      <p className="text-xl font-black text-slate-900 tabular-nums">
+        {percent != null ? `${percent.toLocaleString("fa-IR")}٪` : "—"}
+      </p>
+      <p className="text-[10px] text-slate-500">
+        {part.toLocaleString("fa-IR")} از {whole.toLocaleString("fa-IR")} · {hint}
+      </p>
+    </div>
   );
 }

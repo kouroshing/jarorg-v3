@@ -6,10 +6,22 @@ import { getSession } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { createNotification } from "@/lib/notifications";
 import { getMarketplaceSettings } from "@/lib/orders/settings";
-import { canAfford, getTokenBalance, outOfTokensMessage } from "@/lib/orders/tokens";
+import {
+  UNDISMISS_SHOW_MARKER,
+  canAfford,
+  getTokenBalance,
+  outOfTokensMessage,
+} from "@/lib/orders/tokens";
 import { conflictMessage, findScheduleConflict } from "@/lib/orders/conflicts";
+import { listSpecialistCommittedAgenda } from "@/lib/orders/specialistAgenda";
 import { proposalTotal, quoteTravel } from "@/lib/orders/travel";
 import { resolveScheduledAt } from "@/lib/date/jalali";
+import {
+  resolveLocationCover,
+  formatApproxShootArea,
+  parseLocationImageUrls,
+} from "@/lib/locations/photoLocation";
+import { getBudgetStops } from "@/lib/pricing/budgetStops";
 import {
   type OrderStatus,
   OPEN_TO_APPLICANTS_STATUSES,
@@ -25,6 +37,20 @@ import {
 } from "@/lib/orders/cancelReasons";
 import { CATEGORIES_BY_SLUG } from "@/lib/categories";
 import { formatPublicSpecialistName } from "@/lib/specialists/publicName";
+import { getSpecialistRatingAggregates } from "@/lib/specialists/publicStats";
+import {
+  parseSelectedCategories,
+} from "@/lib/specialists/eligibility";
+import {
+  formatKycDeadlineMessage,
+  getKycDeadlineInfo,
+  isKycMarketplaceReady,
+  kycMarketplaceBlockMessage,
+  kycSelectBlockMessage,
+} from "@/lib/kyc/gates";
+import { enforceKycDeadlineForSpecialist } from "@/lib/kyc/deadline";
+import { revealDueOrderContacts } from "@/lib/orders/revealContacts";
+import { applyDueNoMatches } from "@/lib/orders/noMatch";
 
 // -------------------------------------------------------------
 // Validation Schemas
@@ -66,10 +92,17 @@ const submitInterestSchema = z
       .optional()
       .nullable(),
     scheduleStance: z
-      .enum(["ACCEPT_CLIENT", "DEFER", "PROPOSE"])
+      .enum(["ACCEPT_CLIENT", "PROPOSE"])
       .default("ACCEPT_CLIENT"),
     proposedBookingDate: z.string().trim().max(32).optional().nullable(),
     proposedTimeSlot: z.string().trim().max(80).optional().nullable(),
+    proposedPhotoLocationId: z
+      .string()
+      .trim()
+      .max(64)
+      .optional()
+      .nullable()
+      .transform((v) => (v && v.length > 0 ? v : null)),
   })
   .refine(
     (v) =>
@@ -84,7 +117,7 @@ const submitInterestSchema = z
       v.scheduleStance !== "PROPOSE" ||
       (!!v.proposedBookingDate && !!v.proposedTimeSlot),
     {
-      message: "برای پیشنهاد زمان جایگزین، تاریخ و بازه الزامی است.",
+      message: "برای پیشنهاد زمان، تاریخ و بازه الزامی است.",
       path: ["proposedBookingDate"],
     }
   );
@@ -115,6 +148,28 @@ export interface AvailableOrderSpecialistView {
   durationHours: number;
   locationType: string;
   districtOrCity: string | null;
+  /**
+   * Shoot location context for specialists (pre-payment).
+   * Exact address stays in `contact` until reveal — only an approximate area here.
+   */
+  locationContext: {
+    kind: "JAR_LOCATION" | "CUSTOM_PIN" | "SPECIALIST_ADVICE" | "JAR_STUDIO";
+    photoLocation: {
+      id: string;
+      name: string;
+      slug: string;
+      coverImageUrl: string | null;
+      /** Up to 3 gallery thumbs for the open-board card (no exact map). */
+      previewImageUrls: string[];
+      district: string | null;
+      city: string | null;
+    } | null;
+    /** Human-readable approximate area (never street-level). */
+    approxArea: string;
+    hasPinnedCoords: boolean;
+  };
+  /** Platform commission % on the specialist fee (for payout estimate in UI). */
+  specialistCommissionPercent: number;
   referenceLink: string | null;
   moodboardUrls: string[];
   projectDescription: string | null;
@@ -156,6 +211,7 @@ export interface AvailableOrderSpecialistView {
     travelFee: number | null;
     travelFeeOverride: number | null;
     createdAt: string;
+    updatedAt: string;
   } | null;
 }
 
@@ -173,9 +229,19 @@ export interface ApplicantSpecialistView {
   distanceKm: number | null;
   /** proposedPrice plus the effective travel fee — what the client pays. */
   totalPrice: number;
+  /** Jar floor for this order (client estimate); bids cannot go below. */
+  jarBasePrice: number;
   scheduleStance: string;
   proposedBookingDate: string | null;
   proposedTimeSlot: string | null;
+  proposedPhotoLocation: {
+    id: string;
+    name: string;
+    slug: string;
+    coverImageUrl: string | null;
+    district: string | null;
+    city: string | null;
+  } | null;
   createdAt: string;
   specialist: {
     id: string;
@@ -189,6 +255,8 @@ export interface ApplicantSpecialistView {
     avatarUrl: string | null;
     completedProjects: number;
     approvedPortfolio: number;
+    avgRating: number | null;
+    ratingCount: number;
     portfolioItems: {
       id: string;
       fileUrl: string;
@@ -207,11 +275,47 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
   redirectTo?: string;
   orders?: AvailableOrderSpecialistView[];
   tokens?: SpecialistTokenSummary;
+  /** Marketplace apply requires VERIFIED. */
+  kycStatus?: string | null;
+  kycReady?: boolean;
+  /** Days left in post-approval KYC window (null if verified / no clock). */
+  kycDeadlineDaysLeft?: number | null;
+  kycDeadlineExpired?: boolean;
+  kycDeadlineMessage?: string | null;
+  kycDeadlineEndsAt?: string | null;
+  /** Specialist home city — used to bias the open-board filter. */
+  specialistCity?: string | null;
+  /** True when baseLat/baseLng are set — travel quotes need this. */
+  specialistHasBase?: boolean;
 }> {
   try {
     const session = await getSession();
     if (!session || !session.userId) {
       return { success: false, error: "لطفاً ابتدا وارد حساب کاربری خود شوید." };
+    }
+
+    // Auto-suspend if ACTIVE + past 7-day KYC window without VERIFIED.
+    const deadlineGate = await enforceKycDeadlineForSpecialist(session.userId);
+    // Lazy cron fallbacks so contact reveal / NO_MATCH do not depend only on jobs.
+    await Promise.all([
+      revealDueOrderContacts({ limit: 10 }).catch(() => 0),
+      applyDueNoMatches({ limit: 8 }).catch(() => 0),
+    ]);
+    if (deadlineGate.suspendedNow) {
+      return {
+        success: false,
+        error: formatKycDeadlineMessage(deadlineGate.deadline, deadlineGate.kycStatus),
+        redirectTo: "/specialist/onboarding/identity",
+        kycStatus: deadlineGate.kycStatus,
+        kycReady: false,
+        kycDeadlineDaysLeft: 0,
+        kycDeadlineExpired: true,
+        kycDeadlineMessage: formatKycDeadlineMessage(
+          deadlineGate.deadline,
+          deadlineGate.kycStatus
+        ),
+        kycDeadlineEndsAt: deadlineGate.deadline.endsAt?.toISOString() ?? null,
+      };
     }
 
     // Specialist Authorization Guard
@@ -223,6 +327,18 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
         redirectTo: authCheck.redirectTo,
       };
     }
+
+    const kycRow = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: { kycStatus: true, city: true, reviewedAt: true },
+    });
+    const kycStatus = kycRow?.kycStatus ?? "NONE";
+    const kycReady = isKycMarketplaceReady(kycStatus);
+    const deadline = getKycDeadlineInfo({
+      reviewedAt: kycRow?.reviewedAt,
+      kycStatus,
+    });
+    const specialistCity = kycRow?.city ?? authCheck.specialistProfile?.city ?? null;
 
     // Orders that are open for proposals OR where this specialist is selected/has applied
     const orders = await prisma.order.findMany({
@@ -246,14 +362,31 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
             },
           },
         ],
-        // A project the specialist dismissed stays out of their feed.
+        // A project the specialist dismissed stays out of their feed
+        // (unless they undismissed — marker keeps the token spend).
         NOT: {
           interests: {
-            some: { specialistId: session.userId, status: "NOT_INTERESTED" },
+            some: {
+              specialistId: session.userId,
+              status: "NOT_INTERESTED",
+              NOT: { travelFeeOverrideReason: UNDISMISS_SHOW_MARKER },
+            },
           },
         },
       },
       include: {
+        photoLocation: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            coverImageUrl: true,
+            imageUrls: true,
+            district: true,
+            city: true,
+            status: true,
+          },
+        },
         interests: {
           where: { specialistId: session.userId },
           select: {
@@ -264,6 +397,7 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
             travelFee: true,
             travelFeeOverride: true,
             createdAt: true,
+            updatedAt: true,
           },
         },
         _count: {
@@ -319,6 +453,74 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
         durationHours: o.durationHours,
         locationType: o.locationType,
         districtOrCity: o.districtOrCity,
+        locationContext: (() => {
+          const hasPinnedCoords =
+            o.locationLat != null &&
+            o.locationLng != null &&
+            Number.isFinite(o.locationLat) &&
+            Number.isFinite(o.locationLng);
+          const jar =
+            o.photoLocation && o.photoLocation.status === "APPROVED"
+              ? (() => {
+                  const gallery = parseLocationImageUrls(o.photoLocation!.imageUrls);
+                  const cover = resolveLocationCover(
+                    o.photoLocation!.coverImageUrl,
+                    gallery
+                  );
+                  const previewImageUrls = Array.from(
+                    new Set([cover, ...gallery].filter(Boolean) as string[])
+                  ).slice(0, 3);
+                  return {
+                    id: o.photoLocation!.id,
+                    name: o.photoLocation!.name,
+                    slug: o.photoLocation!.slug,
+                    coverImageUrl: cover,
+                    previewImageUrls,
+                    district: o.photoLocation!.district,
+                    city: o.photoLocation!.city,
+                  };
+                })()
+              : null;
+          const approxArea = formatApproxShootArea({
+            districtOrCity: o.districtOrCity,
+            city: jar?.city,
+            district: jar?.district,
+          });
+
+          if (o.locationType === "SPECIALIST_ADVICE") {
+            return {
+              kind: "SPECIALIST_ADVICE" as const,
+              photoLocation: null,
+              approxArea: formatApproxShootArea({
+                districtOrCity: o.districtOrCity,
+              }),
+              hasPinnedCoords: false,
+            };
+          }
+          if (o.locationType === "JAR_STUDIO") {
+            return {
+              kind: "JAR_STUDIO" as const,
+              photoLocation: jar,
+              approxArea,
+              hasPinnedCoords,
+            };
+          }
+          if (jar) {
+            return {
+              kind: "JAR_LOCATION" as const,
+              photoLocation: jar,
+              approxArea,
+              hasPinnedCoords,
+            };
+          }
+          return {
+            kind: "CUSTOM_PIN" as const,
+            photoLocation: null,
+            approxArea,
+            hasPinnedCoords,
+          };
+        })(),
+        specialistCommissionPercent: settings.specialistCommission,
         referenceLink: o.referenceLink,
         moodboardUrls: moodboardList,
         projectDescription: o.projectDescription,
@@ -351,9 +553,21 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
               travelFee: myInterest.travelFee,
               travelFeeOverride: myInterest.travelFeeOverride,
               createdAt: myInterest.createdAt.toISOString(),
+              updatedAt: myInterest.updatedAt.toISOString(),
             }
           : null,
       };
+    });
+
+    mapped.sort((a, b) => {
+      const da = a.travel?.distanceKm;
+      const db = b.travel?.distanceKm;
+      const aHas = typeof da === "number" && Number.isFinite(da);
+      const bHas = typeof db === "number" && Number.isFinite(db);
+      if (aHas && bHas && da !== db) return (da as number) - (db as number);
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
     const balance = await getTokenBalance(session.userId);
@@ -361,6 +575,14 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
     return {
       success: true,
       orders: mapped,
+      kycStatus,
+      kycReady,
+      kycDeadlineDaysLeft: deadline.daysLeft,
+      kycDeadlineExpired: deadline.isExpired,
+      kycDeadlineMessage: formatKycDeadlineMessage(deadline, kycStatus) || null,
+      kycDeadlineEndsAt: deadline.endsAt?.toISOString() ?? null,
+      specialistCity,
+      specialistHasBase: Boolean(base),
       tokens: {
         granted: balance.granted,
         spent: balance.spent,
@@ -373,6 +595,34 @@ export async function getAvailableOrdersForSpecialistAction(): Promise<{
   } catch (error: any) {
     console.error("Error in getAvailableOrdersForSpecialistAction:", error);
     return { success: false, error: "خطا در دریافت لیست پروژه‌های فعال." };
+  }
+}
+
+/** Committed shoots for the logged-in specialist (interest-modal calendar). */
+export async function getSpecialistWorkAgendaAction(daysAhead = 28): Promise<{
+  success: boolean;
+  error?: string;
+  events?: Awaited<ReturnType<typeof listSpecialistCommittedAgenda>>;
+  /** Live platform commission % — for payout estimate when applying. */
+  specialistCommissionPercent?: number;
+}> {
+  try {
+    const session = await getSession();
+    if (!session?.userId) {
+      return { success: false, error: "لطفاً وارد شوید." };
+    }
+    const [events, settings] = await Promise.all([
+      listSpecialistCommittedAgenda(session.userId, daysAhead),
+      getMarketplaceSettings(),
+    ]);
+    return {
+      success: true,
+      events,
+      specialistCommissionPercent: settings.specialistCommission,
+    };
+  } catch (error) {
+    console.error("getSpecialistWorkAgendaAction:", error);
+    return { success: false, error: "خطا در دریافت تقویم کاری." };
   }
 }
 
@@ -404,15 +654,35 @@ export async function submitProjectInterestAction(
       };
     }
 
+    const deadlineGate = await enforceKycDeadlineForSpecialist(session.userId);
+    if (deadlineGate.suspendedNow || deadlineGate.status === "SUSPENDED") {
+      return {
+        success: false,
+        error: formatKycDeadlineMessage(deadlineGate.deadline, deadlineGate.kycStatus),
+        redirectTo: "/specialist/onboarding/identity",
+      };
+    }
+
     const avatarRow = await prisma.specialistProfile.findUnique({
       where: { userId: session.userId },
-      select: { avatarUrl: true },
+      select: { avatarUrl: true, kycStatus: true, reviewedAt: true },
     });
     if (!avatarRow?.avatarUrl?.trim()) {
       return {
         success: false,
         error: "عکس پروفایل الزامی است. ابتدا عکس خود را آپلود کنید.",
         redirectTo: "/specialist/onboarding/profile",
+      };
+    }
+    if (!isKycMarketplaceReady(avatarRow.kycStatus)) {
+      const deadline = getKycDeadlineInfo({
+        reviewedAt: avatarRow.reviewedAt,
+        kycStatus: avatarRow.kycStatus,
+      });
+      return {
+        success: false,
+        error: kycMarketplaceBlockMessage(avatarRow.kycStatus, deadline),
+        redirectTo: "/specialist/onboarding/identity",
       };
     }
 
@@ -425,6 +695,7 @@ export async function submitProjectInterestAction(
       scheduleStance,
       proposedBookingDate,
       proposedTimeSlot,
+      proposedPhotoLocationId,
     } = parsed.data;
 
     // Verify order exists and is accepting applications
@@ -436,13 +707,16 @@ export async function submitProjectInterestAction(
         status: true,
         contactPhone: true,
         categoryTitle: true,
+        categorySlug: true,
         locationLat: true,
         locationLng: true,
+        locationType: true,
         scheduledAt: true,
         durationHours: true,
         bookingDate: true,
         timeSlot: true,
         isFlexibleSchedule: true,
+        totalEstimatedPrice: true,
       },
     });
 
@@ -460,6 +734,92 @@ export async function submitProjectInterestAction(
     if (order.userId === session.userId || (order.contactPhone && order.contactPhone === session.phone)) {
       return { success: false, error: "شما نمی‌توانید برای سفارش ثبت‌شده توسط خودتان پیشنهاد ارسال کنید." };
     }
+
+    // Flexible client ("best timing") → specialist must propose a concrete window.
+    if (order.isFlexibleSchedule && scheduleStance !== "PROPOSE") {
+      return {
+        success: false,
+        error: "کارفرما زمان توافقی خواسته؛ لطفاً تاریخ و بازهٔ پیشنهادی خود را انتخاب کنید.",
+      };
+    }
+
+    let resolvedProposedPhotoLocationId: string | null = null;
+    let proposedLocCoords: { lat: number; lng: number } | null = null;
+    if (proposedPhotoLocationId) {
+      const loc = await prisma.photoLocation.findFirst({
+        where: { id: proposedPhotoLocationId, status: "APPROVED" },
+        select: { id: true, lat: true, lng: true },
+      });
+      if (!loc) {
+        return { success: false, error: "لوکیشن پیشنهادی معتبر نیست یا هنوز تایید نشده." };
+      }
+      resolvedProposedPhotoLocationId = loc.id;
+      proposedLocCoords = { lat: loc.lat, lng: loc.lng };
+    } else if (order.locationType === "SPECIALIST_ADVICE") {
+      return {
+        success: false,
+        error: "کارفرما مشورت لوکیشن خواسته؛ لطفاً یک جار لوکیشن از محدودهٔ خود پیشنهاد دهید.",
+      };
+    }
+
+    // Category must be one the specialist declared and was approved to offer.
+    const specialistCats = await prisma.specialistProfile.findUnique({
+      where: { userId: session.userId },
+      select: {
+        selectedCategories: true,
+        portfolioItems: {
+          where: { reviewStatus: "APPROVED" },
+          select: { categorySlug: true },
+        },
+      },
+    });
+    const declared = parseSelectedCategories(specialistCats?.selectedCategories);
+    const approvedByCat: Record<string, number> = {};
+    for (const item of specialistCats?.portfolioItems || []) {
+      approvedByCat[item.categorySlug] = (approvedByCat[item.categorySlug] || 0) + 1;
+    }
+    const orderCat = order.categorySlug || "";
+    const inDeclared = Boolean(orderCat && declared.includes(orderCat));
+    const approvedCount = approvedByCat[orderCat] || 0;
+    if (!inDeclared) {
+      return {
+        success: false,
+        error:
+          "این پروژه در دسته تخصص‌های اعلام‌شده شما نیست. فقط برای دسته‌های پروفایل خود اعلام آمادگی کنید.",
+      };
+    }
+    if (approvedCount < 1) {
+      return {
+        success: false,
+        error: "برای این دسته هنوز نمونه‌کار تأییدشده ندارید.",
+      };
+    }
+
+    // Jar sets the floor (client estimate). Specialist may only match or raise.
+    const jarFloor = order.totalEstimatedPrice;
+    if (!jarFloor || jarFloor <= 0) {
+      return { success: false, error: "نرخ پایه این سفارش نامعتبر است. با پشتیبانی جار تماس بگیرید." };
+    }
+    const maxHourly = getBudgetStops().at(-1)?.rate ?? jarFloor;
+    const jarCeiling = Math.max(
+      jarFloor,
+      maxHourly * Math.max(1, order.durationHours || 1)
+    );
+    let resolvedBasePrice =
+      proposedPrice == null || proposedPrice <= 0 ? jarFloor : proposedPrice;
+    if (resolvedBasePrice < jarFloor) {
+      return {
+        success: false,
+        error: `حداقل مبلغ مجاز ${jarFloor.toLocaleString("fa-IR")} تومان (نرخ پایه جار) است. فقط افزایش مجاز است.`,
+      };
+    }
+    if (resolvedBasePrice > jarCeiling) {
+      return {
+        success: false,
+        error: `حداکثر مبلغ مجاز ${jarCeiling.toLocaleString("fa-IR")} تومان است.`,
+      };
+    }
+    resolvedBasePrice = Math.min(jarCeiling, Math.max(jarFloor, resolvedBasePrice));
 
     // Check existing interest record
     const existing = await prisma.projectInterest.findUnique({
@@ -480,17 +840,16 @@ export async function submitProjectInterestAction(
     // Enforced here rather than in the UI alone, because the action is callable
     // directly and the allowance is what keeps a few specialists from
     // blanketing every client's shortlist.
-    const balance = await getTokenBalance(session.userId);
-    if (!canAfford(balance, "apply")) {
-      return { success: false, error: outOfTokensMessage(balance, "apply") };
-    }
+    // (Final affordability is re-checked inside the transaction below.)
 
     // Multiple projects are fine; two at the same time are not. Checked again
     // when the client selects, because a clash can appear in between.
     const conflictAt =
       scheduleStance === "PROPOSE"
         ? resolveScheduledAt(proposedBookingDate, proposedTimeSlot)
-        : order.scheduledAt;
+        : !order.isFlexibleSchedule
+          ? resolveScheduledAt(order.bookingDate, order.timeSlot) || order.scheduledAt
+          : order.scheduledAt;
     const clash = await findScheduleConflict(
       session.userId,
       conflictAt,
@@ -507,19 +866,23 @@ export async function submitProjectInterestAction(
         scheduleStance === "PROPOSE" ? proposedBookingDate || null : null,
       proposedTimeSlot:
         scheduleStance === "PROPOSE" ? proposedTimeSlot || null : null,
+      proposedPhotoLocationId: resolvedProposedPhotoLocationId,
     };
 
-    // Quote travel from the specialist's registered base to the shoot. Computed
-    // server-side so the client and the specialist always see the same figure
-    // for the same trip; the specialist may override it, with a reason.
+    // Quote travel from the specialist's base to the shoot destination.
+    // When they propose a جار لوکیشن, that pin is the destination — not the
+    // client's original pin.
     const settings = await getMarketplaceSettings();
+    const destination =
+      proposedLocCoords ??
+      (order.locationLat != null && order.locationLng != null
+        ? { lat: order.locationLat, lng: order.locationLng }
+        : null);
     const quote = quoteTravel(
       authCheck.specialistProfile?.baseLat != null && authCheck.specialistProfile?.baseLng != null
         ? { lat: authCheck.specialistProfile.baseLat, lng: authCheck.specialistProfile.baseLng }
         : null,
-      order.locationLat != null && order.locationLng != null
-        ? { lat: order.locationLat, lng: order.locationLng }
-        : null,
+      destination,
       settings
     );
 
@@ -531,45 +894,58 @@ export async function submitProjectInterestAction(
     };
 
     // Atomic creation / update and status transition using transaction
-    const result = await prisma.$transaction(async (tx) => {
-      let interest;
-      if (existing) {
-        // Re-activate previously withdrawn or declined proposal
-        interest = await tx.projectInterest.update({
-          where: { id: existing.id },
-          data: {
-            message,
-            proposedPrice: proposedPrice || null,
-            ...travelData,
-            ...scheduleData,
-            status: "PENDING",
-            updatedAt: new Date(),
-          },
-        });
-      } else {
-        interest = await tx.projectInterest.create({
-          data: {
-            orderId,
-            specialistId: session.userId,
-            message,
-            proposedPrice: proposedPrice || null,
-            ...travelData,
-            ...scheduleData,
-            status: "PENDING",
-          },
-        });
-      }
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const balance = await getTokenBalance(session.userId, new Date(), tx as typeof prisma);
+        if (!canAfford(balance, "apply")) {
+          throw new Error(outOfTokensMessage(balance, "apply"));
+        }
 
-      // Advance order status to HAS_APPLICANTS if it was DEPOSIT_PAID or MATCHING
-      if (order.status === "DEPOSIT_PAID" || order.status === "MATCHING") {
-        await tx.order.update({
-          where: { id: orderId },
-          data: { status: "HAS_APPLICANTS" satisfies OrderStatus },
-        });
-      }
+        let interest;
+        if (existing) {
+          // Re-activate previously withdrawn or declined proposal
+          interest = await tx.projectInterest.update({
+            where: { id: existing.id },
+            data: {
+              message,
+              proposedPrice: resolvedBasePrice,
+              ...travelData,
+              ...scheduleData,
+              status: "PENDING",
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          interest = await tx.projectInterest.create({
+            data: {
+              orderId,
+              specialistId: session.userId,
+              message,
+              proposedPrice: resolvedBasePrice,
+              ...travelData,
+              ...scheduleData,
+              status: "PENDING",
+            },
+          });
+        }
 
-      return interest;
-    });
+        // Advance order status to HAS_APPLICANTS if it was DEPOSIT_PAID or MATCHING
+        if (order.status === "DEPOSIT_PAID" || order.status === "MATCHING") {
+          await tx.order.update({
+            where: { id: orderId },
+            data: { status: "HAS_APPLICANTS" satisfies OrderStatus },
+          });
+        }
+
+        return interest;
+      });
+    } catch (e: any) {
+      if (typeof e?.message === "string" && e.message.includes("توکن")) {
+        return { success: false, error: e.message };
+      }
+      throw e;
+    }
 
     // Notify client internally if user ID is linked
     if (order.userId) {
@@ -738,6 +1114,7 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
         status: true,
         categorySlug: true,
         selectedSpecialistId: true,
+        totalEstimatedPrice: true,
       },
     });
 
@@ -755,13 +1132,31 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
       return { success: false, error: "شما مجاز به مشاهده متقاضیان این سفارش نیستید." };
     }
 
-    // Exclude WITHDRAWN interests from client's active applicants view
+    // Exclude WITHDRAWN and specialists who cannot be selected (not ACTIVE / KYC).
     const interests = await prisma.projectInterest.findMany({
       where: {
         orderId: validOrderId,
         status: { not: "WITHDRAWN" },
+        specialist: {
+          specialistProfile: {
+            status: "ACTIVE",
+            kycStatus: "VERIFIED",
+          },
+        },
       },
       include: {
+        proposedPhotoLocation: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            coverImageUrl: true,
+            imageUrls: true,
+            district: true,
+            city: true,
+            status: true,
+          },
+        },
         specialist: {
           select: {
             id: true,
@@ -782,6 +1177,8 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
                 studioLng: true,
                 isMobileGrapher: true,
                 avatarUrl: true,
+                status: true,
+                kycStatus: true,
                 _count: {
                   select: {
                     portfolioItems: { where: { reviewStatus: "APPROVED" } },
@@ -812,9 +1209,9 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
     const categoryMedia = CATEGORIES_BY_SLUG[order.categorySlug || ""]?.mediaType;
 
     const specialistIds = interests.map((i) => i.specialistId);
-    const completedGroups =
+    const [completedGroups, ratingBySpecialist] = await Promise.all([
       specialistIds.length > 0
-        ? await prisma.order.groupBy({
+        ? prisma.order.groupBy({
             by: ["selectedSpecialistId"],
             where: {
               selectedSpecialistId: { in: specialistIds },
@@ -822,7 +1219,9 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
             },
             _count: { _all: true },
           })
-        : [];
+        : Promise.resolve([]),
+      getSpecialistRatingAggregates(specialistIds),
+    ]);
     const completedBySpecialist = new Map(
       completedGroups
         .filter((g) => g.selectedSpecialistId)
@@ -852,9 +1251,24 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
         travelFeeOverrideReason: item.travelFeeOverrideReason,
         distanceKm: item.distanceKm,
         totalPrice: proposalTotal(item),
+        jarBasePrice: order.totalEstimatedPrice,
         scheduleStance: item.scheduleStance || "ACCEPT_CLIENT",
         proposedBookingDate: item.proposedBookingDate ?? null,
         proposedTimeSlot: item.proposedTimeSlot ?? null,
+        proposedPhotoLocation:
+          item.proposedPhotoLocation && item.proposedPhotoLocation.status === "APPROVED"
+            ? {
+                id: item.proposedPhotoLocation.id,
+                name: item.proposedPhotoLocation.name,
+                slug: item.proposedPhotoLocation.slug,
+                coverImageUrl: resolveLocationCover(
+                  item.proposedPhotoLocation.coverImageUrl,
+                  item.proposedPhotoLocation.imageUrls
+                ),
+                district: item.proposedPhotoLocation.district,
+                city: item.proposedPhotoLocation.city,
+              }
+            : null,
         createdAt: item.createdAt.toISOString(),
         specialist: {
           id: item.specialist.id,
@@ -878,6 +1292,8 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
           completedProjects: completedBySpecialist.get(item.specialistId) || 0,
           approvedPortfolio:
             item.specialist.specialistProfile?._count?.portfolioItems || 0,
+          avgRating: ratingBySpecialist.get(item.specialistId)?.avgRating ?? null,
+          ratingCount: ratingBySpecialist.get(item.specialistId)?.ratingCount ?? 0,
           portfolioItems,
         },
       };
@@ -896,13 +1312,12 @@ export async function getOrderApplicantsForClientAction(orderId: string): Promis
 }
 
 // -------------------------------------------------------------
-// 5. Select Specialist For Order (Client Action - Step 1 of Confirmation)
+// 5. Select Specialist For Order (Client Action)
 // -------------------------------------------------------------
 /**
  * Client selects a specialist.
- * Order moves to AWAITING_SPECIALIST_CONFIRMATION.
- * Interest moves to SELECTED.
- * Other applicants are NOT rejected yet, preserving fallback options.
+ * Order moves to AWAITING_PAYMENT (no second specialist confirmation).
+ * Interest moves to SELECTED. Other applicants stay pending until payment.
  */
 export async function selectSpecialistForOrderAction(
   orderId: string,
@@ -939,6 +1354,12 @@ export async function selectSpecialistForOrderAction(
           status: true,
           selectedSpecialistId: true,
           categoryTitle: true,
+          totalEstimatedPrice: true,
+          scheduledAt: true,
+          durationHours: true,
+          bookingDate: true,
+          timeSlot: true,
+          isFlexibleSchedule: true,
         },
       });
 
@@ -972,6 +1393,19 @@ export async function selectSpecialistForOrderAction(
           scheduleStance: true,
           proposedBookingDate: true,
           proposedTimeSlot: true,
+          proposedPhotoLocationId: true,
+          proposedPhotoLocation: {
+            select: {
+              id: true,
+              name: true,
+              lat: true,
+              lng: true,
+              address: true,
+              city: true,
+              district: true,
+              status: true,
+            },
+          },
         },
       });
 
@@ -983,6 +1417,64 @@ export async function selectSpecialistForOrderAction(
         throw new Error("این متقاضی از انجام پروژه انصراف داده است و قابل انتخاب نیست.");
       }
 
+      const specialistProfile = await tx.specialistProfile.findUnique({
+        where: { userId: interest.specialistId },
+        select: { kycStatus: true, status: true },
+      });
+      if (!specialistProfile || specialistProfile.status !== "ACTIVE") {
+        throw new Error("این متخصص فعلاً فعال نیست و قابل انتخاب نیست.");
+      }
+      if (!isKycMarketplaceReady(specialistProfile.kycStatus)) {
+        throw new Error(kycSelectBlockMessage(specialistProfile.kycStatus));
+      }
+
+      // Resolve the schedule that will be frozen onto the order, then re-check
+      // conflicts (1h buffer) — a clash may have appeared since they applied.
+      let effectiveScheduledAt: Date | null = order.scheduledAt;
+      let effectiveDuration = order.durationHours || 2;
+      if (
+        interest.scheduleStance === "PROPOSE" &&
+        interest.proposedBookingDate &&
+        interest.proposedTimeSlot
+      ) {
+        effectiveScheduledAt = resolveScheduledAt(
+          interest.proposedBookingDate,
+          interest.proposedTimeSlot
+        );
+      }
+      const clash = await findScheduleConflict(
+        interest.specialistId,
+        effectiveScheduledAt,
+        effectiveDuration,
+        validOrderId
+      );
+      if (clash) {
+        throw new Error(conflictMessage(clash));
+      }
+
+      // Close out every other active proposal immediately — losers should not
+      // keep waiting until payment. Re-selecting someone else also rejects the
+      // previous SELECTED pick.
+      const losers = await tx.projectInterest.findMany({
+        where: {
+          orderId: validOrderId,
+          NOT: { id: validInterestId },
+          status: { in: ["PENDING", "SELECTED"] },
+        },
+        select: { specialistId: true },
+      });
+
+      if (losers.length > 0) {
+        await tx.projectInterest.updateMany({
+          where: {
+            orderId: validOrderId,
+            NOT: { id: validInterestId },
+            status: { in: ["PENDING", "SELECTED"] },
+          },
+          data: { status: "REJECTED" },
+        });
+      }
+
       await tx.projectInterest.update({
         where: { id: validInterestId },
         data: { status: "SELECTED" },
@@ -992,7 +1484,15 @@ export async function selectSpecialistForOrderAction(
       // afterwards; the price the client saw when they chose is the price they
       // are charged. Commission is snapshotted too, so changing the platform
       // rate later cannot re-price a deal that has already been struck.
-      const agreedBasePrice = interest.proposedPrice ?? 0;
+      // Never settle below Jar's floor (client estimate on the order).
+      const jarFloor = order.totalEstimatedPrice > 0 ? order.totalEstimatedPrice : 0;
+      const rawBase = interest.proposedPrice ?? jarFloor;
+      if (jarFloor > 0 && rawBase < jarFloor) {
+        throw new Error(
+          `پیشنهاد متخصص کمتر از نرخ پایه جار (${jarFloor.toLocaleString("fa-IR")} تومان) است.`
+        );
+      }
+      const agreedBasePrice = Math.max(rawBase, jarFloor);
       const agreedTravelFee = interest.travelFeeOverride ?? interest.travelFee ?? 0;
 
       const schedulePatch =
@@ -1010,6 +1510,22 @@ export async function selectSpecialistForOrderAction(
             }
           : {};
 
+      // If the specialist proposed a جار لوکیشن, lock that pin onto the order
+      // so travel, maps, and reveal all use the same destination that was priced.
+      const loc = interest.proposedPhotoLocation;
+      const locationPatch =
+        loc && loc.status === "APPROVED"
+          ? {
+              photoLocationId: loc.id,
+              locationLat: loc.lat,
+              locationLng: loc.lng,
+              locationAddress: loc.address?.trim() || loc.name,
+              districtOrCity:
+                [loc.city, loc.district].filter(Boolean).join("، ") || loc.name,
+              locationType: "CLIENT_LOCATION",
+            }
+          : {};
+
       await tx.order.update({
         where: { id: validOrderId },
         data: {
@@ -1023,6 +1539,7 @@ export async function selectSpecialistForOrderAction(
           agreedTotalPrice: agreedBasePrice + agreedTravelFee,
           commissionPercent: commission,
           ...schedulePatch,
+          ...locationPatch,
         },
       });
 
@@ -1030,6 +1547,7 @@ export async function selectSpecialistForOrderAction(
         specialistId: interest.specialistId,
         categoryTitle: order.categoryTitle || "عکاسی",
         agreedTotalPrice: agreedBasePrice + agreedTravelFee,
+        loserIds: losers.map((l) => l.specialistId),
       };
     });
 
@@ -1041,6 +1559,18 @@ export async function selectSpecialistForOrderAction(
       type: "SUCCESS",
       link: `/specialist/mine`,
     });
+
+    await Promise.all(
+      result.loserIds.map((loserId) =>
+        createNotification({
+          userId: loserId,
+          title: "پیشنهاد انتخاب نشد",
+          message: `کارفرما برای پروژه «${result.categoryTitle}» متخصص دیگری را انتخاب کرد. از پروژه‌های باز می‌توانید برای سفارش‌های جدید اعلام آمادگی کنید.`,
+          type: "INFO",
+          link: "/specialist/mine",
+        }).catch(() => undefined)
+      )
+    );
 
     revalidatePath(`/order/${validOrderId}`);
     revalidatePath("/specialist/projects");
@@ -1061,13 +1591,13 @@ export async function selectSpecialistForOrderAction(
 }
 
 // -------------------------------------------------------------
-// 6. Confirm Specialist Selection (Specialist Action - Step 2 of Confirmation)
+// 6. Confirm Specialist Selection — LEGACY bridge only
 // -------------------------------------------------------------
 /**
- * The selected specialist confirms that they accept the project.
- * Order moves to CONFIRMED.
- * Interest moves to ACCEPTED.
- * All other applicants for this order are now REJECTED.
+ * Legacy orders stuck in AWAITING_SPECIALIST_CONFIRMATION.
+ * New selections never enter that status; they go straight to AWAITING_PAYMENT.
+ * Confirming here advances the order to AWAITING_PAYMENT so the client can pay
+ * (does NOT skip payment / jump to CONFIRMED).
  */
 export async function confirmSpecialistSelectionAction(
   orderId: string
@@ -1109,29 +1639,18 @@ export async function confirmSpecialistSelectionAction(
         throw new Error("وضعیت پروژه در انتظار تأیید شما نیست.");
       }
 
-      // Accept this specialist's interest
+      // Keep SELECTED until payment; reject others only when money clears.
       await tx.projectInterest.updateMany({
         where: {
           orderId: validOrderId,
           specialistId: session.userId,
         },
-        data: { status: "ACCEPTED" },
+        data: { status: "SELECTED" },
       });
 
-      // Reject all other applicants
-      await tx.projectInterest.updateMany({
-        where: {
-          orderId: validOrderId,
-          specialistId: { not: session.userId },
-          status: { in: ["PENDING", "SELECTED"] },
-        },
-        data: { status: "REJECTED" },
-      });
-
-      // Finalize order status to CONFIRMED
       await tx.order.update({
         where: { id: validOrderId },
-        data: { status: "CONFIRMED" satisfies OrderStatus },
+        data: { status: "AWAITING_PAYMENT" satisfies OrderStatus },
       });
 
       return {
@@ -1140,12 +1659,11 @@ export async function confirmSpecialistSelectionAction(
       };
     });
 
-    // Notify client that specialist confirmed
     if (result.userId) {
       await createNotification({
         userId: result.userId,
-        title: "تأیید پروژه توسط متخصص",
-        message: `متخصص انتخابی انجام پروژه «${result.categoryTitle}» را تأیید کرد و هماهنگی نهایی شد.`,
+        title: "متخصص آماده است — نوبت پرداخت",
+        message: `متخصص منتخب آمادگی خود برای «${result.categoryTitle}» را اعلام کرد. با پرداخت مبلغ توافق‌شده، رزرو قطعی می‌شود.`,
         type: "SUCCESS",
         link: `/order/${validOrderId}`,
       });
@@ -1166,13 +1684,12 @@ export async function confirmSpecialistSelectionAction(
 }
 
 // -------------------------------------------------------------
-// 7. Decline Specialist Selection (Specialist Action)
+// 7. Decline Specialist Selection — LEGACY only
 // -------------------------------------------------------------
 /**
- * The selected specialist declines the project.
- * Interest moves to DECLINED.
- * selectedSpecialistId is cleared.
- * Order returns to HAS_APPLICANTS (if other active proposals exist) or MATCHING.
+ * Legacy ASC escape hatch: selected specialist declines.
+ * New flow has no post-select specialist veto; decline only applies to
+ * AWAITING_SPECIALIST_CONFIRMATION rows.
  */
 export async function declineSpecialistSelectionAction(
   orderId: string,
@@ -1464,9 +1981,9 @@ export async function dismissOrderAction(
       return { success: false, error: authCheck.error };
     }
 
-    const balance = await getTokenBalance(session.userId);
-    if (!canAfford(balance, "dismiss")) {
-      return { success: false, error: outOfTokensMessage(balance, "dismiss") };
+    const balancePre = await getTokenBalance(session.userId);
+    if (!canAfford(balancePre, "dismiss")) {
+      return { success: false, error: outOfTokensMessage(balancePre, "dismiss") };
     }
 
     const existing = await prisma.projectInterest.findUnique({
@@ -1485,19 +2002,36 @@ export async function dismissOrderAction(
       };
     }
 
-    if (existing) {
-      await prisma.projectInterest.update({
-        where: { id: existing.id },
-        data: { status: "NOT_INTERESTED", updatedAt: new Date() },
+    try {
+      await prisma.$transaction(async (tx) => {
+        const balance = await getTokenBalance(session.userId, new Date(), tx as typeof prisma);
+        if (!canAfford(balance, "dismiss")) {
+          throw new Error(outOfTokensMessage(balance, "dismiss"));
+        }
+        if (existing) {
+          await tx.projectInterest.update({
+            where: { id: existing.id },
+            data: {
+              status: "NOT_INTERESTED",
+              travelFeeOverrideReason: null,
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.projectInterest.create({
+            data: {
+              orderId: parsedOrderId.data,
+              specialistId: session.userId,
+              status: "NOT_INTERESTED",
+            },
+          });
+        }
       });
-    } else {
-      await prisma.projectInterest.create({
-        data: {
-          orderId: parsedOrderId.data,
-          specialistId: session.userId,
-          status: "NOT_INTERESTED",
-        },
-      });
+    } catch (e: any) {
+      if (typeof e?.message === "string" && e.message.includes("توکن")) {
+        return { success: false, error: e.message };
+      }
+      throw e;
     }
 
     revalidatePath("/specialist/projects");
@@ -1509,8 +2043,10 @@ export async function dismissOrderAction(
   }
 }
 
+/** Keep NOT_INTERESTED for token accounting; feed shows these again. */
+
 /**
- * Undoes a dismissal, in case it was a misclick.
+ * Undoes a dismissal hide without refunding the dismiss token.
  */
 export async function undismissOrderAction(
   orderId: string
@@ -1526,13 +2062,21 @@ export async function undismissOrderAction(
       return { success: false, error: parsedOrderId.error.issues[0].message };
     }
 
-    await prisma.projectInterest.deleteMany({
+    const updated = await prisma.projectInterest.updateMany({
       where: {
         orderId: parsedOrderId.data,
         specialistId: session.userId,
         status: "NOT_INTERESTED",
       },
+      data: {
+        travelFeeOverrideReason: UNDISMISS_SHOW_MARKER,
+        updatedAt: new Date(),
+      },
     });
+
+    if (updated.count === 0) {
+      return { success: false, error: "رد فعالی برای بازگردانی یافت نشد." };
+    }
 
     revalidatePath("/specialist/projects");
     revalidatePath("/specialist/mine");

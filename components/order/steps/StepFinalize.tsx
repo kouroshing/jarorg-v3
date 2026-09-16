@@ -177,7 +177,7 @@ export default function StepFinalize({
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-jar-muted">
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-jar-canvas border border-jar-border">
               <Calendar className="h-3 w-3 text-[#A8A29A]" />
-              {isFlexibleSchedule ? "زمان منعطف" : bookingDate}
+              {isFlexibleSchedule ? "زمان توافقی با متخصص" : bookingDate}
             </span>
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-jar-canvas border border-jar-border">
               <Clock className="h-3 w-3 text-[#A8A29A]" />

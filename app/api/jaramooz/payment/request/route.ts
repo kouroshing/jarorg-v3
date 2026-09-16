@@ -2,7 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { courseChargeAmount } from "@/lib/jaramooz/pricing";
-import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
+import { resolveZarinpalMerchant, tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
     const zarinpalBody = {
       merchant_id: merchant.merchantId,
-      amount,
+      amount: tomanToRial(amount),
       callback_url: callbackUrl,
       description: `خرید دوره: ${course.title}`,
       metadata: {

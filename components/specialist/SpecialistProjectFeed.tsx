@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useTransition } from "react";
+import React, { useEffect, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -24,6 +24,7 @@ import {
   Car,
   ChevronDown,
   ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 import {
   AvailableOrderSpecialistView,
@@ -31,16 +32,28 @@ import {
   confirmSpecialistSelectionAction,
   declineSpecialistSelectionAction,
   dismissOrderAction,
+  getAvailableOrdersForSpecialistAction,
 } from "@/app/actions/marketplaceActions";
 import SpecialistInterestModal from "./SpecialistInterestModal";
 import { formatPrice } from "@/components/order/BudgetSlider";
-import { classifySpecialistOrder, type SpecialistFeedBucket } from "@/lib/orders/specialist-feed";
+import { classifySpecialistOrder, isLostInterestArchived, type SpecialistFeedBucket } from "@/lib/orders/specialist-feed";
 import { citiesMatch, normalizeCityLabel } from "@/lib/geo/serviceCities";
+import { formatDistanceKm } from "@/lib/locations/photoLocation";
 
 type FeedTabId = SpecialistFeedBucket;
 
+const OPEN_FEED_REFRESH_MS = 10 * 60 * 1000;
+
 function faNum(value: number): string {
   return value.toLocaleString("fa-IR");
+}
+
+function formatUpdatedAt(date: Date): string {
+  return new Intl.DateTimeFormat("fa-IR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 interface SpecialistProjectFeedProps {
@@ -49,6 +62,16 @@ interface SpecialistProjectFeedProps {
   authError?: string;
   redirectTo?: string;
   variant?: "open" | "mine";
+  /** When false, apply CTAs are blocked and a KYC banner is shown. */
+  kycReady?: boolean;
+  kycStatus?: string | null;
+  kycDeadlineDaysLeft?: number | null;
+  kycDeadlineExpired?: boolean;
+  kycDeadlineMessage?: string | null;
+  /** Home city of the specialist — biases the city chip filter. */
+  specialistCity?: string | null;
+  /** Whether travel quotes can be computed from a registered base pin. */
+  specialistHasBase?: boolean;
 }
 
 export default function SpecialistProjectFeed({
@@ -57,29 +80,92 @@ export default function SpecialistProjectFeed({
   authError,
   redirectTo,
   variant = "open",
+  kycReady = true,
+  kycStatus = null,
+  kycDeadlineDaysLeft = null,
+  kycDeadlineExpired = false,
+  kycDeadlineMessage = null,
+  specialistCity = null,
+  specialistHasBase: specialistHasBaseProp = false,
 }: SpecialistProjectFeedProps) {
   const isMine = variant === "mine";
-  const [orders, setOrders] = useState<AvailableOrderSpecialistView[]>(initialOrders);
+  const [orders, setOrders] = useState(initialOrders);
   const [tokens, setTokens] = useState<SpecialistTokenSummary | undefined>(initialTokens);
+  const [specialistHasBase, setSpecialistHasBase] = useState(specialistHasBaseProp);
   const [selectedOrder, setSelectedOrder] = useState<AvailableOrderSpecialistView | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCity, setSelectedCity] = useState<string>("ALL");
+  const [cityInitialized, setCityInitialized] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<FeedTabId>(() => {
     if (variant === "open") return "open";
     if (initialOrders.some((o) => classifySpecialistOrder(o) === "action")) return "action";
     if (initialOrders.some((o) => classifySpecialistOrder(o) === "won")) return "won";
-    return "applied";
+    if (initialOrders.some((o) => classifySpecialistOrder(o) === "applied")) return "applied";
+    return "lost";
   });
 
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ orderId: string; text: string; type: "error" | "success" } | null>(null);
   const [expandedDescIds, setExpandedDescIds] = useState<Record<string, boolean>>({});
   const [isPending, startTransition] = useTransition();
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date());
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrders(initialOrders);
+    setLastUpdatedAt(new Date());
+  }, [initialOrders]);
+
+  useEffect(() => {
+    if (initialTokens) setTokens(initialTokens);
+  }, [initialTokens]);
+
+  useEffect(() => {
+    setSpecialistHasBase(specialistHasBaseProp);
+  }, [specialistHasBaseProp]);
+
+  const refreshOpenFeed = async () => {
+    if (isMine || isRefreshing) return;
+    setIsRefreshing(true);
+    setRefreshError(null);
+    try {
+      const res = await getAvailableOrdersForSpecialistAction();
+      if (!res.success) {
+        setRefreshError(res.error || "به‌روزرسانی ناموفق بود.");
+        return;
+      }
+      setOrders(res.orders || []);
+      if (res.tokens) setTokens(res.tokens);
+      if (typeof res.specialistHasBase === "boolean") {
+        setSpecialistHasBase(res.specialistHasBase);
+      }
+      setLastUpdatedAt(new Date());
+    } catch {
+      setRefreshError("خطای شبکه در به‌روزرسانی فهرست.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isMine) return;
+    const id = window.setInterval(() => {
+      void refreshOpenFeed();
+    }, OPEN_FEED_REFRESH_MS);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional interval on mount for open feed
+  }, [isMine]);
 
   const pool = orders.filter((o) => {
     const bucket = classifySpecialistOrder(o);
-    return isMine ? bucket !== "open" : bucket === "open";
+    if (isMine) {
+      if (bucket === "open") return false;
+      if (bucket === "lost" && isLostInterestArchived(o)) return false;
+      return true;
+    }
+    return bucket === "open";
   });
 
   const uniqueCities = Array.from(
@@ -90,23 +176,66 @@ export default function SpecialistProjectFeed({
     )
   ).sort((a, b) => a.localeCompare(b, "fa"));
 
+  // Prefer the specialist's home city chip when it appears in the board.
+  React.useEffect(() => {
+    if (cityInitialized || isMine || !specialistCity) return;
+    const home = normalizeCityLabel(specialistCity);
+    if (!home) {
+      setCityInitialized(true);
+      return;
+    }
+    const cities = Array.from(
+      new Set(
+        pool
+          .map((o) => normalizeCityLabel(o.districtOrCity))
+          .filter((c): c is string => !!c && c.trim().length > 0)
+      )
+    );
+    const match = cities.find((c) => citiesMatch(c, home));
+    if (match) setSelectedCity(match);
+    setCityInitialized(true);
+  }, [cityInitialized, isMine, specialistCity, pool]);
+
   const cityFiltered = pool.filter((o) => {
     if (selectedCity === "ALL") return true;
     return citiesMatch(o.districtOrCity, selectedCity);
   });
 
+  /** Keep proximity order from the server; within city filter preserve it. */
+  const sortedForTab = useMemo(() => {
+    return [...cityFiltered].sort((a, b) => {
+      const da = a.travel?.distanceKm;
+      const db = b.travel?.distanceKm;
+      const aHas = typeof da === "number" && Number.isFinite(da);
+      const bHas = typeof db === "number" && Number.isFinite(db);
+      if (aHas && bHas && da !== db) return (da as number) - (db as number);
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [cityFiltered]);
+
   const counts = useMemo(() => {
-    const next = { action: 0, open: 0, applied: 0, won: 0 };
-    for (const order of cityFiltered) {
+    const next = { action: 0, open: 0, applied: 0, won: 0, lost: 0 };
+    for (const order of sortedForTab) {
       next[classifySpecialistOrder(order)] += 1;
     }
     return next;
-  }, [cityFiltered]);
+  }, [sortedForTab]);
 
-  const filteredOrders = cityFiltered.filter((o) => classifySpecialistOrder(o) === activeTab);
+  const filteredOrders = sortedForTab.filter((o) => classifySpecialistOrder(o) === activeTab);
   const canAffordApply = !tokens || tokens.remaining >= tokens.costApply;
 
   const handleOpenInterestModal = (order: AvailableOrderSpecialistView) => {
+    if (!kycReady) {
+      setApplyNotice(
+        kycDeadlineMessage ||
+          (kycStatus === "PENDING"
+            ? "احراز هویت در صف بررسی است؛ تا تایید نهایی نمی‌توانید اعلام آمادگی کنید."
+            : "ابتدا احراز هویت را تکمیل کنید، سپس اعلام آمادگی کنید.")
+      );
+      return;
+    }
     setSelectedOrder(order);
     setIsModalOpen(true);
   };
@@ -127,6 +256,7 @@ export default function SpecialistProjectFeed({
               travelFee: o.travel?.fee ?? null,
               travelFeeOverride: null,
               createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
             },
           };
         }
@@ -157,7 +287,7 @@ export default function SpecialistProjectFeed({
       } else {
         setActionNotice({
           orderId,
-          text: "پروژه تأیید شد. بعد از پرداخت کارفرما، اطلاعات تماس نمایش داده می‌شود.",
+          text: "آمادگی شما ثبت شد. کارفرما باید مبلغ را پرداخت کند تا رزرو قطعی شود.",
           type: "success",
         });
         setOrders((prev) =>
@@ -165,8 +295,8 @@ export default function SpecialistProjectFeed({
             if (o.id === orderId) {
               return {
                 ...o,
-                status: "CONFIRMED",
-                myInterest: o.myInterest ? { ...o.myInterest, status: "ACCEPTED" } : null,
+                status: "AWAITING_PAYMENT",
+                myInterest: o.myInterest ? { ...o.myInterest, status: "SELECTED" } : null,
               };
             }
             return o;
@@ -276,6 +406,7 @@ export default function SpecialistProjectFeed({
         { id: "action", label: "نیاز به تأیید" },
         { id: "applied", label: "پیشنهادهای در انتظار" },
         { id: "won", label: "انتخاب‌شده و قطعی" },
+        { id: "lost", label: "از دست‌رفته" },
       ]
     : [];
 
@@ -289,12 +420,16 @@ export default function SpecialistProjectFeed({
       body: "سفارش‌های جدید به‌محض ثبت در این فهرست ظاهر می‌شوند.",
     },
     applied: {
-      title: "هنوز پیشنهادی ارسال نکرده‌اید",
+      title: "هنوز پیشنهادی در انتظار ندارید",
       body: "از پروژه‌های باز می‌توانید برای سفارش مناسب اعلام آمادگی کنید.",
     },
     won: {
       title: "پروژه انتخاب‌شده یا قطعی ندارید",
       body: "اگر کارفرما شما را انتخاب کند، تا زمان پرداخت و بعد از آن اینجا می‌ماند.",
+    },
+    lost: {
+      title: "پروژه از دست‌رفته‌ای نیست",
+      body: "اگر کارفرما متخصص دیگری را انتخاب کند، تا ۱۴ روز اینجا می‌ماند.",
     },
   };
 
@@ -309,24 +444,124 @@ export default function SpecialistProjectFeed({
             <p className="text-xs text-jar-muted font-medium mt-0.5">
               {isMine
                 ? "پیشنهادهای ارسال‌شده، انتخاب کارفرما و پروژه‌های قطعی"
-                : "سفارش‌های جدید برای اعلام آمادگی. قیمت و ایاب‌وذهاب را روی هر پیشنهاد تنظیم کنید."}
+                : kycReady
+                  ? "اول پروژه‌های نزدیک محدوده شما، بعد تازه‌ترها. قیمت و ایاب‌وذهاب را روی هر پیشنهاد تنظیم کنید."
+                  : "پروژه‌های محدوده شما را ببینید؛ اعلام آمادگی بعد از تکمیل احراز هویت باز می‌شود."}
             </p>
+            {!isMine && (
+              <p className="mt-1.5 text-[11px] text-jar-muted font-medium">
+                آخرین به‌روزرسانی:{" "}
+                <span className="font-mono text-jar-primary font-bold">
+                  {formatUpdatedAt(lastUpdatedAt)}
+                </span>
+                <span className="text-jar-muted/80"> · هر ۱۰ دقیقه خودکار</span>
+              </p>
+            )}
           </div>
 
-          {!isMine && tokens && (
-            <div className="inline-flex items-center gap-2 rounded-full border border-jar-border bg-jar-surface px-3.5 py-2">
-              <Coins className="h-4 w-4 text-jar-logo shrink-0" />
-              <div className="text-right">
-                <p className="text-[11px] font-bold text-jar-primary">
-                  {faNum(tokens.remaining)} توکن باقی‌مانده
+          <div className="flex flex-wrap items-center gap-2">
+            {!isMine && (
+              <button
+                type="button"
+                onClick={() => void refreshOpenFeed()}
+                disabled={isRefreshing}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-jar-border bg-jar-surface px-3.5 text-[11px] font-bold text-jar-primary hover:bg-jar-soft transition-colors disabled:opacity-60"
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {isRefreshing ? "در حال به‌روزرسانی…" : "به‌روزرسانی"}
+              </button>
+            )}
+
+            {!isMine && tokens && (
+              <div className="inline-flex items-center gap-2 rounded-full border border-jar-border bg-jar-surface px-3.5 py-2">
+                <Coins className="h-4 w-4 text-jar-logo shrink-0" />
+                <div className="text-right">
+                  <p className="text-[11px] font-bold text-jar-primary">
+                    {faNum(tokens.remaining)} توکن باقی‌مانده
+                  </p>
+                  <p className="text-[10px] text-jar-muted font-medium">
+                    {tokens.planName} · هر اعلام آمادگی {faNum(tokens.costApply)} توکن
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!isMine && refreshError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-800 flex items-center justify-between gap-2">
+            <span>{refreshError}</span>
+            <button type="button" onClick={() => setRefreshError(null)} className="text-rose-700">
+              <XCircle className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {!isMine && !kycReady && (
+          <div
+            className={`rounded-2xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              kycDeadlineExpired
+                ? "border-rose-200 bg-rose-50"
+                : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              <ShieldAlert
+                className={`h-4 w-4 shrink-0 mt-0.5 ${
+                  kycDeadlineExpired ? "text-rose-700" : "text-amber-700"
+                }`}
+              />
+              <div className="space-y-0.5">
+                <p
+                  className={`text-xs font-black ${
+                    kycDeadlineExpired ? "text-rose-950" : "text-amber-950"
+                  }`}
+                >
+                  {kycDeadlineExpired
+                    ? "مهلت ۷ روزه احراز هویت تمام شد"
+                    : kycStatus === "PENDING"
+                      ? "احراز هویت در صف بررسی جار"
+                      : kycStatus === "FAILED"
+                        ? "احراز هویت رد شده — اعلام آمادگی قفل است"
+                        : kycDeadlineDaysLeft != null
+                          ? `${faNum(kycDeadlineDaysLeft)} روز از مهلت ۷ روزه احراز باقی است`
+                          : "احراز هویت برای اعلام آمادگی لازم است"}
                 </p>
-                <p className="text-[10px] text-jar-muted font-medium">
-                  {tokens.planName} · هر اعلام آمادگی {faNum(tokens.costApply)} توکن
+                <p
+                  className={`text-[11px] font-medium leading-relaxed ${
+                    kycDeadlineExpired ? "text-rose-900/90" : "text-amber-900/90"
+                  }`}
+                >
+                  {kycDeadlineMessage ||
+                    (kycStatus === "PENDING"
+                      ? "پروژه‌ها را می‌بینید، اما تا تایید هویت نمی‌توانید پیشنهاد بفرستید."
+                      : kycStatus === "FAILED"
+                        ? "اطلاعات را اصلاح کنید و دوباره ارسال کنید؛ تا تایید مجدد پیشنهاد و تسویه ممکن نیست."
+                        : "از تایید پرونده توسط جار، ۷ روز فرصت دارید هویت و شبا را تکمیل کنید.")}
                 </p>
               </div>
             </div>
-          )}
-        </div>
+            <Link
+              href="/specialist/onboarding/identity"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-full bg-jar-primary px-4 text-[11px] font-bold text-white"
+            >
+              {kycStatus === "PENDING" ? "مشاهده وضعیت احراز" : "شروع احراز هویت"}
+            </Link>
+          </div>
+        )}
+
+        {applyNotice && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950 flex items-center justify-between gap-2">
+            <span>{applyNotice}</span>
+            <button type="button" onClick={() => setApplyNotice(null)} className="text-amber-700">
+              <XCircle className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -408,6 +643,30 @@ export default function SpecialistProjectFeed({
               {emptyCopy[activeTab].body}
             </p>
           </div>
+          {!isMine && (
+            <div className="flex flex-col items-center gap-2.5 pt-1">
+              <p className="text-[11px] text-jar-muted font-medium">
+                آخرین به‌روزرسانی:{" "}
+                <span className="font-mono font-bold text-jar-primary">
+                  {formatUpdatedAt(lastUpdatedAt)}
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => void refreshOpenFeed()}
+                disabled={isRefreshing}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-jar-border bg-jar-canvas px-4 text-xs font-bold text-jar-primary hover:bg-jar-soft transition-colors disabled:opacity-60"
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                {isRefreshing ? "در حال به‌روزرسانی…" : "به‌روزرسانی فهرست"}
+              </button>
+              <p className="text-[10px] text-jar-muted">هر ۱۰ دقیقه خودکار هم به‌روز می‌شود</p>
+            </div>
+          )}
           {activeTab === "applied" && (
             <Link
               href="/specialist/projects"
@@ -421,32 +680,105 @@ export default function SpecialistProjectFeed({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredOrders.map((order) => {
-          let locationText = "محل مدنظر کارفرما";
-          if (order.locationType === "SPECIALIST_ADVICE") {
-            locationText = order.districtOrCity
-              ? `مشورت عکاس — ${order.districtOrCity}`
-              : "مشاوره و پیشنهاد متخصص";
-          }
-          if (order.locationType === "JAR_STUDIO") {
-            locationText = order.districtOrCity
-              ? `استودیوهای جار — ${order.districtOrCity}`
-              : "استودیوها و عمارت‌های جار";
-          }
+          const locKind =
+            order.locationContext?.kind ||
+            (order.locationType === "SPECIALIST_ADVICE"
+              ? "SPECIALIST_ADVICE"
+              : order.locationType === "JAR_STUDIO"
+                ? "JAR_STUDIO"
+                : order.locationContext?.photoLocation
+                  ? "JAR_LOCATION"
+                  : "CUSTOM_PIN");
+
+          const jarLoc = order.locationContext?.photoLocation ?? null;
+          const approxArea =
+            order.locationContext?.approxArea ||
+            (order.districtOrCity
+              ? `محدودهٔ تقریبی: ${order.districtOrCity}`
+              : "محدودهٔ تقریبی روی نقشه");
+
+          const locationKindLabel =
+            locKind === "SPECIALIST_ADVICE"
+              ? "مشورت لوکیشن با شما"
+              : locKind === "JAR_STUDIO"
+                ? "استودیو / عمارت جار"
+                : locKind === "JAR_LOCATION"
+                  ? "جار لوکیشن"
+                  : "پین اختصاصی کارفرما";
+
+          const previewUrls = Array.from(
+            new Set([
+              ...order.moodboardUrls,
+              ...(jarLoc?.previewImageUrls || []),
+              ...(jarLoc?.coverImageUrl ? [jarLoc.coverImageUrl] : []),
+            ])
+          ).slice(0, 5);
+
+          const travelHint =
+            order.travel != null
+              ? null
+              : locKind === "SPECIALIST_ADVICE"
+                ? "ایاب‌وذهاب بعد از پیشنهاد لوکیشن در اعلام آمادگی مشخص می‌شود."
+                : !specialistHasBase
+                  ? "مبدأ کاری‌تان ثبت نشده — برای دیدن مبلغ ایاب‌وذهاب مبدأ را تنظیم کنید."
+                  : "مختصات مقصد برای محاسبهٔ ایاب‌وذهاب در دسترس نیست.";
+
+          const travelFeeShown = order.travel
+            ? order.travel.isFree
+              ? 0
+              : order.travel.fee
+            : null;
+          const estimateTotal =
+            travelFeeShown != null
+              ? order.totalEstimatedPrice + travelFeeShown
+              : order.totalEstimatedPrice;
 
           return (
             <div
               key={order.id}
-              className="rounded-2xl border border-jar-border bg-jar-surface p-4 sm:p-5 space-y-4"
+              className="rounded-2xl border border-jar-border bg-jar-surface overflow-hidden flex flex-col"
             >
+              {previewUrls.length > 0 ? (
+                <div className="relative border-b border-jar-border bg-jar-canvas">
+                  <div className="flex gap-1.5 overflow-x-auto p-2.5">
+                    {previewUrls.map((imgUrl, idx) => (
+                      <div
+                        key={`${order.id}-prev-${idx}`}
+                        className="relative h-20 w-[5.5rem] sm:h-24 sm:w-28 shrink-0 overflow-hidden rounded-xl border border-jar-border/80 bg-jar-border/20"
+                      >
+                        <Image
+                          src={imgUrl}
+                          alt={
+                            idx < order.moodboardUrls.length
+                              ? `نمونه کارفرما ${idx + 1}`
+                              : `لوکیشن ${idx + 1}`
+                          }
+                          fill
+                          className="object-cover"
+                          sizes="112px"
+                          unoptimized
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="absolute top-3 right-3 rounded-full bg-black/55 px-2 py-0.5 text-[9px] font-bold text-white backdrop-blur-sm">
+                    {order.moodboardUrls.length > 0
+                      ? "نمونه / رفرنس کارفرما"
+                      : "تصاویر جار لوکیشن"}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="p-4 sm:p-5 space-y-4 flex-1 flex flex-col">
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <span className="inline-flex items-center gap-1.5 text-xs font-bold text-jar-logo">
                       <Sparkles className="h-3.5 w-3.5 text-jar-logo" />
-                      <span>{order.categoryTitle}</span>
+                      <span className="truncate">{order.categoryTitle}</span>
                     </span>
-                    <h3 className="text-base font-bold text-jar-primary pt-0.5">
-                      آفیش {order.categoryTitle} ({order.durationHours} ساعت)
+                    <h3 className="text-base font-bold text-jar-primary pt-0.5 leading-snug">
+                      آفیش {order.categoryTitle} ({faNum(order.durationHours)} ساعت)
                     </h3>
                   </div>
 
@@ -461,7 +793,7 @@ export default function SpecialistProjectFeed({
                     <div className="col-span-2 flex items-center gap-1.5 text-jar-primary text-xs font-medium">
                       <Sparkles className="h-3.5 w-3.5 text-jar-logo shrink-0" />
                       <span>
-                        زمان‌بندی: <b className="text-jar-primary">منعطف (هماهنگی توافقی با متخصص پس از پذیرش)</b>
+                        زمان‌بندی: <b className="text-jar-primary">بهترین زمان با توافق متخصص</b>
                       </span>
                     </div>
                   ) : (
@@ -481,29 +813,105 @@ export default function SpecialistProjectFeed({
                       </div>
                     </>
                   )}
+                </div>
 
-                  <div className="col-span-2 flex items-center gap-1.5 text-jar-muted truncate">
-                    <MapPin className="h-3.5 w-3.5 text-jar-logo shrink-0" />
-                    <span className="truncate">
-                      موقعیت: <b className="text-jar-primary">{locationText}</b>
-                      {order.districtOrCity ? ` (${order.districtOrCity})` : ""}
-                    </span>
+                {/* Location — approx only pre-pay */}
+                <div className="rounded-2xl border border-jar-border bg-jar-canvas/70 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <MapPin className="h-4 w-4 text-jar-logo shrink-0 mt-0.5" />
+                      <div className="min-w-0 space-y-0.5">
+                        <p className="text-[10px] font-bold text-jar-muted">{locationKindLabel}</p>
+                        {jarLoc ? (
+                          <p className="text-sm font-black text-jar-primary truncate">
+                            {jarLoc.name}
+                          </p>
+                        ) : null}
+                        <p className="text-xs font-bold text-jar-primary leading-relaxed">
+                          {approxArea}
+                        </p>
+                        {locKind === "SPECIALIST_ADVICE" ? (
+                          <p className="text-[10px] text-jar-muted font-medium leading-relaxed">
+                            کارفرما از شما می‌خواهد لوکیشن مناسب پیشنهاد دهید؛ آدرس دقیق بعد از
+                            پرداخت آزاد می‌شود.
+                          </p>
+                        ) : locKind === "CUSTOM_PIN" ? (
+                          <p className="text-[10px] text-amber-900/90 font-medium leading-relaxed">
+                            خارج از کاتالوگ جار لوکیشن · نقشه و آدرس دقیق بعد از پرداخت.
+                          </p>
+                        ) : (
+                          <p className="text-[10px] text-jar-muted font-medium leading-relaxed">
+                            فقط محدودهٔ تقریبی — پین دقیق بعد از پرداخت.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {jarLoc ? (
+                      <Link
+                        href={`/locations/${jarLoc.slug}`}
+                        target="_blank"
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-jar-border bg-white px-2.5 py-1 text-[10px] font-bold text-jar-logo hover:bg-jar-soft"
+                      >
+                        صفحه لوکیشن
+                        <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    ) : null}
                   </div>
+                  {typeof order.travel?.distanceKm === "number" &&
+                    order.travel.distanceKm <= 35 && (
+                      <span className="inline-flex rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[9px] font-bold px-2 py-0.5">
+                        نزدیک شما · {formatDistanceKm(order.travel.distanceKm)}
+                      </span>
+                    )}
+                </div>
 
-                  <div className="col-span-2 flex items-center gap-1.5 text-jar-muted truncate">
-                    <Car className="h-3.5 w-3.5 text-jar-logo shrink-0" />
-                    <span className="truncate">
-                      ایاب‌وذهاب:{" "}
-                      <b className="text-jar-primary">
-                        {order.travel
-                          ? order.travel.isFree
+                {/* Travel */}
+                <div className="rounded-2xl border border-jar-border bg-white px-3 py-2.5 flex items-start gap-2.5">
+                  <Car className="h-4 w-4 text-jar-logo shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="text-[10px] font-bold text-jar-muted">ایاب‌وذهاب (برآورد جار)</p>
+                    {order.travel ? (
+                      <>
+                        <p className="text-sm font-black font-mono text-jar-primary">
+                          {order.travel.isFree
                             ? "رایگان"
-                            : `${formatPrice(order.travel.fee)} تومان`
-                          : "بعد از ثبت مبدأ شما محاسبه می‌شود"}
-                      </b>
-                    </span>
+                            : `${formatPrice(order.travel.fee)} تومان`}
+                        </p>
+                        <p className="text-[10px] text-jar-muted font-medium">
+                          فاصلهٔ تقریبی {formatDistanceKm(order.travel.distanceKm)} از مبدأ شما · در
+                          اعلام آمادگی قابل ویرایش است.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs font-bold text-jar-primary leading-relaxed">
+                          {travelHint}
+                        </p>
+                        {!specialistHasBase && locKind !== "SPECIALIST_ADVICE" ? (
+                          <Link
+                            href="/specialist/profile"
+                            className="inline-flex text-[10px] font-bold text-jar-logo hover:underline mt-0.5"
+                          >
+                            ثبت / ویرایش مبدأ کاری
+                          </Link>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 </div>
+
+                {classifySpecialistOrder(order) === "won" &&
+                  !order.contact &&
+                  (order.status === "CONFIRMED" ||
+                    order.status === "AWAITING_PAYMENT" ||
+                    order.myInterest?.status === "SELECTED" ||
+                    order.myInterest?.status === "ACCEPTED") && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-[11px] font-medium text-amber-950 leading-relaxed">
+                      {order.status === "AWAITING_PAYMENT" || order.myInterest?.status === "SELECTED"
+                        ? "شما انتخاب شده‌اید — به‌محض پرداخت کارفرما پروژه قطعی می‌شود. شماره تماس حدود ۲۴ ساعت پیش از شروع پروژه آزاد می‌شود."
+                        : "پروژه قطعی شد. شماره تماس و نشانی دقیق حدود ۲۴ ساعت پیش از شروع پروژه در اختیارتان قرار می‌گیرد."}
+                    </div>
+                  )}
 
                 {order.contact && (order.contact.name || order.contact.phone || order.contact.address) && (
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 space-y-1.5">
@@ -529,10 +937,11 @@ export default function SpecialistProjectFeed({
                   </div>
                 )}
 
-                {(order.projectDescription || order.moodboardUrls.length > 0 || order.referenceLink) && (
-                  <div className="space-y-2 pt-1">
+                {(order.projectDescription || order.referenceLink) && (
+                  <div className="space-y-2 pt-0.5">
                     {order.projectDescription && (
                       <div className="space-y-1.5 bg-jar-canvas p-2.5 rounded-xl border border-jar-border/60">
+                        <p className="text-[10px] font-bold text-jar-muted">توضیح کارفرما</p>
                         <p
                           className={`text-xs text-jar-muted leading-relaxed font-medium whitespace-pre-wrap break-words ${
                             expandedDescIds[order.id] ? "" : "line-clamp-3"
@@ -567,59 +976,66 @@ export default function SpecialistProjectFeed({
                       </div>
                     )}
 
-                    {order.moodboardUrls.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-medium text-jar-muted">تصاویر رفرنس کارفرما:</span>
-                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                          {order.moodboardUrls.slice(0, 4).map((imgUrl, idx) => (
-                            <div
-                              key={idx}
-                              className="relative h-14 w-14 rounded-xl overflow-hidden border border-jar-border shrink-0 shadow-xs"
-                            >
-                              <Image src={imgUrl} alt={`مودبورد ${idx + 1}`} fill className="object-cover" />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {order.referenceLink && (
-                      <div className="text-[11px] pt-1">
-                        <a
-                          href={order.referenceLink.startsWith("http") ? order.referenceLink : `https://${order.referenceLink}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-jar-logo hover:underline font-medium"
-                        >
-                          <span>مشاهده لینک نمونه کار درخواستی</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
+                      <a
+                        href={
+                          order.referenceLink.startsWith("http")
+                            ? order.referenceLink
+                            : `https://${order.referenceLink}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-jar-logo hover:underline font-bold"
+                      >
+                        <span>لینک نمونه / رفرنس درخواستی</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
                     )}
                   </div>
                 )}
+
+                {previewUrls.length === 0 && !order.referenceLink && (
+                  <p className="text-[10px] text-jar-muted font-medium leading-relaxed">
+                    کارفرما هنوز نمونه عکس یا لینک رفرنس نگذاشته — جزئیات را از توضیح و زمان بسنجید.
+                  </p>
+                )}
               </div>
 
-              <div className="pt-3 border-t border-jar-border space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
+              <div className="pt-3 border-t border-jar-border space-y-3 mt-auto">
+                <div className="rounded-2xl border border-jar-border/80 bg-jar-canvas/50 px-3 py-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-jar-muted font-medium">نرخ پایه پروژه</span>
+                    <span className="font-mono font-bold text-jar-primary">
+                      {formatPrice(order.totalEstimatedPrice)} ت
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-jar-muted font-medium">ایاب‌وذهاب</span>
+                    <span className="font-mono font-bold text-jar-primary">
+                      {travelFeeShown == null
+                        ? "—"
+                        : travelFeeShown === 0
+                          ? "رایگان"
+                          : `${formatPrice(travelFeeShown)} ت`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-t border-jar-border/60 pt-1.5">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-jar-muted font-medium">برآورد کل پروژه:</span>
+                      <span className="text-[10px] text-jar-muted font-bold">برآورد قابل‌نمایش</span>
                       {order.isAutoPriced ? (
-                        <span className="px-1.5 py-0.5 rounded-md bg-jar-canvas border border-jar-border text-jar-logo text-[10px] font-medium">
-                          نرخ پیشنهادی جار
+                        <span className="px-1.5 py-0.5 rounded-md bg-white border border-jar-border text-jar-logo text-[9px] font-bold">
+                          نرخ جار
                         </span>
                       ) : null}
                     </div>
-                    <span className="text-base font-bold text-jar-primary font-mono">
-                      {formatPrice(order.totalEstimatedPrice)} <span className="text-xs font-normal">تومان</span>
+                    <span className="text-base font-black text-jar-primary font-mono leading-none">
+                      {formatPrice(estimateTotal)}{" "}
+                      <span className="text-[11px] font-bold">تومان</span>
                     </span>
                   </div>
-
-                  <div className="text-left">
-                    <span className="block text-[10px] text-jar-muted font-medium">تسویه حساب:</span>
-                    <span className="text-xs font-medium text-jar-primary">امن پس از توافق و پرداخت</span>
-                  </div>
+                  <p className="text-[9px] text-jar-muted font-medium leading-relaxed">
+                    تسویه امن پس از توافق و پرداخت · قیمت نهایی در اعلام آمادگی شماست.
+                  </p>
                 </div>
 
                 {actionNotice && actionNotice.orderId === order.id && (
@@ -635,12 +1051,15 @@ export default function SpecialistProjectFeed({
                   </div>
                 )}
 
+                {/* Legacy ASC only — new selections skip this and go to payment. */}
                 {order.status === "AWAITING_SPECIALIST_CONFIRMATION" &&
                 (order.myInterest?.status === "SELECTED" || order.hasApplied) ? (
                   <div className="space-y-2 rounded-2xl bg-jar-canvas border border-jar-border p-3.5 text-right">
                     <div className="flex items-center gap-2 text-jar-primary font-bold text-xs">
                       <Sparkles className="h-4 w-4 text-jar-logo shrink-0" />
-                      <span>کارفرما شما را انتخاب کرده است. لطفاً وضعیت را نهایی کنید:</span>
+                      <span>
+                        کارفرما شما را انتخاب کرده است. با تأیید، نوبت پرداخت کارفرما می‌شود:
+                      </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
@@ -654,7 +1073,7 @@ export default function SpecialistProjectFeed({
                         ) : (
                           <Check className="h-3.5 w-3.5" />
                         )}
-                        <span>تأیید و شروع پروژه</span>
+                        <span>تأیید آمادگی</span>
                       </button>
 
                       <button
@@ -684,13 +1103,27 @@ export default function SpecialistProjectFeed({
                     <span>شما انجام این پروژه را نپذیرفتید</span>
                   </div>
                 ) : order.myInterest?.status === "REJECTED" ? (
-                  <div className="flex items-center justify-center gap-2 w-full h-11 rounded-full bg-jar-canvas border border-jar-border text-jar-muted text-xs font-medium">
-                    <span>متخصص دیگری برای این سفارش انتخاب شد</span>
+                  <div className="rounded-2xl border border-jar-border bg-jar-canvas p-3.5 text-right space-y-2.5">
+                    <div className="flex items-center gap-2 text-jar-muted font-bold text-xs">
+                      <XCircle className="h-4 w-4 shrink-0" />
+                      <span>کارفرما متخصص دیگری را انتخاب کرد</span>
+                    </div>
+                    <p className="text-[11px] text-jar-muted leading-relaxed font-medium">
+                      این پیشنهاد بسته شد. توکن مصرف‌شده برنمی‌گردد — برای سفارش‌های جدید از پروژه‌های باز اعلام آمادگی کنید.
+                    </p>
+                    <Link
+                      href="/specialist/projects"
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-jar-primary px-4 text-[11px] font-bold text-white hover:bg-jar-primaryHover"
+                    >
+                      رفتن به پروژه‌های باز
+                    </Link>
                   </div>
                 ) : order.myInterest?.status === "ACCEPTED" ||
-                  order.status === "CONFIRMED" ||
-                  order.status === "COMPLETED" ||
-                  order.status === "IN_PROGRESS" ? (
+                  ((order.status === "CONFIRMED" ||
+                    order.status === "COMPLETED" ||
+                    order.status === "IN_PROGRESS") &&
+                    (order.myInterest?.status === "SELECTED" ||
+                      order.myInterest?.status === "ACCEPTED")) ? (
                   <div className="space-y-2">
                     <div className="flex items-center justify-center gap-2 w-full min-h-11 px-3 py-2 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
@@ -723,14 +1156,18 @@ export default function SpecialistProjectFeed({
                     <button
                       type="button"
                       onClick={() => handleOpenInterestModal(order)}
-                      disabled={!canAffordApply}
+                      disabled={!canAffordApply || !kycReady}
                       className="group flex h-11 w-full items-center justify-center gap-2 rounded-full bg-jar-primary hover:bg-jar-primaryHover text-white font-medium text-xs sm:text-sm shadow-none transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Send className="h-4 w-4" />
                       <span>
-                        {canAffordApply
-                          ? "اعلام آمادگی برای این پروژه"
-                          : "توکن این ماه تمام شده است"}
+                        {!kycReady
+                          ? kycStatus === "PENDING"
+                            ? "منتظر تایید احراز هویت"
+                            : "ابتدا احراز هویت کنید"
+                          : canAffordApply
+                            ? "اعلام آمادگی برای این پروژه"
+                            : "توکن این ماه تمام شده است"}
                       </span>
                     </button>
                     <button
@@ -748,6 +1185,7 @@ export default function SpecialistProjectFeed({
                     </button>
                   </div>
                 )}
+              </div>
               </div>
             </div>
           );

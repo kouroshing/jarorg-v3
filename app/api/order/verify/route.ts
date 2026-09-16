@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { markOrderPaid } from "@/lib/orders/payment";
+import { tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         merchant_id: merchantId,
-        amount: order.agreedTotalPrice ?? 0,
+        amount: tomanToRial(order.agreedTotalPrice ?? 0),
         authority,
       }),
     });

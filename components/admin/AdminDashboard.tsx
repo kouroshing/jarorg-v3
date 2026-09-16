@@ -10,6 +10,7 @@ import {
   MagnifyingGlassIcon,
   CreditCardIcon,
   ClockIcon,
+  MapPinIcon,
 } from "@heroicons/react/24/outline";
 import AdminOrderTriageQueue, {
   type TriageOrderRow,
@@ -21,7 +22,11 @@ import AdminFollowUpQueue from "@/components/admin/AdminFollowUpQueue";
 import AdminAuditStrip, {
   type AuditRow,
 } from "@/components/admin/AdminAuditStrip";
+import AdminPhotoLocationQueue, {
+  type AdminPhotoLocationQueueRow,
+} from "@/components/admin/AdminPhotoLocationQueue";
 import type { AdminPermission } from "@/lib/auth/adminPermissions";
+import { formatJalaliDate } from "@/lib/date/jalali";
 
 export interface DashboardData {
   pendingReviewCount: number;
@@ -31,10 +36,14 @@ export interface DashboardData {
   pendingSpecialistCount: number;
   pendingPortfolioCount: number;
   pendingWithdrawalCount: number;
+  pendingLocationCount: number;
   triageOrders: TriageOrderRow[];
   matchingOrders: TriageOrderRow[];
   paymentOrders: TriageOrderRow[];
   disputeOrders: TriageOrderRow[];
+  /** Quiet archive — not a KPI; matching timeouts only. */
+  noMatchOrders: TriageOrderRow[];
+  pendingLocations: AdminPhotoLocationQueueRow[];
   withdrawals: WithdrawalRow[];
   recentAudits: AuditRow[];
 }
@@ -238,6 +247,27 @@ export default function AdminDashboard({
       )}
 
       {canOrders && (
+        <section id="jar-locations" className="space-y-3 scroll-mt-24">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <MapPinIcon className="w-5 h-5 text-[#CC785C]" />
+              جار لوکیشن · صف تایید
+            </h2>
+            <span className="text-[11px] font-bold text-slate-400">
+              {(data.pendingLocationCount ?? 0).toLocaleString("fa-IR")} مورد
+            </span>
+          </div>
+          <AdminPhotoLocationQueue items={data.pendingLocations || []} />
+          <Link
+            href="/tools/locations"
+            className="text-[11px] font-bold text-indigo-600 inline-flex"
+          >
+            مشاهده نقشه عمومی جار لوکیشن ←
+          </Link>
+        </section>
+      )}
+
+      {canOrders && (
         <section id="disputes" className="space-y-3 scroll-mt-24">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
@@ -264,12 +294,63 @@ export default function AdminDashboard({
                     {ord.categoryTitle || "پروژه"}
                   </p>
                   <p className="text-[11px] text-rose-900/80 mt-1 leading-relaxed">
-                    {ord.disputeReason || "بدون توضیح"} · باز کردن برای آزادسازی یا عودت
+                    {ord.disputeReason || "بدون توضیح"}
+                  </p>
+                  <p className="text-[10px] text-rose-800/70 mt-1">
+                    {(ord.deliverableCount ?? 0).toLocaleString("fa-IR")} خروجی ·{" "}
+                    {(ord.messageCount ?? 0).toLocaleString("fa-IR")} پیام چت · باز کردن برای
+                    آزادسازی یا عودت
                   </p>
                 </Link>
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {canOrders && (data.noMatchOrders?.length ?? 0) > 0 && (
+        <section id="no-match" className="space-y-2 scroll-mt-24 opacity-90">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-500 flex items-center gap-2">
+              <ClockIcon className="w-4 h-4 text-slate-400" />
+              تعلیق بدون متخصص (آرشیو آرام)
+            </h2>
+            <span className="text-[10px] font-medium text-slate-400">
+              {(data.noMatchOrders?.length ?? 0).toLocaleString("fa-IR")} مورد · خارج از بورد
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            پس از مهلت جستجو از بورد متخصصان خارج شده‌اند؛ کارفرما می‌تواند با ویرایش بودجه دوباره
+            منتشر کند. اینجا فقط برای پیگیری ادمین است.
+          </p>
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 divide-y divide-slate-100">
+            {(data.noMatchOrders || []).map((ord) => (
+              <Link
+                key={ord.id}
+                href={`/order/${ord.id}`}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 hover:bg-white/80 text-xs"
+              >
+                <span className="font-bold text-slate-700">
+                  {ord.categoryTitle || "پروژه"}
+                  <span className="font-medium text-slate-400 mr-2">
+                    · {ord.contactName || "کارفرما"}
+                  </span>
+                </span>
+                <span className="text-[10px] text-slate-400 tabular-nums">
+                  {ord.totalEstimatedPrice.toLocaleString("fa-IR")} ت
+                  {ord.noMatchAt
+                    ? ` · ${formatQuietDate(ord.noMatchAt)}`
+                    : ""}
+                </span>
+              </Link>
+            ))}
+          </div>
+          <Link
+            href="/admin/Order?filters=%7B%22status%22%3A%22NO_MATCH%22%7D"
+            className="text-[10px] font-bold text-slate-500 hover:text-slate-700 inline-flex"
+          >
+            همه سفارش‌های NO_MATCH در NextAdmin ←
+          </Link>
         </section>
       )}
 
@@ -300,6 +381,14 @@ export default function AdminDashboard({
       )}
     </div>
   );
+}
+
+function formatQuietDate(iso: string): string {
+  try {
+    return formatJalaliDate(new Date(iso));
+  } catch {
+    return "";
+  }
 }
 
 function Kpi({

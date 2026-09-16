@@ -55,6 +55,11 @@ model User {
   orders             Order[]             @relation("ClientOrders")
   assignedOrders     Order[]             @relation("SelectedSpecialistOrders")
   projectInterests   ProjectInterest[]
+  orderMessages      OrderMessage[]
+  orderDeliverables  OrderDeliverable[]
+  reviewsGiven       OrderReview[]       @relation("OrderReviewsGiven")
+  reviewsReceived    OrderReview[]       @relation("OrderReviewsReceived")
+  photoLocations     PhotoLocation[]     @relation("PhotoLocationSubmitter")
 
   @@map("users")
 }
@@ -140,6 +145,10 @@ model Order {
   locationLat Float? @map("location_lat")
   locationLng Float? @map("location_lng")
 
+  /// When the client picked a جار لوکیشن catalog pin (null = custom map pin / advice).
+  photoLocationId String? @map("photo_location_id")
+  photoLocation   PhotoLocation? @relation("OrderPhotoLocation", fields: [photoLocationId], references: [id], onDelete: SetNull)
+
   // Moodboard & References
   referenceLink      String? @map("reference_link")
   moodboardUrls      String? @map("moodboard_urls") // JSON Array string of URLs
@@ -186,6 +195,11 @@ model Order {
   /// Last nudge sent to a client sitting on proposals without choosing one.
   clientRemindedAt  DateTime? @map("client_reminded_at")
 
+  /// When the order was published to the specialist board (admin approve / auto-publish).
+  publishedAt       DateTime? @map("published_at")
+  /// Set when matching timed out with no specialist selected (NO_MATCH).
+  noMatchAt         DateTime? @map("no_match_at")
+
   /// Set when an order has sat on the board with nobody applying.
   noApplicantsAt    DateTime? @map("no_applicants_at")
 
@@ -195,9 +209,8 @@ model Order {
   settledAt        DateTime? @map("settled_at")
   settledAmount    Int?      @map("settled_amount")
 
-  /// Set 24 hours before the shoot. Chat opens at payment; phone numbers and
-  /// the exact address wait until they are needed to actually meet, which keeps
-  /// the conversation on Jar and gives the platform a record of it.
+  /// Set 24 hours before the shoot. In-app order chat opens at payment; phone
+  /// numbers and the exact address wait until they are needed to meet.
   contactRevealedAt DateTime? @map("contact_revealed_at")
 
   /// Most complaints are "please fix this", not "refund me". The client can
@@ -212,11 +225,86 @@ model Order {
   selectedSpecialistId String? @map("selected_specialist_id")
   selectedSpecialist   User?   @relation("SelectedSpecialistOrders", fields: [selectedSpecialistId], references: [id], onDelete: SetNull)
 
-  interests ProjectInterest[]
+  interests    ProjectInterest[]
+  messages     OrderMessage[]
+  reviews      OrderReview[]
+  deliverables OrderDeliverable[]
 
   @@index([createdAt])
   @@index([status])
+  @@index([photoLocationId])
   @@map("orders")
+}
+
+/// Specialist delivery artifacts for a paid order (file upload or external link).
+/// Required before reportDelivery; used as evidence in disputes.
+model OrderDeliverable {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  uploadedById String @map("uploaded_by_id")
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  /// FILE | LINK
+  kind String
+
+  /// Public path under /uploads/deliverables/… for FILE rows.
+  fileUrl  String? @map("file_url")
+  /// External Drive / Dropbox / WeTransfer / etc. for LINK rows.
+  linkUrl  String? @map("link_url")
+  label    String?
+  fileName String? @map("file_name")
+  mimeType String? @map("mime_type")
+  fileSize Int?    @map("file_size")
+
+  @@index([orderId, createdAt])
+  @@map("order_deliverables")
+}
+
+/// Text coordination thread between client and selected specialist after payment.
+model OrderMessage {
+  id        String   @id @default(uuid())
+  orderId   String   @map("order_id")
+  senderId  String   @map("sender_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_messages")
+}
+
+/// Bilateral post-settlement rating (one row per direction per order).
+model OrderReview {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// CLIENT_TO_SPECIALIST | SPECIALIST_TO_CLIENT
+  direction String
+
+  reviewerId String @map("reviewer_id")
+  reviewer   User   @relation("OrderReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  revieweeId String @map("reviewee_id")
+  reviewee   User   @relation("OrderReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
+
+  /// 1–5 stars
+  rating  Int
+  comment String?
+
+  @@unique([orderId, direction])
+  @@index([revieweeId, createdAt])
+  @@index([direction, revieweeId])
+  @@map("order_reviews")
 }
 
 /// Specialist interest / proposal submitted for an Order.
@@ -240,10 +328,14 @@ model ProjectInterest {
   travelFeeOverrideReason String? @map("travel_fee_override_reason")
 
   /// How the specialist wants to handle shoot timing vs the client's request.
-  /// ACCEPT_CLIENT | DEFER | PROPOSE
+  /// ACCEPT_CLIENT | PROPOSE (legacy DEFER values may exist in older rows)
   scheduleStance       String  @default("ACCEPT_CLIENT") @map("schedule_stance")
   proposedBookingDate  String? @map("proposed_booking_date")
   proposedTimeSlot     String? @map("proposed_time_slot")
+
+  /// Specialist-suggested جار لوکیشن (for SPECIALIST_ADVICE or an alternative pin).
+  proposedPhotoLocationId String? @map("proposed_photo_location_id")
+  proposedPhotoLocation   PhotoLocation? @relation("InterestProposedPhotoLocation", fields: [proposedPhotoLocationId], references: [id], onDelete: SetNull)
 
   order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   specialist User  @relation(fields: [specialistId], references: [id], onDelete: Cascade)
@@ -365,6 +457,8 @@ model PwaSettings {
   selectionReminderHours    Int @default(72) @map("selection_reminder_hours")
   /// Days after which an unanswered order is closed and the applicants freed.
   selectionTimeoutDays      Int @default(7) @map("selection_timeout_days")
+  /// Days after publish (admin approve) before MATCHING/HAS_APPLICANTS → NO_MATCH.
+  matchingTimeoutDays       Int @default(7) @map("matching_timeout_days")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
@@ -556,6 +650,10 @@ model SpecialistProfile {
   kycNationalIdMask String?   @map("kyc_national_id_mask") // e.g. ۰۰۱۲****۸۹
   kycShabaMask      String?   @map("kyc_shaba_mask") // e.g. IR****1234
   kycBankName       String?   @map("kyc_bank_name")
+  /// Legal name from Zohal national_identity_inquiry (shown after VERIFIED).
+  kycFirstName      String?   @map("kyc_first_name")
+  kycLastName       String?   @map("kyc_last_name")
+  kycFatherName     String?   @map("kyc_father_name")
   kycVerifiedAt     DateTime? @map("kyc_verified_at")
   kycFailureReason  String?   @map("kyc_failure_reason")
   kycSubmittedAt    DateTime? @map("kyc_submitted_at")
@@ -629,4 +727,52 @@ model AdminStaff {
 
   @@index([isActive])
   @@map("admin_staff")
+}
+
+/// جار لوکیشن — public photography location / mansion catalog.
+model PhotoLocation {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  name        String
+  slug        String  @unique
+  description String?
+
+  lat      Float
+  lng      Float
+  city     String?
+  district String?
+  address  String?
+
+  needsPermit         Boolean @default(false) @map("needs_permit")
+  proCameraAllowed    Boolean @default(true) @map("pro_camera_allowed")
+  phoneCameraAllowed  Boolean @default(true) @map("phone_camera_allowed")
+  hasEntranceFee      Boolean @default(false) @map("has_entrance_fee")
+  hasChangingRoom     Boolean @default(false) @map("has_changing_room")
+  hasParking          Boolean @default(false) @map("has_parking")
+  /// LOW | MEDIUM | HIGH
+  securityLevel       String  @default("MEDIUM") @map("security_level")
+
+  contactPhone  String? @map("contact_phone")
+  coverImageUrl String? @map("cover_image_url")
+  /// JSON array of image URLs for the location gallery.
+  imageUrls     String? @map("image_urls")
+
+  /// PENDING | APPROVED | REJECTED
+  status          String  @default("PENDING")
+  rejectionReason String? @map("rejection_reason")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewedById    String?   @map("reviewed_by_id")
+
+  submittedById String? @map("submitted_by_id")
+  submittedBy   User?   @relation("PhotoLocationSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+
+  ordersLinked   Order[]            @relation("OrderPhotoLocation")
+  interestPicks  ProjectInterest[]  @relation("InterestProposedPhotoLocation")
+
+  @@index([status, city])
+  @@index([lat, lng])
+  @@index([status, createdAt])
+  @@map("photo_locations")
 }

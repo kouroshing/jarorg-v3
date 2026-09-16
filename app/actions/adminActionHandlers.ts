@@ -10,6 +10,7 @@ import {
 import type { AdminPermission } from "@/lib/auth/adminPermissions";
 import {
   evaluateEligibility,
+  isPortfolioApprovalComplete,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
   SPECIALIST_REVIEW_PATH,
 } from "@/lib/specialists/eligibility";
@@ -20,6 +21,7 @@ import {
 } from "@/lib/specialists/profileEdit";
 import { parseOrderStatus, type OrderStatus } from "@/lib/orders/status";
 import { createNotification } from "@/lib/notifications";
+import { reactivateAfterKycIfSuspended } from "@/lib/kyc/deadline";
 
 export type AdminActionResult =
   | { success: true; message?: string }
@@ -139,6 +141,8 @@ export async function approveOrderAction({
     data: {
       status: "MATCHING" satisfies OrderStatus,
       adminNote: null,
+      publishedAt: new Date(),
+      noMatchAt: null,
     },
   });
 
@@ -563,7 +567,7 @@ export async function approveSpecialistAction({
     eligibility.hasAvatar &&
     eligibility.hasDisplayName;
 
-  const hasMinApproved = eligibility.qualifiedCategories.length > 0;
+  const hasMinApproved = isPortfolioApprovalComplete(eligibility);
   const activationReady = coreReady && (hasMinApproved || allowUnderMinimum);
 
   if (!activationReady) {
@@ -573,36 +577,36 @@ export async function approveSpecialistAction({
         error: "عکس پروفایل متخصص الزامی است. بدون عکس نمی‌توان فعال کرد.",
       };
     }
-    const missing = missingRequirementLabels({
-      ...eligibility,
-      submittableCategories:
-        eligibility.qualifiedCategories.length > 0
-          ? eligibility.submittableCategories
-          : [],
-    });
+    const missing = missingRequirementLabels(eligibility);
     if (!hasMinApproved && !allowUnderMinimum) {
       missing.push(
-        `حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده (یا تایید استثنایی)`
+        `${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در هر دسته‌بندی انتخاب‌شده (یا تایید استثنایی)`
       );
     }
     return {
       success: false,
       error: missing.length
         ? `این پرونده هنوز کامل نیست: ${[...new Set(missing)].join("، ")}.`
-        : `برای فعال‌سازی، حداقل ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در یک شاخه لازم است.`,
+        : `برای فعال‌سازی، ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در هر دسته لازم است.`,
     };
   }
 
   const underMinimumNote = !hasMinApproved
-    ? `تایید استثنایی با کمتر از ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده`
+    ? `تایید استثنایی با کمتر از ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار تاییدشده در هر دسته`
     : null;
   const reviewNote = [note?.trim(), underMinimumNote].filter(Boolean).join(" · ") || null;
+
+  // Do not reset the KYC 7-day clock when re-approving an already-ACTIVE profile.
+  const keepReviewedAt =
+    profile.status === "ACTIVE" && profile.reviewedAt
+      ? profile.reviewedAt
+      : new Date();
 
   await prisma.specialistProfile.update({
     where: { id: specialistId },
     data: {
       status: "ACTIVE",
-      reviewedAt: new Date(),
+      reviewedAt: keepReviewedAt,
       reviewedBy: actorId,
       reviewNote,
     },
@@ -726,7 +730,7 @@ export async function getSpecialistPortfolioItems(specialistId: string) {
   };
 }
 
-/** Admin can manually mark KYC verified/failed (override or when Zohal left PENDING). */
+/** Manual KYC override for legacy PENDING rows only — normal path is Zohal auto-verify. */
 export async function setSpecialistKycStatusAction({
   specialistId,
   status,
@@ -754,10 +758,19 @@ export async function setSpecialistKycStatusAction({
       kycStatus: status,
       kycVerifiedAt: status === "VERIFIED" ? new Date() : null,
       kycFailureReason: status === "FAILED" ? reason?.trim() || "رد احراز هویت" : null,
+      ...(status !== "VERIFIED"
+        ? {
+            kycFirstName: null,
+            kycLastName: null,
+            kycFatherName: null,
+            kycBankName: status === "NONE" ? null : undefined,
+          }
+        : {}),
     },
   });
 
   if (status === "VERIFIED") {
+    await reactivateAfterKycIfSuspended(specialistId);
     await prisma.notification.create({
       data: {
         userId: profile.userId,
@@ -874,14 +887,28 @@ export async function adminSelectInterestAction({
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { id: true, status: true, userId: true, categoryTitle: true },
+    select: {
+      id: true,
+      status: true,
+      userId: true,
+      categoryTitle: true,
+      totalEstimatedPrice: true,
+    },
   });
   if (!order) {
     return { success: false, error: "سفارش یافت نشد." };
   }
 
+  const jarFloor = order.totalEstimatedPrice > 0 ? order.totalEstimatedPrice : 0;
   const travel = interest.travelFeeOverride ?? interest.travelFee ?? 0;
-  const base = interest.proposedPrice ?? 0;
+  const rawBase = interest.proposedPrice ?? jarFloor;
+  if (jarFloor > 0 && rawBase < jarFloor) {
+    return {
+      success: false,
+      error: `پیشنهاد متخصص کمتر از نرخ پایه جار (${jarFloor.toLocaleString("fa-IR")} تومان) است.`,
+    };
+  }
+  const base = Math.max(rawBase, jarFloor);
   const total = base + travel;
 
   await prisma.$transaction(async (tx) => {

@@ -98,6 +98,16 @@ export default function AdminFollowUpQueue({
                         : `${applicants.toLocaleString("fa-IR")} متقاضی`}
                     </span>
                   )}
+                  {mode === "matching" && ord.noApplicantsAt && (
+                    <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-200">
+                      پرچم بدون متقاضی (کرون)
+                    </span>
+                  )}
+                  {mode === "matching" && ord.clientRemindedAt && (
+                    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-800 border border-sky-200">
+                      یادآوری انتخاب فرستاده شد
+                    </span>
+                  )}
                   {mode === "payment" && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
                       <CreditCard className="h-3 w-3" />

@@ -49,8 +49,6 @@ import {
 } from "lucide-react";
 import {
   ALL_CATEGORIES,
-  PERSONAL_CATEGORIES,
-  COMMERCIAL_CATEGORIES,
   ServiceCategory,
 } from "@/lib/categories";
 import { CATEGORY_VISUAL_MAP } from "./categoryVisualData";
@@ -111,6 +109,8 @@ export function CategoryIcon({
 interface StepCategoryProps {
   selectedSlug: string;
   onSelectSlug: (slug: string) => void;
+  /** When set, only these slugs are shown (categories with ACTIVE specialists). */
+  availableSlugs?: string[];
 }
 
 function CategoryThumbnail({
@@ -197,14 +197,30 @@ function CategoryThumbnail({
 export default function StepCategory({
   selectedSlug,
   onSelectSlug,
+  availableSlugs,
 }: StepCategoryProps) {
   const [activeTab, setActiveTab] = useState<"ALL" | "PERSONAL" | "COMMERCIAL">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
+  const catalog = useMemo(() => {
+    if (!availableSlugs) return ALL_CATEGORIES;
+    const allowed = new Set(availableSlugs);
+    return ALL_CATEGORIES.filter((c) => allowed.has(c.slug));
+  }, [availableSlugs]);
+
+  const personalCatalog = useMemo(
+    () => catalog.filter((c) => c.type === "PERSONAL"),
+    [catalog]
+  );
+  const commercialCatalog = useMemo(
+    () => catalog.filter((c) => c.type === "COMMERCIAL"),
+    [catalog]
+  );
+
   const filteredCategories = useMemo(() => {
-    let list: ServiceCategory[] = ALL_CATEGORIES;
-    if (activeTab === "PERSONAL") list = PERSONAL_CATEGORIES;
-    if (activeTab === "COMMERCIAL") list = COMMERCIAL_CATEGORIES;
+    let list: ServiceCategory[] = catalog;
+    if (activeTab === "PERSONAL") list = personalCatalog;
+    if (activeTab === "COMMERCIAL") list = commercialCatalog;
 
     if (!searchQuery.trim()) return list;
 
@@ -212,7 +228,7 @@ export default function StepCategory({
     return list.filter(
       (cat) => cat.title.toLowerCase().includes(q) || cat.slug.toLowerCase().includes(q)
     );
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery, catalog, personalCatalog, commercialCatalog]);
 
   return (
     <div className="relative space-y-6" dir="rtl">
@@ -231,7 +247,7 @@ export default function StepCategory({
             چه نوع پروژه‌ای در پیش دارید؟
           </h1>
           <p className="text-xs sm:text-sm text-jar-muted font-medium leading-relaxed max-w-2xl">
-            دسته‌بندی مدنظرتان را انتخاب کنید تا مرتبط‌ترین و مجرب‌ترین متخصصین جار برای پروژه شما فراخوان شوند.
+            فقط شاخه‌هایی نمایش داده می‌شوند که هم‌اکنون متخصص فعال در جار دارند تا پروژه شما واقعاً پوشش داده شود.
           </p>
         </div>
       </div>
@@ -278,7 +294,7 @@ export default function StepCategory({
                 activeTab === "ALL" ? "text-jar-primary font-bold" : "text-[#A8A29A]"
               }`}
             >
-              ({ALL_CATEGORIES.length})
+              ({catalog.length})
             </span>
           </button>
 
@@ -299,7 +315,7 @@ export default function StepCategory({
                 activeTab === "PERSONAL" ? "text-jar-primary font-bold" : "text-[#A8A29A]"
               }`}
             >
-              ({PERSONAL_CATEGORIES.length})
+              ({personalCatalog.length})
             </span>
           </button>
 
@@ -320,7 +336,7 @@ export default function StepCategory({
                 activeTab === "COMMERCIAL" ? "text-jar-primary font-bold" : "text-[#A8A29A]"
               }`}
             >
-              ({COMMERCIAL_CATEGORIES.length})
+              ({commercialCatalog.length})
             </span>
           </button>
         </div>
@@ -328,21 +344,31 @@ export default function StepCategory({
 
       {/* Responsive Category Grid: Symmetrical Layout, Photographic Thumbnails & Rich Meta */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
-        {filteredCategories.length === 0 ? (
+        {catalog.length === 0 ? (
+          <div className="col-span-full py-16 px-4 text-center rounded-3xl border border-dashed border-jar-border bg-jar-surface space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-jar-canvas text-jar-muted">
+              <Camera className="h-7 w-7" />
+            </div>
+            <h3 className="text-base font-black text-jar-primary">هنوز متخصص فعالی برای ثبت سفارش نیست</h3>
+            <p className="text-xs text-jar-muted max-w-sm mx-auto">
+              به‌زودی با پیوستن متخصص‌های بیشتر شاخه‌ها اینجا باز می‌شوند. می‌توانید کمی بعد دوباره سر بزنید.
+            </p>
+          </div>
+        ) : filteredCategories.length === 0 ? (
           <div className="col-span-full py-16 px-4 text-center rounded-3xl border border-dashed border-jar-border bg-jar-surface space-y-3">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-jar-canvas text-jar-muted">
               <Search className="h-7 w-7" />
             </div>
             <h3 className="text-base font-black text-jar-primary">هیچ دسته‌بندی با عنوان «{searchQuery}» یافت نشد</h3>
             <p className="text-xs text-jar-muted max-w-sm mx-auto">
-              می‌توانید عبارت دیگری را جستجو کنید یا از دسته‌بندی «عکاسی غیره» برای پروژه‌های اختصاصی استفاده فرمایید.
+              می‌توانید عبارت دیگری را جستجو کنید یا از بین شاخه‌های فعال موجود انتخاب کنید.
             </p>
             <button
               type="button"
               onClick={() => setSearchQuery("")}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-jar-primary text-white text-xs font-medium hover:bg-jar-primaryHover transition-colors cursor-pointer shadow-none"
             >
-              <span>نمایش همه خدمات</span>
+              <span>نمایش خدمات فعال</span>
             </button>
           </div>
         ) : (

@@ -1,6 +1,7 @@
 /**
- * The toman amount charged for a JarAmooz course.
- * Always the row in `courses.price` — never a client-supplied figure.
+ * Catalog price of a JarAmooz course in **تومان**.
+ * Always from `courses.price` — never a client-supplied figure.
+ * When talking to Zarinpal, convert with `tomanToRial()` (×10).
  */
 export const FULL_BUNDLE_PRICE = 9_100_000;
 

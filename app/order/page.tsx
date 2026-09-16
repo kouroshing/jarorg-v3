@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { findActiveOrderForUser } from "@/app/actions/orderActions";
 import OrderFormClient from "./OrderFormClient";
+import { getOrderableCategorySlugs } from "@/lib/orders/availableCategories";
 import { Loader2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,8 @@ export default async function OrderPage({ searchParams }: OrderPageProps) {
     console.error("Error fetching user profile for order page:", e);
   }
 
+  const availableCategorySlugs = await getOrderableCategorySlugs();
+
   return (
     <div
       className="jar-theme relative min-h-dvh w-full overflow-x-clip selection:bg-neutral-900/10 bg-white text-neutral-900"
@@ -80,6 +83,7 @@ export default async function OrderPage({ searchParams }: OrderPageProps) {
           initialContactName={initialContactName}
           initialContactPhone={initialContactPhone}
           userId={session.userId}
+          availableCategorySlugs={availableCategorySlugs}
         />
       </Suspense>
     </div>

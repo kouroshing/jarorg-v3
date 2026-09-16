@@ -80,6 +80,7 @@ CREATE TABLE "orders" (
     "district_or_city" TEXT,
     "location_lat" REAL,
     "location_lng" REAL,
+    "photo_location_id" TEXT,
     "reference_link" TEXT,
     "moodboard_urls" TEXT,
     "project_description" TEXT,
@@ -106,6 +107,8 @@ CREATE TABLE "orders" (
     "dispute_resolution" TEXT,
     "client_reminded_at" DATETIME,
     "no_applicants_at" DATETIME,
+    "published_at" DATETIME,
+    "no_match_at" DATETIME,
     "delivered_at" DATETIME,
     "settled_at" DATETIME,
     "settled_amount" INTEGER,
@@ -117,6 +120,50 @@ CREATE TABLE "orders" (
     "selected_specialist_id" TEXT,
     CONSTRAINT "orders_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "orders_selected_specialist_id_fkey" FOREIGN KEY ("selected_specialist_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "order_deliverables" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "order_id" TEXT NOT NULL,
+    "uploaded_by_id" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "file_url" TEXT,
+    "link_url" TEXT,
+    "label" TEXT,
+    "file_name" TEXT,
+    "mime_type" TEXT,
+    "file_size" INTEGER,
+    CONSTRAINT "order_deliverables_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "order_deliverables_uploaded_by_id_fkey" FOREIGN KEY ("uploaded_by_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "order_messages" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "order_id" TEXT NOT NULL,
+    "sender_id" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "order_messages_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "order_messages_sender_id_fkey" FOREIGN KEY ("sender_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "order_reviews" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" DATETIME NOT NULL,
+    "order_id" TEXT NOT NULL,
+    "direction" TEXT NOT NULL,
+    "reviewer_id" TEXT NOT NULL,
+    "reviewee_id" TEXT NOT NULL,
+    "rating" INTEGER NOT NULL,
+    "comment" TEXT,
+    CONSTRAINT "order_reviews_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "order_reviews_reviewer_id_fkey" FOREIGN KEY ("reviewer_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "order_reviews_reviewee_id_fkey" FOREIGN KEY ("reviewee_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -136,6 +183,7 @@ CREATE TABLE "project_interests" (
     "schedule_stance" TEXT NOT NULL DEFAULT 'ACCEPT_CLIENT',
     "proposed_booking_date" TEXT,
     "proposed_time_slot" TEXT,
+    "proposed_photo_location_id" TEXT,
     CONSTRAINT "project_interests_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "project_interests_specialist_id_fkey" FOREIGN KEY ("specialist_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -219,6 +267,7 @@ CREATE TABLE "pwa_settings" (
     "no_applicant_timeout_hours" INTEGER NOT NULL DEFAULT 48,
     "selection_reminder_hours" INTEGER NOT NULL DEFAULT 72,
     "selection_timeout_days" INTEGER NOT NULL DEFAULT 7,
+    "matching_timeout_days" INTEGER NOT NULL DEFAULT 7,
     "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" DATETIME NOT NULL
 );
@@ -364,6 +413,9 @@ CREATE TABLE "specialist_profiles" (
     "kyc_national_id_mask" TEXT,
     "kyc_shaba_mask" TEXT,
     "kyc_bank_name" TEXT,
+    "kyc_first_name" TEXT,
+    "kyc_last_name" TEXT,
+    "kyc_father_name" TEXT,
     "kyc_verified_at" DATETIME,
     "kyc_failure_reason" TEXT,
     "kyc_submitted_at" DATETIME,
@@ -423,6 +475,21 @@ CREATE INDEX "orders_created_at_idx" ON "orders"("created_at");
 
 -- CreateIndex
 CREATE INDEX "orders_status_idx" ON "orders"("status");
+
+-- CreateIndex
+CREATE INDEX "order_deliverables_order_id_created_at_idx" ON "order_deliverables"("order_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "order_messages_order_id_created_at_idx" ON "order_messages"("order_id", "created_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "order_reviews_order_id_direction_key" ON "order_reviews"("order_id", "direction");
+
+-- CreateIndex
+CREATE INDEX "order_reviews_reviewee_id_created_at_idx" ON "order_reviews"("reviewee_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "order_reviews_direction_reviewee_id_idx" ON "order_reviews"("direction", "reviewee_id");
 
 -- CreateIndex
 CREATE INDEX "project_interests_order_id_idx" ON "project_interests"("order_id");
@@ -500,4 +567,47 @@ CREATE UNIQUE INDEX "admin_staff_phone_key" ON "admin_staff"("phone");
 
 -- CreateIndex
 CREATE INDEX "admin_staff_is_active_idx" ON "admin_staff"("is_active");
+
+-- CreateTable
+CREATE TABLE "photo_locations" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" DATETIME NOT NULL,
+    "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "description" TEXT,
+    "lat" REAL NOT NULL,
+    "lng" REAL NOT NULL,
+    "city" TEXT,
+    "district" TEXT,
+    "address" TEXT,
+    "needs_permit" BOOLEAN NOT NULL DEFAULT false,
+    "pro_camera_allowed" BOOLEAN NOT NULL DEFAULT true,
+    "phone_camera_allowed" BOOLEAN NOT NULL DEFAULT true,
+    "has_entrance_fee" BOOLEAN NOT NULL DEFAULT false,
+    "has_changing_room" BOOLEAN NOT NULL DEFAULT false,
+    "has_parking" BOOLEAN NOT NULL DEFAULT false,
+    "security_level" TEXT NOT NULL DEFAULT 'MEDIUM',
+    "contact_phone" TEXT,
+    "cover_image_url" TEXT,
+    "image_urls" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "rejection_reason" TEXT,
+    "reviewed_at" DATETIME,
+    "reviewed_by_id" TEXT,
+    "submitted_by_id" TEXT,
+    CONSTRAINT "photo_locations_submitted_by_id_fkey" FOREIGN KEY ("submitted_by_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "photo_locations_slug_key" ON "photo_locations"("slug");
+
+-- CreateIndex
+CREATE INDEX "photo_locations_status_city_idx" ON "photo_locations"("status", "city");
+
+-- CreateIndex
+CREATE INDEX "photo_locations_lat_lng_idx" ON "photo_locations"("lat", "lng");
+
+-- CreateIndex
+CREATE INDEX "photo_locations_status_created_at_idx" ON "photo_locations"("status", "created_at");
 

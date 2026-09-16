@@ -32,6 +32,11 @@ import {
   setSpecialistKycStatusAction,
 } from "@/app/actions/adminActionHandlers";
 import type { SpecialistReviewCard } from "@/lib/specialists/review";
+import {
+  isKycPendingOverSla,
+  kycPendingAgeHours,
+  KYC_PENDING_SLA_HOURS,
+} from "@/lib/kyc/gates";
 import Image from "next/image";
 import EquipmentTagsDisplay from "@/components/specialist/EquipmentTagsDisplay";
 import AdminPortfolioGallery from "@/components/admin/AdminPortfolioGallery";
@@ -136,6 +141,24 @@ export default function SpecialistReviewBoard({
       ).length,
     [localCards]
   );
+
+  const overdueKycCount = useMemo(
+    () =>
+      localCards.filter(
+        (c) => c.kycStatus === "PENDING" && isKycPendingOverSla(c.kycSubmittedAt)
+      ).length,
+    [localCards]
+  );
+
+  const orderedCards = useMemo(() => {
+    const rank = (c: SpecialistReviewCard) => {
+      if (c.kycStatus === "PENDING" && isKycPendingOverSla(c.kycSubmittedAt)) return 0;
+      if (c.kycStatus === "PENDING") return 1;
+      if (c.status === "PENDING_REVIEW" || c.profileEditStatus === "PENDING") return 2;
+      return 3;
+    };
+    return [...localCards].sort((a, b) => rank(a) - rank(b));
+  }, [localCards]);
 
   const refresh = () => startTransition(() => router.refresh());
 
@@ -367,6 +390,11 @@ export default function SpecialistReviewBoard({
                 {pendingCount.toLocaleString("fa-IR")} پرونده در صف
               </span>
             )}
+            {overdueKycCount > 0 && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
+                {overdueKycCount.toLocaleString("fa-IR")} KYC معوق (&gt;{KYC_PENDING_SLA_HOURS}س)
+              </span>
+            )}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             متخصص تا زمانی که اینجا تایید نشود به کارتابل پروژه‌ها دسترسی ندارد.
@@ -476,7 +504,7 @@ export default function SpecialistReviewBoard({
         </div>
       ) : (
         <div className="space-y-4">
-          {localCards.map((card) => {
+          {orderedCards.map((card) => {
             const isOpen = expanded === card.profileId;
             const status = STATUS_LABEL[card.status] || STATUS_LABEL.INCOMPLETE;
             const isBusy = busy === card.profileId || isPending;
@@ -484,9 +512,8 @@ export default function SpecialistReviewBoard({
               !card.eligibility.hasDisplayName && "نام",
               !card.eligibility.hasAvatar && "عکس پروفایل",
               !card.eligibility.hasCategories && "دسته‌بندی",
-              card.eligibility.submittableCategories.length === 0 &&
-                !card.canActivateCore &&
-                "۱۰ نمونه‌کار در یک شاخه",
+              card.eligibility.incompleteCategories.length > 0 &&
+                "۱۰ نمونه‌کار در هر دسته",
               !card.eligibility.hasCity && "شهر",
               !card.eligibility.hasBaseLocation && "مبدأ روی نقشه",
               !card.eligibility.hasAgreedToTerms && "تعهدنامه",
@@ -545,19 +572,28 @@ export default function SpecialistReviewBoard({
                         </span>
                         {card.kycStatus && card.kycStatus !== "NONE" && (
                           <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                               card.kycStatus === "VERIFIED"
                                 ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                                 : card.kycStatus === "PENDING"
-                                  ? "bg-sky-50 text-sky-800 border-sky-200"
+                                  ? isKycPendingOverSla(card.kycSubmittedAt)
+                                    ? "bg-rose-50 text-rose-900 border-rose-300"
+                                    : "bg-sky-50 text-sky-800 border-sky-200"
                                   : "bg-rose-50 text-rose-800 border-rose-200"
                             }`}
+                            title={
+                              card.kycStatus === "PENDING" && card.kycSubmittedAt
+                                ? `ثبت‌شده ${Math.floor(kycPendingAgeHours(card.kycSubmittedAt) || 0)} ساعت پیش · SLA ${KYC_PENDING_SLA_HOURS}س`
+                                : undefined
+                            }
                           >
                             KYC:{" "}
                             {card.kycStatus === "VERIFIED"
                               ? "تایید"
                               : card.kycStatus === "PENDING"
-                                ? "در انتظار"
+                                ? isKycPendingOverSla(card.kycSubmittedAt)
+                                  ? `معوق (>${KYC_PENDING_SLA_HOURS}س)`
+                                  : "در انتظار"
                                 : "رد"}
                           </span>
                         )}
@@ -686,8 +722,9 @@ export default function SpecialistReviewBoard({
                                     .finally(() => setBusy(null));
                                 }}
                                 className="w-full text-right px-3 py-2 rounded-lg text-xs font-bold text-sky-800 hover:bg-sky-50 disabled:opacity-40"
+                                title="فقط برای موارد گیرکرده قدیمی؛ مسیر عادی استعلام خودکار زحل است"
                               >
-                                تایید KYC
+                                تایید دستی اضطراری KYC
                               </button>
                               <button
                                 type="button"

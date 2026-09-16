@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { parseOrderStatus } from "@/lib/orders/status";
 import { markOrderPaid } from "@/lib/orders/payment";
+import { tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export async function GET(request: Request) {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
         merchant_id: merchantId,
-        amount,
+        amount: tomanToRial(amount),
         callback_url: callbackUrl,
         description: `پرداخت پروژه ${order.categoryTitle || "عکاسی"} (شناسه: #${order.id.slice(-6)})`,
       }),

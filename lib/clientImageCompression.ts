@@ -41,7 +41,16 @@ export function isImageFile(file: File): boolean {
  * Checks if a file is a video
  */
 export function isVideoFile(file: File): boolean {
-  return file.type.startsWith("video/") || /\.(mp4|mov|quicktime|webm|m4v)$/i.test(file.name);
+  return file.type.startsWith("video/") || /\.(mp4|mov|quicktime|webm|m4v|mpeg|mpg|avi)$/i.test(file.name);
+}
+
+/** Portfolio uploads: only MP4 is accepted for video. */
+export function isAllowedPortfolioVideo(file: File): boolean {
+  const mime = (file.type || "").toLowerCase();
+  const name = file.name.toLowerCase();
+  if (mime === "video/mp4") return true;
+  if (mime && mime.startsWith("video/") && mime !== "video/mp4") return false;
+  return /\.mp4$/i.test(name);
 }
 
 /**

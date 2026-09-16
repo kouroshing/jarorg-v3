@@ -5,7 +5,7 @@ import { generateSpotPlayerLicense } from "@/lib/spotplayer";
 import { signSessionToken } from "@/lib/auth/jwt";
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { sessionRoleFromPhone } from "@/lib/auth/roles";
-import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
+import { resolveZarinpalMerchant, tomanToRial } from "@/lib/payments/zarinpal";
 import { courseChargeAmount } from "@/lib/jaramooz/pricing";
 
 export const dynamic = "force-dynamic";
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
 
     const zarinpalBody = {
       merchant_id: merchantId,
-      amount: finalAmount,
+      amount: tomanToRial(finalAmount),
       authority: authority,
     };
 

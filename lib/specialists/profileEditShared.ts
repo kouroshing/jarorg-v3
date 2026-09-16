@@ -14,6 +14,7 @@ export type PendingProfileEditDraft = {
   selectedCategories?: string[] | null;
   displayName?: string | null;
   avatarUrl?: string | null;
+  bio?: string | null;
 };
 
 export function parsePendingProfileEdit(
@@ -67,6 +68,7 @@ export const PROFILE_EDIT_FIELD_LABELS: Record<keyof PendingProfileEditDraft, st
   selectedCategories: "دسته‌بندی‌ها",
   displayName: "نام نمایشی",
   avatarUrl: "عکس پروفایل",
+  bio: "بیوگرافی",
 };
 
 export function formatPendingEditValue(

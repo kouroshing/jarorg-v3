@@ -4,8 +4,6 @@ import React, { useTransition } from "react";
 import Link from "next/link";
 import {
   Briefcase,
-  FolderOpen,
-  MapPin,
   Wallet,
   User,
   ClipboardList,
@@ -31,8 +29,7 @@ export type SpecialistGate =
 const SPECIALIST_SECTIONS = [
   { id: "projects", href: "/specialist/projects", label: "پروژه‌های باز", icon: Briefcase },
   { id: "mine", href: "/specialist/mine", label: "پروژه‌های من", icon: ClipboardList },
-  { id: "portfolio", href: "/specialist/portfolio", label: "نمونه‌کارها", icon: FolderOpen },
-  { id: "profile", href: "/specialist/profile", label: "پروفایل کاری", icon: MapPin },
+  { id: "portfolio", href: "/specialist/portfolio", label: "پروفایل من", icon: Camera },
   { id: "studio", href: "/specialist/studio", label: "استودیو", icon: Building2 },
 ] as const;
 
@@ -182,8 +179,7 @@ function SpecialistSectionNav({
         const Icon = item.icon;
         const isActive =
           item.id === active ||
-          (active === "studio" && item.id === "profile") ||
-          (active === "identity" && item.id === "profile");
+          (item.id === "portfolio" && (active === "profile" || active === "identity"));
         return (
           <Link
             key={item.id}

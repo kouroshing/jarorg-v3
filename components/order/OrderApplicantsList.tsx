@@ -39,6 +39,41 @@ interface OrderApplicantsListProps {
   agreedTotalPrice?: number | null;
   categoryTitle?: string | null;
   categorySlug?: string | null;
+  clientIsFlexible?: boolean;
+  clientBookingDate?: string | null;
+  clientTimeSlot?: string | null;
+  clientLocationType?: string | null;
+  clientPhotoLocationId?: string | null;
+}
+
+function applicantHasTimeMismatch(
+  applicant: ApplicantSpecialistView,
+  clientIsFlexible: boolean,
+  clientBookingDate: string | null,
+  clientTimeSlot: string | null
+): boolean {
+  if (clientIsFlexible) return false;
+  if (applicant.scheduleStance !== "PROPOSE") return false;
+  if (!applicant.proposedBookingDate || !applicant.proposedTimeSlot) return false;
+  return (
+    applicant.proposedBookingDate !== clientBookingDate ||
+    applicant.proposedTimeSlot !== clientTimeSlot
+  );
+}
+
+function applicantHasLocationMismatch(
+  applicant: ApplicantSpecialistView,
+  clientLocationType: string | null,
+  clientPhotoLocationId: string | null
+): boolean {
+  const proposed = applicant.proposedPhotoLocation;
+  if (!proposed) return false;
+  if (clientPhotoLocationId && clientPhotoLocationId === proposed.id) return false;
+  // Specialist suggested a catalog pin that isn't the client's current pick.
+  if (clientLocationType === "SPECIALIST_ADVICE") return true;
+  if (clientLocationType === "JAR_STUDIO") return true;
+  if (clientLocationType === "CLIENT_LOCATION") return true;
+  return Boolean(proposed);
 }
 
 export default function OrderApplicantsList({
@@ -50,6 +85,11 @@ export default function OrderApplicantsList({
   agreedTotalPrice: initialAgreedTotalPrice,
   categoryTitle,
   categorySlug,
+  clientIsFlexible = false,
+  clientBookingDate = null,
+  clientTimeSlot = null,
+  clientLocationType = null,
+  clientPhotoLocationId = null,
 }: OrderApplicantsListProps) {
   const router = useRouter();
   const [applicants, setApplicants] = useState<ApplicantSpecialistView[]>(initialApplicants);
@@ -143,7 +183,7 @@ export default function OrderApplicantsList({
               : isAwaitingPayment
                 ? "متخصص انتخاب شد. پروژه بعد از پرداخت شما قطعی می‌شود"
                 : isAwaitingConfirmation
-                  ? "متخصص انتخاب شده و در انتظار تأیید نهایی ایشان است"
+                  ? "سفارش قدیمی: متخصص انتخاب شده و در انتظار تأیید آمادگی ایشان است؛ سپس نوبت پرداخت شماست"
                   : `نمونه‌کارها فقط از حوزه «${domainLabel}» است تا راحت‌تر مقایسه کنید.`}
           </p>
         </div>
@@ -199,10 +239,12 @@ export default function OrderApplicantsList({
                 className="mt-2"
                 completedProjects={selectedApplicant.specialist.completedProjects}
                 approvedPortfolio={selectedApplicant.specialist.approvedPortfolio}
+                avgRating={selectedApplicant.specialist.avgRating}
+                ratingCount={selectedApplicant.specialist.ratingCount}
               />
             </div>
             <span className="px-3 py-1 rounded-xl bg-[#141413] text-white text-[11px] font-bold shrink-0">
-              {isAwaitingPayment ? "منتخب · پرداخت" : "منتخب · تایید متخصص"}
+              {isAwaitingPayment ? "منتخب · پرداخت" : "منتخب · آمادگی (قدیمی)"}
             </span>
           </div>
 
@@ -380,6 +422,8 @@ export default function OrderApplicantsList({
                       <SpecialistPublicStatsRow
                         completedProjects={applicant.specialist.completedProjects}
                         approvedPortfolio={applicant.specialist.approvedPortfolio}
+                        avgRating={applicant.specialist.avgRating}
+                        ratingCount={applicant.specialist.ratingCount}
                       />
                       {items.length > 0 && (
                         <p className="text-[11px] font-bold text-[#A8A29A]">
@@ -390,15 +434,26 @@ export default function OrderApplicantsList({
                       </div>
                     </div>
 
-                    {applicant.totalPrice > 0 && (
-                      <div className="text-left shrink-0 rounded-2xl bg-[#FAF9F5] px-3.5 py-2.5 border border-[#E5E0D8]">
-                        <span className="block text-[10px] font-bold text-[#A8A29A]">پیشنهاد</span>
-                        <span className="text-base sm:text-lg font-black font-mono text-[#141413] leading-none">
-                          {formatPrice(applicant.totalPrice)}
-                        </span>
-                        <span className="block text-[10px] text-[#66605B] mt-0.5">تومان</span>
-                      </div>
-                    )}
+                      {applicant.totalPrice > 0 && (
+                        <div className="text-left shrink-0 rounded-2xl bg-[#FAF9F5] px-3.5 py-2.5 border border-[#E5E0D8]">
+                          <span className="block text-[10px] font-bold text-[#A8A29A]">پیشنهاد</span>
+                          <span className="text-base sm:text-lg font-black font-mono text-[#141413] leading-none">
+                            {formatPrice(applicant.totalPrice)}
+                          </span>
+                          <span className="block text-[10px] text-[#66605B] mt-0.5">تومان</span>
+                          {applicant.jarBasePrice > 0 &&
+                          (applicant.proposedPrice ?? 0) <= applicant.jarBasePrice ? (
+                            <span className="mt-1.5 inline-flex rounded-md bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                              نرخ جار
+                            </span>
+                          ) : applicant.jarBasePrice > 0 &&
+                            (applicant.proposedPrice ?? 0) > applicant.jarBasePrice ? (
+                            <span className="mt-1.5 inline-flex rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">
+                              +{formatPrice((applicant.proposedPrice ?? 0) - applicant.jarBasePrice)} نسبت به نرخ پایه
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
                   </div>
 
                   {applicant.message && (
@@ -407,17 +462,63 @@ export default function OrderApplicantsList({
                     </p>
                   )}
 
-                  <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E0D8] bg-[#FAF9F5] px-3 py-1.5 text-[11px] font-bold text-[#66605B]">
-                    <Calendar className="h-3.5 w-3.5 text-[#CC785C] shrink-0" />
-                    <span>
-                      {applicant.scheduleStance === "PROPOSE" &&
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E0D8] bg-[#FAF9F5] px-3 py-1.5 text-[11px] font-bold text-[#66605B]">
+                      <Calendar className="h-3.5 w-3.5 text-[#CC785C] shrink-0" />
+                      <span>
+                        {applicant.scheduleStance === "PROPOSE" &&
+                        applicant.proposedBookingDate &&
+                        applicant.proposedTimeSlot
+                          ? `پیشنهاد زمان: ${applicant.proposedBookingDate} · ${applicant.proposedTimeSlot}`
+                          : clientIsFlexible
+                            ? "موافق هماهنگی زمان با شما"
+                            : "موافق زمان شما"}
+                      </span>
+                    </div>
+                    {applicant.proposedPhotoLocation && (
+                      <div className="inline-flex items-center gap-1.5 rounded-full border border-[#CC785C]/25 bg-[#CC785C]/5 px-3 py-1.5 text-[11px] font-bold text-[#8B4F3A]">
+                        <MapPin className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          پیشنهاد لوکیشن: {applicant.proposedPhotoLocation.name}
+                          {applicant.proposedPhotoLocation.district
+                            ? ` · ${applicant.proposedPhotoLocation.district}`
+                            : ""}
+                        </span>
+                      </div>
+                    )}
+                    {!clientIsFlexible &&
+                      applicant.scheduleStance === "PROPOSE" &&
                       applicant.proposedBookingDate &&
-                      applicant.proposedTimeSlot
-                        ? `پیشنهاد زمان: ${applicant.proposedBookingDate} · ${applicant.proposedTimeSlot}`
-                        : applicant.scheduleStance === "DEFER"
-                          ? "هماهنگی زمان بعد از پرداخت"
-                          : "موافق زمان شما"}
-                    </span>
+                      applicant.proposedTimeSlot &&
+                      (applicant.proposedBookingDate !== clientBookingDate ||
+                        applicant.proposedTimeSlot !== clientTimeSlot) && (
+                        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950 leading-relaxed">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            زمان پیشنهادی متخصص با زمان شما فرق دارد
+                            {clientBookingDate && clientTimeSlot
+                              ? ` (شما: ${clientBookingDate} · ${clientTimeSlot})`
+                              : ""}
+                            .
+                          </span>
+                        </div>
+                      )}
+                    {applicantHasLocationMismatch(
+                      applicant,
+                      clientLocationType,
+                      clientPhotoLocationId
+                    ) && (
+                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950 leading-relaxed">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          لوکیشن پیشنهادی متخصص با درخواست اولیه شما فرق دارد
+                          {applicant.proposedPhotoLocation
+                            ? ` («${applicant.proposedPhotoLocation.name}»)`
+                            : ""}
+                          .
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 pt-1">
@@ -455,28 +556,78 @@ export default function OrderApplicantsList({
                         متخصص دیگری انتخاب شده
                       </span>
                     ) : isConfirming ? (
-                      <div className="flex gap-2 w-full sm:w-auto">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSpecialist(applicant.id)}
-                          disabled={isPending}
-                          className="flex-1 sm:flex-none h-12 px-5 rounded-2xl bg-[#141413] text-white text-sm font-bold inline-flex items-center justify-center gap-2"
-                        >
-                          {isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Check className="h-4 w-4" />
-                          )}
-                          تایید و پرداخت
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmingInterestId(null)}
-                          className="h-12 px-4 rounded-2xl border border-[#E5E0D8] text-xs font-bold"
-                        >
-                          انصراف
-                        </button>
-                      </div>
+                      (() => {
+                        const timeMismatch = applicantHasTimeMismatch(
+                          applicant,
+                          clientIsFlexible,
+                          clientBookingDate,
+                          clientTimeSlot
+                        );
+                        const locationMismatch = applicantHasLocationMismatch(
+                          applicant,
+                          clientLocationType,
+                          clientPhotoLocationId
+                        );
+                        const hasMismatch = timeMismatch || locationMismatch;
+                        return (
+                          <div className="flex flex-col gap-2 w-full sm:w-auto sm:min-w-[16rem]">
+                            {hasMismatch && (
+                              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-950 space-y-1.5 text-right">
+                                <p className="font-black flex items-center gap-1.5">
+                                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                  تأیید تفاوت پیشنهاد
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 font-bold leading-relaxed">
+                                  {timeMismatch && (
+                                    <li>
+                                      زمان:{" "}
+                                      {applicant.proposedBookingDate} ·{" "}
+                                      {applicant.proposedTimeSlot}
+                                      {clientBookingDate && clientTimeSlot
+                                        ? ` (درخواست شما: ${clientBookingDate} · ${clientTimeSlot})`
+                                        : ""}
+                                    </li>
+                                  )}
+                                  {locationMismatch && applicant.proposedPhotoLocation && (
+                                    <li>
+                                      لوکیشن: {applicant.proposedPhotoLocation.name}
+                                      {clientLocationType === "SPECIALIST_ADVICE"
+                                        ? " (شما مشورت عکاس خواسته بودید)"
+                                        : " (متفاوت با پین/لوکیشن اولیه شما)"}
+                                    </li>
+                                  )}
+                                </ul>
+                                <p className="font-medium text-amber-900/90 leading-relaxed">
+                                  با تأیید، همین زمان و لوکیشن روی سفارش قفل می‌شود و به مرحله
+                                  پرداخت می‌روید.
+                                </p>
+                              </div>
+                            )}
+                            <div className="flex gap-2 w-full">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectSpecialist(applicant.id)}
+                                disabled={isPending}
+                                className="flex-1 sm:flex-none h-12 px-5 rounded-2xl bg-[#141413] text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+                              >
+                                {isPending ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Check className="h-4 w-4" />
+                                )}
+                                {hasMismatch ? "تأیید تفاوت و ادامه" : "تایید و پرداخت"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingInterestId(null)}
+                                className="h-12 px-4 rounded-2xl border border-[#E5E0D8] text-xs font-bold"
+                              >
+                                انصراف
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()
                     ) : (
                       <button
                         type="button"

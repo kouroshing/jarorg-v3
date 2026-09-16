@@ -18,6 +18,8 @@ import {
   SERVICE_CITIES,
   matchServiceCity,
 } from "@/lib/geo/serviceCities";
+import { listNearbyPhotoLocationsForOrderAction } from "@/app/actions/locationActions";
+import type { PhotoLocationPublic } from "@/lib/locations/photoLocation";
 
 export interface Coordinates {
   lat: number;
@@ -45,7 +47,12 @@ export interface LocationMapPickerProps {
   variant?: "fullscreen" | "embedded";
   /** Override the floating pin status label (defaults differ by variant). */
   pinLabel?: string;
-}
+  /** Show جار لوکیشن circular pins (order map). Off for embedded pickers. */
+  showJarLocations?: boolean;
+  /** When client picks / clears a catalog جار لوکیشن. */
+  onChangePhotoLocationId?: (id: string | null) => void;
+  photoLocationId?: string | null;
+};
 
 const DEFAULT_CENTER: Coordinates = { lat: 35.6892, lng: 51.3890 }; // Tehran Center [35.6892, 51.3890]
 
@@ -60,12 +67,16 @@ export default function LocationMapPicker({
   initialCoords = DEFAULT_CENTER,
   variant = "fullscreen",
   pinLabel,
+  showJarLocations,
+  onChangePhotoLocationId,
 }: LocationMapPickerProps) {
   const isEmbedded = variant === "embedded";
+  const jarLocationsEnabled = showJarLocations ?? !isEmbedded;
   const resolvedPinLabel =
     pinLabel || (isEmbedded ? "محل شروع حرکت" : "محل دقیق عکاسی");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const catalogLayerRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   // Keep latest callback & prop refs so Leaflet listeners always have fresh values without re-mounting
@@ -75,6 +86,8 @@ export default function LocationMapPicker({
   onChangeAddressRef.current = onChangeAddress;
   const onChangeCoordsRef = useRef(onChangeCoords);
   onChangeCoordsRef.current = onChangeCoords;
+  const onChangePhotoLocationIdRef = useRef(onChangePhotoLocationId);
+  onChangePhotoLocationIdRef.current = onChangePhotoLocationId;
   const districtRef = useRef(district);
   districtRef.current = district;
   const locationTypeRef = useRef(locationType);
@@ -87,7 +100,10 @@ export default function LocationMapPicker({
   const [isLocating, setIsLocating] = useState(false);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [catalogPick, setCatalogPick] = useState<PhotoLocationPublic | null>(null);
   const toastTimeoutRef = useRef<any>(null);
+  const catalogLoadTimerRef = useRef<any>(null);
+  const skipClearPhotoLocationRef = useRef(false);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -123,6 +139,12 @@ export default function LocationMapPicker({
     // 0. Hand the raw point up. Reverse geocoding below can fail or be slow;
     //    the travel fee only needs these two numbers, so publish them first.
     onChangeCoordsRef.current?.({ lat, lng });
+    // Manual map move clears catalog pick unless we just applied a جار لوکیشن.
+    if (skipClearPhotoLocationRef.current) {
+      skipClearPhotoLocationRef.current = false;
+    } else {
+      onChangePhotoLocationIdRef.current?.(null);
+    }
 
     // 1. Instant 0ms offline resolution for Iranian cities and Tehran districts
     const fastLoc = getFastIranLocation(lat, lng);
@@ -223,6 +245,8 @@ export default function LocationMapPicker({
         minZoom: 5,
         subdomains: neshanKey ? [] : ["a", "b", "c"],
       }).addTo(map);
+
+      catalogLayerRef.current = L.layerGroup().addTo(map);
 
       // Listen to movement events for Snapp-style central pin
       map.on("movestart", () => {
@@ -370,9 +394,53 @@ export default function LocationMapPicker({
         }
         mapInstanceRef.current = null;
       }
+      catalogLayerRef.current = null;
     };
     // Deliberately empty deps array so map is NEVER destroyed & recreated on prop changes
   }, []);
+
+  // جار لوکیشن pins near map center (order flow)
+  useEffect(() => {
+    if (!jarLocationsEnabled) return;
+    if (catalogLoadTimerRef.current) clearTimeout(catalogLoadTimerRef.current);
+    catalogLoadTimerRef.current = setTimeout(async () => {
+      const map = mapInstanceRef.current;
+      const layer = catalogLayerRef.current;
+      if (!map || !layer) return;
+      try {
+        const L = (await import("leaflet")).default;
+        const res = await listNearbyPhotoLocationsForOrderAction({
+          lat: coords.lat,
+          lng: coords.lng,
+          radiusKm: 45,
+          limit: 40,
+        });
+        if (!res.success) return;
+        layer.clearLayers();
+        for (const item of res.items) {
+          const icon = L.divIcon({
+            className: "jar-loc-order-marker",
+            html: `<div style="width:14px;height:14px;border-radius:9999px;background:#CC785C;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.3)"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7],
+          });
+          const marker = L.marker([item.lat, item.lng], { icon, zIndexOffset: 200 });
+          marker.on("click", (ev: any) => {
+            try {
+              L.DomEvent.stopPropagation(ev);
+            } catch {}
+            setCatalogPick(item);
+          });
+          layer.addLayer(marker);
+        }
+      } catch {
+        // ignore catalog load failures
+      }
+    }, 450);
+    return () => {
+      if (catalogLoadTimerRef.current) clearTimeout(catalogLoadTimerRef.current);
+    };
+  }, [coords.lat, coords.lng, jarLocationsEnabled]);
 
   // GPS Geolocation button with Iran boundary checks & fallback
   const handleGetLocation = () => {
@@ -975,6 +1043,87 @@ export default function LocationMapPicker({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {catalogPick && jarLocationsEnabled && (
+        <div
+          className={`absolute inset-x-3 sm:inset-x-6 max-w-xl mx-auto z-40 ${
+            isEmbedded ? "bottom-3" : "bottom-36 sm:bottom-40"
+          }`}
+        >
+          <div className="rounded-2xl border border-[#CC785C]/30 bg-white/95 backdrop-blur-xl p-3.5 shadow-md space-y-2 text-right" dir="rtl">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold text-[#CC785C]">جار لوکیشن</p>
+                <h3 className="text-sm font-black text-jar-primary truncate">{catalogPick.name}</h3>
+                <p className="text-[10px] text-jar-muted mt-0.5 truncate">
+                  {[catalogPick.city, catalogPick.district].filter(Boolean).join(" · ") || "—"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCatalogPick(null)}
+                className="text-[10px] font-bold text-jar-muted px-2 py-1"
+              >
+                بستن
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {catalogPick.needsPermit && (
+                <span className="text-[9px] font-bold rounded-full bg-amber-50 text-amber-900 px-2 py-0.5">مجوز</span>
+              )}
+              {catalogPick.proCameraAllowed && (
+                <span className="text-[9px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">دوربین حرفه‌ای</span>
+              )}
+              {catalogPick.hasChangingRoom && (
+                <span className="text-[9px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">رختکن</span>
+              )}
+              {catalogPick.hasParking && (
+                <span className="text-[9px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">پارکینگ</span>
+              )}
+              {catalogPick.hasEntranceFee && (
+                <span className="text-[9px] font-bold rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">ورودی</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const item = catalogPick;
+                  onChangeLocationType?.("CLIENT_LOCATION");
+                  setCoords({ lat: item.lat, lng: item.lng });
+                  const dist =
+                    [item.city, item.district].filter(Boolean).join("، ") || item.name;
+                  onChangeDistrict(dist);
+                  setLocationBadge(item.district || item.city || item.name);
+                  onChangeAddress(item.address || item.name);
+                  skipClearPhotoLocationRef.current = true;
+                  onChangeCoords?.({ lat: item.lat, lng: item.lng });
+                  onChangePhotoLocationId?.(item.id);
+                  try {
+                    mapInstanceRef.current?.flyTo([item.lat, item.lng], 16, {
+                      animate: true,
+                      duration: 0.8,
+                    });
+                  } catch {}
+                  setCatalogPick(null);
+                  showToast(`لوکیشن «${item.name}» برای سفارش انتخاب شد.`);
+                }}
+                className="flex-1 h-9 rounded-xl bg-jar-primary text-white text-[11px] font-bold"
+              >
+                انتخاب این لوکیشن
+              </button>
+              <a
+                href={`/locations/${catalogPick.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-9 items-center justify-center rounded-xl border border-jar-border px-3 text-[11px] font-bold text-jar-primary"
+              >
+                جزئیات
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 5. FLOATING ZOOM CONTROLS (Corner) */}
       <div

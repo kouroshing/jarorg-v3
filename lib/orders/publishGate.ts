@@ -109,17 +109,18 @@ function collectFlags(input: PublishGateInput): PublishGateFlag[] {
       Number.isFinite(input.locationLat) &&
       Number.isFinite(input.locationLng);
 
-    if (!hasAddress && !hasCity && !hasCoords) {
+    // Custom client locations must be map-pinned.
+    if (!hasCoords) {
       flags.push({
         code: "LOCATION_INCOMPLETE",
         severity: "hard",
-        label: "محل کارفرما بدون آدرس، شهر یا نقشه",
+        label: "لوکیشن اختصاصی کارفرما باید روی نقشه پین شود",
       });
-    } else if (!hasAddress && !hasCoords && hasCity) {
+    } else if (!hasAddress && !hasCity) {
       flags.push({
         code: "LOCATION_WEAK",
         severity: "soft",
-        label: "فقط شهر مشخص است؛ آدرس/نقشه ندارد",
+        label: "پین روی نقشه هست ولی آدرس/محله ناقص است",
       });
     }
   }

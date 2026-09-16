@@ -160,11 +160,13 @@ export async function createWithdrawalRequest(
     }
 
     if (specialist.kycStatus !== "VERIFIED") {
-      return {
-        success: false,
-        error:
-          "برای تسویه حساب ابتدا احراز هویت (شاهکار + شبا) را تکمیل کنید.",
-      };
+      const msg =
+        specialist.kycStatus === "PENDING"
+          ? "احراز هویت در صف بررسی است. تا تایید نهایی امکان تسویه وجود ندارد."
+          : specialist.kycStatus === "FAILED"
+            ? "احراز هویت رد شده است. پس از اصلاح و تایید مجدد می‌توانید تسویه کنید."
+            : "برای تسویه حساب ابتدا احراز هویت (شاهکار + شبا) را از مسیر متخصص تکمیل کنید.";
+      return { success: false, error: msg };
     }
 
     const res = await prisma.$transaction(async (tx) => {

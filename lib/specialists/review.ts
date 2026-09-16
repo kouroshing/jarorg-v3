@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getAdminPhoneDigits, SUPER_ADMIN_PHONE } from "@/lib/auth/admin";
 import {
   evaluateEligibility,
+  isPortfolioApprovalComplete,
+  isPortfolioUploadComplete,
   MIN_PORTFOLIO_ITEMS_PER_CATEGORY,
   MIN_SELECTED_CATEGORIES,
   parseSelectedCategories,
@@ -60,7 +62,7 @@ export type SpecialistReviewCard = {
    * portfolio is still under the usual 10-item bar.
    */
   canActivateCore: boolean;
-  /** True when core is ready but no category has ≥10 approved items. */
+  /** True when core is ready but not every category has ≥10 approved items. */
   belowPortfolioMinimum: boolean;
   eligibility: EligibilityResult;
 };
@@ -165,7 +167,7 @@ export async function getSpecialistReviewCards(
         rejected: items.filter((i) => i.reviewStatus === "REJECTED").length,
       },
       canActivate:
-        eligibility.qualifiedCategories.length > 0 &&
+        isPortfolioApprovalComplete(eligibility) &&
         eligibility.hasCity &&
         eligibility.hasBaseLocation &&
         eligibility.hasAgreedToTerms &&
@@ -183,7 +185,7 @@ export async function getSpecialistReviewCards(
         eligibility.hasAgreedToTerms &&
         eligibility.hasAvatar &&
         eligibility.hasDisplayName &&
-        eligibility.qualifiedCategories.length === 0,
+        !isPortfolioApprovalComplete(eligibility),
       eligibility,
     };
   });
@@ -234,8 +236,10 @@ export function missingRequirementLabels(eligibility: EligibilityResult): string
   if (!eligibility.hasCategories) {
     missing.push(`انتخاب حداقل ${MIN_SELECTED_CATEGORIES} دسته‌بندی`);
   }
-  if (eligibility.submittableCategories.length === 0) {
-    missing.push(`حداقل یک شاخه با ${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار`);
+  if (!isPortfolioUploadComplete(eligibility)) {
+    missing.push(
+      `${MIN_PORTFOLIO_ITEMS_PER_CATEGORY} نمونه‌کار در هر دسته‌بندی انتخاب‌شده`
+    );
   }
   if (!eligibility.hasCity) missing.push("شهر محل فعالیت");
   if (!eligibility.hasBaseLocation) missing.push("مبدأ حرکت روی نقشه");

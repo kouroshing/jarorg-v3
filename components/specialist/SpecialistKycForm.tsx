@@ -6,6 +6,8 @@ import Link from "next/link";
 import { AlertCircle, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { submitSpecialistKycAction } from "@/app/actions/specialistOnboardingActions";
 import JalaliBirthDatePicker from "@/components/specialist/JalaliBirthDatePicker";
+import { isValidIranIban, normalizeShabaDigitsFromInput } from "@/lib/kyc/iban";
+import { isValidIranianNationalId } from "@/lib/kyc/nationalId";
 
 interface Props {
   kycStatus: string;
@@ -13,13 +15,21 @@ interface Props {
   shabaMask?: string | null;
   failureReason?: string | null;
   bankName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  fatherName?: string | null;
+  /** Days left in post-approval KYC window. */
+  deadlineDaysLeft?: number | null;
+  deadlineExpired?: boolean;
+  deadlineDays?: number;
 }
 
-function digitsOnly(value: string) {
+function digitsOnlyNationalId(value: string) {
   return value
     .replace(/[^\d۰-۹٠-٩]/g, "")
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .slice(0, 10);
 }
 
 export default function SpecialistKycForm({
@@ -28,6 +38,12 @@ export default function SpecialistKycForm({
   shabaMask,
   failureReason,
   bankName,
+  firstName,
+  lastName,
+  fatherName,
+  deadlineDaysLeft = null,
+  deadlineExpired = false,
+  deadlineDays = 7,
 }: Props) {
   const router = useRouter();
   const [nationalId, setNationalId] = useState("");
@@ -38,10 +54,14 @@ export default function SpecialistKycForm({
   const [okMessage, setOkMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [touched, setTouched] = useState(false);
+  /** Allow re-submit while server status is still PENDING (manual queue / old soft-lock). */
+  const [retryPending, setRetryPending] = useState(false);
 
   const nationalOk = nationalId.trim().length === 10;
+  const nationalChecksumOk = nationalOk && isValidIranianNationalId(nationalId);
   const birthOk = birthDate.trim().length >= 8;
   const shabaOk = shabaDigits.length === 24;
+  const shabaChecksumOk = shabaOk && isValidIranIban(shabaDigits);
   const shabaRemaining = Math.max(0, 24 - shabaDigits.length);
 
   const blockers: string[] = [];
@@ -49,35 +69,71 @@ export default function SpecialistKycForm({
     blockers.push(
       nationalId.length === 0
         ? "کد ملی را وارد کنید (۱۰ رقم)."
-        : `کد ملی ناقص است (${nationalId.length}/۱۰ رقم).`
+        : `کد ملی ناقص است (${nationalId.length.toLocaleString("fa-IR")}/۱۰ رقم).`
     );
+  } else if (!nationalChecksumOk) {
+    blockers.push("کد ملی از نظر رقم کنترلی نامعتبر است — با کارت ملی دوباره چک کنید.");
   }
-  if (!birthOk) blockers.push("تاریخ تولد را از تقویم انتخاب کنید.");
+  if (!birthOk) blockers.push("تاریخ تولد را از تقویم شمسی انتخاب کنید (مطابق کارت ملی).");
   if (!shabaOk) {
     blockers.push(
       shabaDigits.length === 0
-        ? "۲۴ رقم شبا را بعد از IR وارد کنید (خود IR را ننویسید)."
+        ? "۲۴ رقم شبا را بعد از IR وارد کنید (خود IR را ننویسید؛ اگر از بانک با IR کپی کردید، خودکار حذف می‌شود)."
         : `شبا ناقص است — ${shabaRemaining.toLocaleString("fa-IR")} رقم دیگر لازم است (${shabaDigits.length.toLocaleString("fa-IR")}/۲۴).`
+    );
+  } else if (!shabaChecksumOk) {
+    blockers.push(
+      "رقم‌های شبا از نظر کنترل بانکی نامعتبر است — یک رقم اشتباه وارد شده؛ از اپ بانک دوباره کپی کنید."
     );
   }
 
-  const canSubmit = !isPending && nationalOk && birthOk && shabaOk;
+  const canSubmit =
+    !isPending && nationalOk && nationalChecksumOk && birthOk && shabaOk && shabaChecksumOk;
   const showHints = touched || shabaDigits.length > 0 || nationalId.length > 0;
+
+  const fullLegalName = [firstName, lastName].filter(Boolean).join(" ").trim();
 
   if (kycStatus === "VERIFIED") {
     return (
-      <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 p-6 space-y-3 text-center">
+      <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 p-6 space-y-4 text-center">
         <CheckCircle2 className="h-10 w-10 text-emerald-600 mx-auto" />
-        <h1 className="text-lg font-black text-emerald-950">احراز هویت تایید شد</h1>
-        <p className="text-xs text-emerald-900/80">
-          هویت و حساب بانکی شما برای تسویه پروژه‌ها تایید شده است.
-          {bankName ? ` (${bankName})` : ""}
-        </p>
-        {(nationalIdMask || shabaMask) && (
-          <p className="text-[11px] font-mono text-emerald-800">
-            {[nationalIdMask, shabaMask].filter(Boolean).join(" · ")}
+        <div className="space-y-1">
+          <h1 className="text-lg font-black text-emerald-950">اطلاعات تایید شد</h1>
+          <p className="text-xs text-emerald-900/80 leading-relaxed">
+            هویت و حساب بانکی شما برای تسویه پروژه‌ها تایید شده است.
           </p>
-        )}
+        </div>
+
+        <div className="rounded-2xl border border-emerald-200 bg-white/80 p-4 text-right space-y-2.5">
+          {fullLegalName ? (
+            <div>
+              <p className="text-[10px] font-bold text-emerald-800/70">نام کامل (ثبت احوال)</p>
+              <p className="text-base font-black text-emerald-950">{fullLegalName}</p>
+            </div>
+          ) : null}
+          {fatherName ? (
+            <div>
+              <p className="text-[10px] font-bold text-emerald-800/70">نام پدر</p>
+              <p className="text-sm font-bold text-emerald-900">{fatherName}</p>
+            </div>
+          ) : null}
+          {(nationalIdMask || shabaMask) && (
+            <div className="pt-1 border-t border-emerald-100 space-y-1">
+              {nationalIdMask ? (
+                <p className="text-[11px] font-mono text-emerald-800">
+                  کد ملی: {nationalIdMask}
+                </p>
+              ) : null}
+              {shabaMask ? (
+                <p className="text-[11px] font-mono text-emerald-800">شبا: {shabaMask}</p>
+              ) : null}
+              {bankName ? (
+                <p className="text-[11px] font-bold text-emerald-900">بانک: {bankName}</p>
+              ) : null}
+            </div>
+          )}
+        </div>
+
         <Link
           href="/specialist/projects"
           className="inline-flex h-11 items-center justify-center rounded-full bg-jar-primary px-6 text-xs font-medium text-white"
@@ -88,25 +144,43 @@ export default function SpecialistKycForm({
     );
   }
 
-  if (kycStatus === "PENDING") {
+  if (kycStatus === "PENDING" && !retryPending) {
     return (
       <div className="rounded-3xl border border-amber-200 bg-amber-50/80 p-6 space-y-3 text-center">
         <ShieldCheck className="h-10 w-10 text-amber-700 mx-auto" />
         <h1 className="text-lg font-black text-amber-950">در انتظار تایید احراز هویت</h1>
-        <p className="text-xs text-amber-900/80 leading-relaxed">
-          درخواست شما ثبت شده و در صف بررسی است. تا اعلام نتیجه دوباره ارسال نکنید.
+        <p className="text-xs text-amber-900/80 leading-relaxed text-right sm:text-center">
+          {failureReason ||
+            "استعلام قبلی کامل نشده. احراز هویت باید با استعلام آنلاین (زحل) تمام شود — معمولاً نیازی به تایید دستی ادمین نیست."}
         </p>
+        <div className="rounded-2xl border border-amber-200/80 bg-white/70 p-3 text-right space-y-1.5">
+          <p className="text-[11px] font-black text-amber-950">کار بعدی شما:</p>
+          <ul className="text-[11px] font-medium text-amber-900/90 space-y-1 list-disc list-inside leading-relaxed">
+            <li>دکمه «اصلاح و تلاش مجدد» را بزنید و دوباره استعلام آنلاین بگیرید.</li>
+            <li>کد ملی، تاریخ تولد و شبا را با کارت ملی و اپ بانک چک کنید.</li>
+            <li>موبایل ورود به جار باید به نام صاحب کد ملی باشد (شاهکار).</li>
+          </ul>
+        </div>
         {(nationalIdMask || shabaMask) && (
           <p className="text-[11px] font-mono text-amber-900">
             {[nationalIdMask, shabaMask].filter(Boolean).join(" · ")}
           </p>
         )}
-        <Link
-          href="/specialist/projects"
-          className="inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-5 text-xs font-bold text-amber-950"
-        >
-          فعلاً برو به پروژه‌ها
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-2 justify-center pt-1">
+          <button
+            type="button"
+            onClick={() => setRetryPending(true)}
+            className="inline-flex h-10 items-center justify-center rounded-full bg-jar-primary px-5 text-xs font-bold text-white"
+          >
+            اصلاح و تلاش مجدد
+          </button>
+          <Link
+            href="/specialist/projects"
+            className="inline-flex h-10 items-center justify-center rounded-full border border-amber-300 bg-white px-5 text-xs font-bold text-amber-950"
+          >
+            فعلاً برو به پروژه‌ها
+          </Link>
+        </div>
       </div>
     );
   }
@@ -129,12 +203,18 @@ export default function SpecialistKycForm({
       });
       if (!res.success) {
         setError(res.error || "خطا");
+        // FAILED / ERROR stay on form so user can fix or retry.
+        if (res.status === "FAILED" || res.status === "ERROR") {
+          router.refresh();
+        }
         return;
       }
       if (res.status === "VERIFIED") {
-        setOkMessage("احراز هویت با موفقیت تایید شد.");
-      } else if (res.status === "PENDING") {
-        setOkMessage("درخواست ثبت شد و در صف بررسی قرار گرفت.");
+        setOkMessage(
+          res.firstName && res.lastName
+            ? `احراز هویت «${res.firstName} ${res.lastName}» تایید شد.`
+            : "احراز هویت با موفقیت تایید شد."
+        );
       }
       router.refresh();
     });
@@ -148,22 +228,67 @@ export default function SpecialistKycForm({
       <div className="space-y-1">
         <h1 className="text-lg sm:text-xl font-black text-jar-primary">احراز هویت</h1>
         <p className="text-sm text-jar-muted leading-relaxed">
-          برای تسویه کیف‌پول، مالکیت موبایل (شاهکار)، کد ملی، تاریخ تولد و مطابقت شبا به‌صورت
-          آنلاین استعلام می‌شود. تصویر کارت ملی لازم نیست — فقط همین اطلاعات.
-          کد ملی و شبا کامل ذخیره نمی‌شود؛ فقط نسخه ماسک‌شده.
+          سه استعلام جداگانه انجام می‌شود:{" "}
+          <span className="font-bold text-jar-primary">شاهکار</span> (موبایل به نام کد ملی)،{" "}
+          <span className="font-bold text-jar-primary">ثبت احوال</span> (کد ملی + تاریخ تولد)، و{" "}
+          <span className="font-bold text-jar-primary">تطبیق شبا</span> (حساب بانکی به نام همان کد
+          ملی). تصویر کارت ملی لازم نیست. اگر یکی رد شود، همان مورد را در پیام خطا می‌بینید.
         </p>
       </div>
 
+      {kycStatus !== "VERIFIED" && (deadlineExpired || deadlineDaysLeft != null) && (
+        <div
+          className={`rounded-xl border p-3 text-sm font-medium space-y-1 ${
+            deadlineExpired
+              ? "border-rose-200 bg-rose-50 text-rose-900"
+              : deadlineDaysLeft != null && deadlineDaysLeft <= 2
+                ? "border-amber-300 bg-amber-50 text-amber-950"
+                : "border-sky-200 bg-sky-50 text-sky-950"
+          }`}
+        >
+          <p className="font-black">
+            {deadlineExpired
+              ? "مهلت احراز هویت تمام شد"
+              : deadlineDaysLeft != null && deadlineDaysLeft <= 1
+                ? "کمتر از یک روز تا پایان مهلت"
+                : `مهلت ${deadlineDays.toLocaleString("fa-IR")} روزه احراز هویت`}
+          </p>
+          <p className="text-xs leading-relaxed opacity-90">
+            {deadlineExpired
+              ? `مهلت ${deadlineDays.toLocaleString("fa-IR")} روز پس از تایید پرونده تمام شده و دسترسی پروژه‌ها معلق است. همین حالا اطلاعات را بفرستید تا پس از تایید دوباره فعال شوید.`
+              : deadlineDaysLeft != null
+                ? `${deadlineDaysLeft.toLocaleString("fa-IR")} روز از مهلت باقی مانده است. بعد از این زمان بدون احراز تاییدشده، حساب معلق می‌شود.`
+                : `از زمان تایید پرونده، ${deadlineDays.toLocaleString("fa-IR")} روز فرصت تکمیل دارید.`}
+          </p>
+        </div>
+      )}
+
       {kycStatus === "FAILED" && failureReason && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 font-medium">
-          رد قبلی: {failureReason}
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 font-medium space-y-2">
+          <p className="font-black">احراز هویت رد شد — جزئیات</p>
+          <p className="leading-relaxed">{failureReason}</p>
+          <p className="text-xs font-normal text-rose-700/90 leading-relaxed">
+            فیلد مربوط را اصلاح کنید و دوباره «ارسال و استعلام» بزنید. تا وقتی تایید نشود، اعلام
+            آمادگی و تسویه فعال نیست.
+          </p>
+        </div>
+      )}
+
+      {kycStatus === "PENDING" && retryPending && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 font-medium space-y-1">
+          <p className="font-black">تلاش مجدد استعلام</p>
+          <p className="text-xs font-normal leading-relaxed">
+            همه فیلدها را دوباره وارد کنید. اگر قبلاً شبا یا کد ملی اشتباه بوده، همین‌جا اصلاح
+            کنید.
+            {failureReason ? ` دلیل قبلی: ${failureReason}` : ""}
+          </p>
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
+        <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span className="leading-relaxed">{error}</span>
         </div>
       )}
 
@@ -193,10 +318,10 @@ export default function SpecialistKycForm({
         <input
           inputMode="numeric"
           value={nationalId}
-          onChange={(e) => setNationalId(digitsOnly(e.target.value).slice(0, 10))}
+          onChange={(e) => setNationalId(digitsOnlyNationalId(e.target.value))}
           onBlur={() => setTouched(true)}
           className={`w-full h-11 px-3 rounded-xl border bg-jar-canvas text-sm font-mono text-jar-primary placeholder:text-jar-muted/50 outline-none focus:ring-2 focus:ring-jar-logo/20 ${
-            showHints && !nationalOk
+            showHints && (!nationalOk || !nationalChecksumOk)
               ? "border-amber-400 focus:border-amber-500"
               : "border-jar-border focus:border-jar-logo"
           }`}
@@ -205,9 +330,14 @@ export default function SpecialistKycForm({
           autoComplete="off"
           maxLength={10}
         />
-        <p className="text-[11px] text-jar-muted">
+        <p className="text-[11px] text-jar-muted leading-relaxed">
           {nationalId.length.toLocaleString("fa-IR")}/۱۰ رقم
-          {nationalOk ? " · کامل" : ""}
+          {nationalOk && nationalChecksumOk
+            ? " · معتبر"
+            : nationalOk
+              ? " · رقم کنترلی نامعتبر"
+              : ""}
+          {" · "}سیم‌کارت ورود باید به نام همین کد ملی باشد.
         </p>
       </div>
 
@@ -221,7 +351,7 @@ export default function SpecialistKycForm({
           }}
           disabled={isPending}
         />
-        <p className="text-xs text-jar-muted">از تقویم شمسی انتخاب کنید.</p>
+        <p className="text-xs text-jar-muted">دقیقاً مطابق کارت ملی (سال/ماه/روز شمسی).</p>
       </div>
 
       <div className="space-y-1.5">
@@ -229,15 +359,16 @@ export default function SpecialistKycForm({
           <label className="block text-sm font-bold text-jar-primary">شماره شبا</label>
           <span
             className={`text-[11px] font-bold tabular-nums ${
-              shabaOk ? "text-emerald-700" : "text-amber-700"
+              shabaOk && shabaChecksumOk ? "text-emerald-700" : "text-amber-700"
             }`}
           >
             {shabaDigits.length.toLocaleString("fa-IR")}/۲۴ رقم
+            {shabaOk && shabaChecksumOk ? " · معتبر" : shabaOk ? " · نامعتبر" : ""}
           </span>
         </div>
         <div
           className={`flex h-11 w-full items-center overflow-hidden rounded-xl border bg-jar-canvas focus-within:ring-2 focus-within:ring-jar-logo/20 ${
-            showHints && !shabaOk
+            showHints && (!shabaOk || !shabaChecksumOk)
               ? "border-amber-400 focus-within:border-amber-500"
               : "border-jar-border focus-within:border-jar-logo"
           }`}
@@ -250,24 +381,33 @@ export default function SpecialistKycForm({
             inputMode="numeric"
             value={shabaDigits}
             onChange={(e) => {
-              setShabaDigits(digitsOnly(e.target.value).slice(0, 24));
+              // Do not use maxLength={24}: pasting "IR"+24 digits gets truncated by the
+              // browser before onChange, which drops the last two account digits.
+              setShabaDigits(normalizeShabaDigitsFromInput(e.target.value));
+              setTouched(true);
+            }}
+            onPaste={(e) => {
+              e.preventDefault();
+              const pasted = e.clipboardData.getData("text");
+              setShabaDigits(normalizeShabaDigitsFromInput(pasted));
               setTouched(true);
             }}
             className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm font-mono text-jar-primary placeholder:text-jar-muted/50 outline-none"
-            placeholder="۲۴ رقم بدون IR و بدون فاصله"
+            placeholder="۲۴ رقم — اگر IR هم کپی شد، حذف می‌شود"
             autoComplete="off"
-            maxLength={24}
           />
         </div>
         <p
-          className={`text-[11px] font-medium ${
-            showHints && !shabaOk ? "text-amber-800" : "text-jar-muted"
+          className={`text-[11px] font-medium leading-relaxed ${
+            showHints && (!shabaOk || !shabaChecksumOk) ? "text-amber-800" : "text-jar-muted"
           }`}
         >
-          پیشوند IR از قبل گذاشته شده — آن را دوباره تایپ نکنید.
+          پیشوند IR از قبل هست — دوباره تایپ نکنید. اگر از اپ بانک کل شبا (با IR) را بچسبانید،
+          IR و فاصله‌ها خودکار برداشته می‌شود و هر ۲۴ رقم حفظ می‌شود.
           {!shabaOk && shabaDigits.length > 0
             ? ` هنوز ${shabaRemaining.toLocaleString("fa-IR")} رقم کم است.`
             : ""}
+          {shabaOk && !shabaChecksumOk ? " رقم کنترلی شبا اشتباه است." : ""}
         </p>
       </div>
 

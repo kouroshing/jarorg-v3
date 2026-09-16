@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import Link from "next/link";
+import { getJarMapTileConfig } from "@/lib/maps/tiles";
 
 // Specialist & Studio location items
 interface ExpertLocation {
@@ -87,6 +88,7 @@ function MapController({ center, zoom }: { center: [number, number]; zoom: numbe
 }
 
 export default function OutdoorMap({ onClose }: OutdoorMapProps) {
+  const jarTiles = getJarMapTileConfig();
   const [selectedExpert, setSelectedExpert] = useState<ExpertLocation>(EXPERT_LOCATIONS[0]);
   const [mapCenter, setMapCenter] = useState<[number, number]>([35.7760, 51.4080]);
   const [mapZoom, setMapZoom] = useState(12);
@@ -163,10 +165,11 @@ export default function OutdoorMap({ onClose }: OutdoorMapProps) {
           zoomControl={false}
           style={{ height: "100%", width: "100%" }}
         >
-          {/* CartoDB Positron Minimalistic Unfiltered Map Tiles */}
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            maxZoom={19}
+            url={jarTiles.url}
+            attribution={jarTiles.attribution}
+            maxZoom={jarTiles.maxZoom}
+            {...(jarTiles.subdomains ? { subdomains: jarTiles.subdomains } : {})}
           />
 
           {EXPERT_LOCATIONS.map((expert) => (

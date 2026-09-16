@@ -148,20 +148,18 @@ export default function SpecialistStudioForm({
           <label className="block text-xs font-bold text-jar-primary">
             موقعیت روی نقشه <span className="text-rose-500">*</span>
           </label>
-          <div className="relative h-[min(70vh,480px)] min-h-[320px] w-full overflow-hidden rounded-2xl border border-jar-border">
-            <SpecialistBaseMapPicker
-              district={district}
-              onChangeDistrict={setDistrict}
-              address={address}
-              onChangeAddress={setAddress}
-              onChangeCoords={setCoords}
-              initialCoords={coords ?? undefined}
-              pinLabel="محل استودیو"
-              districtFieldLabel="منطقه استودیو"
-              addressFieldLabel="آدرس استودیو"
-              addressPlaceholder="خیابان، پلاک، طبقه..."
-            />
-          </div>
+          <SpecialistBaseMapPicker
+            district={district}
+            onChangeDistrict={setDistrict}
+            address={address}
+            onChangeAddress={setAddress}
+            onChangeCoords={setCoords}
+            initialCoords={coords ?? undefined}
+            pinLabel="محل استودیو"
+            districtFieldLabel="منطقه استودیو"
+            addressFieldLabel="آدرس استودیو"
+            addressPlaceholder="خیابان، پلاک، طبقه..."
+          />
           {coords ? (
             <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700">
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -209,10 +207,10 @@ export default function SpecialistStudioForm({
             </button>
           )}
           <Link
-            href="/specialist/profile"
+            href="/specialist/portfolio?tab=work"
             className="h-11 px-4 rounded-full border border-jar-border text-jar-muted text-xs font-medium inline-flex items-center hover:bg-jar-soft"
           >
-            بازگشت به پروفایل کاری
+            بازگشت به پروفایل
           </Link>
         </div>
       </div>

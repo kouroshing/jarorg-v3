@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
 
 export default async function SpecialistLoginPage() {
   const session = await getSession();
+  // Sole unauthenticated specialist entry is /join (not customer /login).
   if (!session?.userId) {
-    redirect(encodeURI("/login?redirect=/specialist"));
+    redirect("/join");
   }
 
   await repairOrphanSpecialistRole(session.userId);

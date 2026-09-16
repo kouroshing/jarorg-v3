@@ -21,10 +21,13 @@ import OrderClientWaiting from "@/components/order/OrderClientWaiting";
 import CancelOrderButton from "@/components/order/CancelOrderButton";
 import OrderAdminStage from "@/components/order/OrderAdminStage";
 import OrderDeliveryPanel from "@/components/order/OrderDeliveryPanel";
+import OrderChatPanel from "@/components/order/OrderChatPanel";
+import OrderReviewPanel from "@/components/order/OrderReviewPanel";
 import {
   isAdminTriage,
   isClientCancellable,
   isOnMarket,
+  needsClientEdit,
   orderStatusPresentation,
   parseOrderStatus,
 } from "@/lib/orders/status";
@@ -104,8 +107,19 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
       Boolean(order.disputedAt)) &&
     deliveryRole != null;
 
+  const showChat =
+    Boolean(order.paidAt) &&
+    deliveryRole != null &&
+    parsedStatus !== "CANCELLED";
+  /** Admins review the thread read-only (esp. during disputes). */
+  const chatReadOnly = deliveryRole === "admin";
+  const showReview =
+    Boolean(order.settledAt) &&
+    (deliveryRole === "client" || deliveryRole === "specialist");
+
   let applicants: ApplicantSpecialistView[] = [];
-  const isPendingFlow = isAdminTriage(order.status);
+  const isPendingFlow =
+    isAdminTriage(order.status) || needsClientEdit(order.status);
 
   if (isOwnerOrAdmin && !isPendingFlow) {
     const appResult = await getOrderApplicantsForClientAction(order.id);
@@ -203,6 +217,8 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
               referenceLink: order.referenceLink,
               moodboardUrls,
               adminNote: order.adminNote ?? null,
+              hourlyRate: order.hourlyRate,
+              createdAt: order.createdAt.toISOString(),
             }}
             isOwnerOrAdmin={isOwnerOrAdmin}
           />
@@ -218,6 +234,12 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             isOwnerOrAdmin={isOwnerOrAdmin}
             selectedSpecialistId={order.selectedSpecialistId}
             agreedTotalPrice={order.agreedTotalPrice}
+            createdAt={order.createdAt.toISOString()}
+            clientIsFlexible={order.isFlexibleSchedule}
+            clientBookingDate={order.bookingDate}
+            clientTimeSlot={order.timeSlot}
+            clientLocationType={order.locationType}
+            clientPhotoLocationId={order.photoLocationId}
           />
         )}
 
@@ -228,7 +250,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             </div>
             <h1 className="text-xl font-black text-neutral-900">متخصص انتخاب شد</h1>
             <p className="text-sm text-neutral-600 leading-relaxed max-w-md mx-auto">
-              با پرداخت مبلغ توافق‌شده، رزرو قطعی می‌شود و هماهنگی شروع می‌گردد.
+              با پرداخت مبلغ توافق‌شده، رزرو قطعی می‌شود و گفتگوی هماهنگی روی همین صفحه باز می‌شود. شماره تماس نزدیک زمان پروژه نمایش داده می‌شود.
             </p>
             {payableAmount != null && (
               <p className="text-2xl font-black font-mono text-neutral-900">
@@ -274,7 +296,7 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
                     </a>
                   ) : (
                     <p className="text-xs text-neutral-500 mt-1">
-                      شماره تماس نزدیک زمان پروژه نمایش داده می‌شود. هماهنگی از همین صفحه و تماس پس از افشا انجام می‌شود.
+                      شماره تماس نزدیک زمان پروژه نمایش داده می‌شود. تا آن موقع از گفتگوی هماهنگی همین صفحه استفاده کنید.
                     </p>
                   )}
                 </div>
@@ -282,10 +304,18 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
             )}
             {isSelectedSpecialist && !isOwnerOrAdmin && (
               <p className="text-xs text-neutral-600 leading-relaxed">
-                پروژه قطعی است. پس از اتمام کار، تحویل را از پنل پایین ثبت کنید. شماره و آدرس کارفرما نزدیک زمان پروژه آزاد می‌شود.
+                پروژه قطعی است. هماهنگی را از گفتگوی پایین پیگیری کنید. پس از اتمام کار، تحویل را ثبت کنید. شماره و آدرس کارفرما نزدیک زمان پروژه آزاد می‌شود.
               </p>
             )}
           </div>
+        )}
+
+        {showChat && deliveryRole && (
+          <OrderChatPanel
+            orderId={order.id}
+            role={deliveryRole}
+            readOnly={chatReadOnly}
+          />
         )}
 
         {showDelivery && deliveryRole && (
@@ -314,16 +344,20 @@ export default async function OrderDetailPage({ params, searchParams }: OrderDet
           />
         )}
 
+        {showReview && deliveryRole && (
+          <OrderReviewPanel orderId={order.id} role={deliveryRole} />
+        )}
+
         {parsedStatus === "AWAITING_SPECIALIST_CONFIRMATION" && isOwnerOrAdmin && (
           <div className="rounded-2xl border border-neutral-200 bg-white p-6 sm:p-8 space-y-3 text-center shadow-sm">
             <div className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-900">
-              در انتظار تأیید متخصص
+              سفارش قدیمی — تأیید متخصص
             </div>
             <h1 className="text-lg font-black text-neutral-900">
-              منتظر تأیید نهایی متخصص هستیم
+              منتظر تأیید آمادگی متخصص هستیم
             </h1>
             <p className="text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
-              تا قبل از تأیید متخصص می‌توانید از منوی ⋮ بالای صفحه رزرو را لغو کنید.
+              پس از تأیید متخصص، نوبت پرداخت شماست. تا قبل از آن می‌توانید از منوی ⋮ رزرو را لغو کنید. سفارش‌های جدید دیگر این مرحله را ندارند.
             </p>
           </div>
         )}

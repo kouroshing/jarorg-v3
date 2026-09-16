@@ -32,6 +32,11 @@ interface OrderMatchingStageProps {
   isOwnerOrAdmin: boolean;
   selectedSpecialistId?: string | null;
   agreedTotalPrice?: number | null;
+  clientIsFlexible?: boolean;
+  clientBookingDate?: string | null;
+  clientTimeSlot?: string | null;
+  clientLocationType?: string | null;
+  clientPhotoLocationId?: string | null;
 }
 
 export default function OrderMatchingStage({
@@ -44,6 +49,11 @@ export default function OrderMatchingStage({
   isOwnerOrAdmin,
   selectedSpecialistId,
   agreedTotalPrice,
+  clientIsFlexible = false,
+  clientBookingDate = null,
+  clientTimeSlot = null,
+  clientLocationType = null,
+  clientPhotoLocationId = null,
 }: OrderMatchingStageProps) {
   const router = useRouter();
   const [applicants, setApplicants] = useState(initialApplicants);
@@ -186,6 +196,11 @@ export default function OrderMatchingStage({
             agreedTotalPrice={agreedTotalPrice}
             categoryTitle={categoryTitle}
             categorySlug={categorySlug}
+            clientIsFlexible={clientIsFlexible}
+            clientBookingDate={clientBookingDate}
+            clientTimeSlot={clientTimeSlot}
+            clientLocationType={clientLocationType}
+            clientPhotoLocationId={clientPhotoLocationId}
           />
         )}
       </div>

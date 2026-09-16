@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
+import { prisma } from "@/lib/prisma";
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  const base = "https://app.jarorg.ir";
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const base = "https://jarorg.ir";
   const now = new Date();
 
-  return [
+  const staticEntries: MetadataRoute.Sitemap = [
     {
       url: `${base}/`,
       lastModified: now,
@@ -22,6 +23,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.7,
+    },
+    {
+      url: `${base}/tools/locations`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${base}/order`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
     },
     {
       url: `${base}/contact`,
@@ -42,4 +55,23 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
   ];
+
+  let locationEntries: MetadataRoute.Sitemap = [];
+  try {
+    const locations = await prisma.photoLocation.findMany({
+      where: { status: "APPROVED" },
+      select: { slug: true, updatedAt: true },
+      take: 2000,
+    });
+    locationEntries = locations.map((loc) => ({
+      url: `${base}/locations/${loc.slug}`,
+      lastModified: loc.updatedAt,
+      changeFrequency: "weekly" as const,
+      priority: 0.85,
+    }));
+  } catch {
+    // Table may not exist yet during bootstrap.
+  }
+
+  return [...staticEntries, ...locationEntries];
 }

@@ -118,6 +118,8 @@ export default async function AdminPage({
       disputeRaw,
       withdrawalsRaw,
       auditsRaw,
+      pendingLocationsRaw,
+      noMatchRaw,
     ] = await Promise.all([
       canOrders
         ? prisma.order.count({
@@ -187,10 +189,12 @@ export default async function AdminPage({
               OR: [
                 { createdAt: { lt: fortyEightHoursAgo } },
                 { interests: { none: {} } },
+                { noApplicantsAt: { not: null } },
+                { clientRemindedAt: { not: null } },
               ],
             },
-            orderBy: { createdAt: "asc" },
-            take: 8,
+            orderBy: [{ noApplicantsAt: "asc" }, { clientRemindedAt: "asc" }, { createdAt: "asc" }],
+            take: 12,
             select: {
               id: true,
               categoryTitle: true,
@@ -199,6 +203,8 @@ export default async function AdminPage({
               createdAt: true,
               contactName: true,
               contactPhone: true,
+              noApplicantsAt: true,
+              clientRemindedAt: true,
               _count: { select: { interests: true } },
             },
           })
@@ -238,7 +244,7 @@ export default async function AdminPage({
               contactName: true,
               contactPhone: true,
               disputeReason: true,
-              _count: { select: { interests: true } },
+              _count: { select: { interests: true, deliverables: true, messages: true } },
             },
           })
         : Promise.resolve([]),
@@ -265,6 +271,32 @@ export default async function AdminPage({
           actorId: true,
         },
       }),
+      canOrders
+        ? prisma.photoLocation.findMany({
+            where: { status: "PENDING" },
+            orderBy: { createdAt: "asc" },
+            take: 20,
+            include: { submittedBy: { select: { phone: true } } },
+          }).catch(() => [])
+        : Promise.resolve([]),
+      canOrders
+        ? prisma.order.findMany({
+            where: { status: { in: storedValuesFor("NO_MATCH") } },
+            orderBy: { noMatchAt: "desc" },
+            take: 20,
+            select: {
+              id: true,
+              categoryTitle: true,
+              status: true,
+              totalEstimatedPrice: true,
+              createdAt: true,
+              contactName: true,
+              contactPhone: true,
+              noMatchAt: true,
+              _count: { select: { interests: true } },
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
     const actorIds = [
@@ -294,9 +326,12 @@ export default async function AdminPage({
       createdAt: Date;
       contactName: string | null;
       contactPhone: string | null;
-      _count: { interests: number };
+      _count: { interests: number; deliverables?: number; messages?: number };
       publishFlags?: string | null;
       disputeReason?: string | null;
+      noApplicantsAt?: Date | null;
+      clientRemindedAt?: Date | null;
+      noMatchAt?: Date | null;
     }) => ({
       id: o.id,
       categoryTitle: o.categoryTitle,
@@ -306,6 +341,11 @@ export default async function AdminPage({
       contactName: o.contactName,
       contactPhone: o.contactPhone,
       applicantCount: o._count.interests,
+      deliverableCount: o._count.deliverables ?? 0,
+      messageCount: o._count.messages ?? 0,
+      noApplicantsAt: o.noApplicantsAt?.toISOString() ?? null,
+      clientRemindedAt: o.clientRemindedAt?.toISOString() ?? null,
+      noMatchAt: o.noMatchAt?.toISOString() ?? null,
       publishFlags: parsePublishFlags(o.publishFlags),
       disputeReason: o.disputeReason ?? null,
     });
@@ -320,10 +360,54 @@ export default async function AdminPage({
       pendingPortfolioCount,
       pendingSpecialistCount,
       pendingWithdrawalCount,
+      pendingLocationCount: pendingLocationsRaw.length,
       triageOrders: triageRaw.map(mapOrder),
       matchingOrders: matchingRaw.map(mapOrder),
       paymentOrders: paymentRaw.map(mapOrder),
       disputeOrders: disputeRaw.map(mapOrder),
+      noMatchOrders: noMatchRaw.map(mapOrder),
+      pendingLocations: pendingLocationsRaw.map((r) => ({
+        id: r.id,
+        name: r.name,
+        slug: r.slug,
+        description: r.description,
+        city: r.city,
+        district: r.district,
+        address: r.address,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+        contactPhone: r.contactPhone,
+        submittedByPhone: r.submittedBy?.phone ?? null,
+        lat: r.lat,
+        lng: r.lng,
+        needsPermit: r.needsPermit,
+        proCameraAllowed: r.proCameraAllowed,
+        phoneCameraAllowed: r.phoneCameraAllowed,
+        hasEntranceFee: r.hasEntranceFee,
+        hasChangingRoom: r.hasChangingRoom,
+        hasParking: r.hasParking,
+        securityLevel: (r.securityLevel === "LOW" || r.securityLevel === "HIGH"
+          ? r.securityLevel
+          : "MEDIUM") as "LOW" | "MEDIUM" | "HIGH",
+        coverImageUrl: r.coverImageUrl || (() => {
+          try {
+            const arr = r.imageUrls ? JSON.parse(r.imageUrls) : [];
+            return Array.isArray(arr) && typeof arr[0] === "string" ? arr[0] : null;
+          } catch {
+            return null;
+          }
+        })(),
+        imageUrls: (() => {
+          try {
+            const arr = r.imageUrls ? JSON.parse(r.imageUrls) : [];
+            return Array.isArray(arr)
+              ? arr.filter((u: unknown): u is string => typeof u === "string" && u.trim().length > 0)
+              : [];
+          } catch {
+            return [];
+          }
+        })(),
+      })),
       withdrawals: withdrawalsRaw.map((w) => ({
         id: w.id,
         amount: w.amount,

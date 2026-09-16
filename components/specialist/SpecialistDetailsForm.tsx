@@ -27,13 +27,14 @@ import {
 } from "@/lib/equipment/catalog";
 import SaveFeedbackToast from "@/components/ui/SaveFeedbackToast";
 import ProfileEditPendingBanner from "@/components/specialist/ProfileEditPendingBanner";
+import type { BaseMapPhase } from "@/components/specialist/SpecialistBaseMapPicker";
 
 const SpecialistBaseMapPicker = dynamic(
   () => import("@/components/specialist/SpecialistBaseMapPicker"),
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full min-h-[420px] items-center justify-center bg-jar-canvas text-xs font-bold text-jar-muted">
+      <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-jar-border bg-jar-canvas text-xs font-bold text-jar-muted">
         در حال بارگذاری نقشه...
       </div>
     ),
@@ -91,6 +92,9 @@ export default function SpecialistDetailsForm({
   const [baseDistrict, setBaseDistrict] = useState("");
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null);
   const [mapFocusToken, setMapFocusToken] = useState(0);
+  const [mapPhase, setMapPhase] = useState<BaseMapPhase>(() =>
+    typeof initialBaseLat === "number" && typeof initialBaseLng === "number" ? "cover" : "place"
+  );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [toastOpen, setToastOpen] = useState(false);
@@ -117,6 +121,7 @@ export default function SpecialistDetailsForm({
       setMapFocus(coords);
       setMapFocusToken((t) => t + 1);
       setBaseCoords(coords);
+      setMapPhase("place");
     }
   };
 
@@ -131,7 +136,12 @@ export default function SpecialistDetailsForm({
     }
 
     if (!baseCoords) {
-      setError("لطفاً محل شروع حرکت و محدوده کاری را روی نقشه مشخص کنید.");
+      setError("لطفاً محل شروع حرکت را روی نقشه مشخص کنید.");
+      return;
+    }
+
+    if (mapPhase !== "cover") {
+      setError("ابتدا مبدأ را تأیید کنید، بعد شعاع محدوده کاری را تنظیم کنید.");
       return;
     }
 
@@ -220,42 +230,51 @@ export default function SpecialistDetailsForm({
                 مبدأ حرکت و محدوده کاری <span className="text-rose-500">*</span>
               </label>
               <span className="text-[10px] text-jar-muted block leading-relaxed">
-                سنجاق را روی محل شروع حرکت بگذارید و با دایره مشخص کنید تا چند کیلومتر اطراف مبدأ
-                پروژه می‌گیرید. فاصله مبدأ تا پروژه برای ایاب‌وذهاب حساب می‌شود؛ نشانی دقیق به مشتری
-                نشان داده نمی‌شود.
+                اول محل شروع حرکت را روی نقشه بگذارید و تأیید کنید؛ بعد با دایره ببینید تا چند
+                کیلومتر اطراف مبدأ پروژه می‌گیرید. فاصله مبدأ تا پروژه برای ایاب‌وذهاب حساب می‌شود؛
+                نشانی دقیق به مشتری نشان داده نمی‌شود.
               </span>
-              <div className="relative h-[min(82dvh,620px)] min-h-[460px] w-full overflow-hidden rounded-2xl border border-jar-border sm:h-[min(70vh,560px)] sm:min-h-[420px]">
-                <SpecialistBaseMapPicker
-                  district={baseDistrict}
-                  onChangeDistrict={(v) => {
-                    markDirty();
-                    setBaseDistrict(v);
-                  }}
-                  address={baseAddress}
-                  onChangeAddress={(v) => {
-                    markDirty();
-                    setBaseAddress(v);
-                  }}
-                  onChangeCoords={(coords) => {
-                    markDirty();
-                    setBaseCoords(coords);
-                  }}
-                  initialCoords={baseCoords ?? mapFocus ?? undefined}
-                  focusCoords={mapFocus}
-                  focusToken={mapFocusToken}
-                  showCoverage
-                  radiusKm={coverageRadiusKm}
-                  onChangeRadius={(km) => {
-                    markDirty();
-                    setCoverageRadiusKm(km);
-                  }}
-                />
-              </div>
-              {baseCoords ? (
+              <SpecialistBaseMapPicker
+                district={baseDistrict}
+                onChangeDistrict={(v) => {
+                  markDirty();
+                  setBaseDistrict(v);
+                }}
+                address={baseAddress}
+                onChangeAddress={(v) => {
+                  markDirty();
+                  setBaseAddress(v);
+                }}
+                onChangeCoords={(coords) => {
+                  markDirty();
+                  setBaseCoords(coords);
+                }}
+                initialCoords={baseCoords ?? mapFocus ?? undefined}
+                focusCoords={mapFocus}
+                focusToken={mapFocusToken}
+                showCoverage
+                initialPhase={
+                  typeof initialBaseLat === "number" && typeof initialBaseLng === "number"
+                    ? "cover"
+                    : "place"
+                }
+                radiusKm={coverageRadiusKm}
+                onChangeRadius={(km) => {
+                  markDirty();
+                  setCoverageRadiusKm(km);
+                }}
+                onPhaseChange={(p) => setMapPhase(p)}
+              />
+              {baseCoords && mapPhase === "cover" ? (
                 <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  مبدأ و محدوده ثبت شد
-                  {baseAddress ? ` — ${baseAddress}` : ""} · تا {coverageRadiusKm} کیلومتر
+                  مبدأ تأیید شد
+                  {baseAddress ? ` — ${baseAddress}` : ""} · پوشش تا{" "}
+                  {coverageRadiusKm.toLocaleString("fa-IR")} کیلومتر
+                </span>
+              ) : baseCoords && mapPhase === "place" ? (
+                <span className="text-[10px] font-bold text-amber-800">
+                  مبدأ روی نقشه است — برای ادامه، «تأیید مبدأ و تنظیم محدوده» را بزنید.
                 </span>
               ) : (
                 <span className="text-[10px] font-bold text-rose-600">

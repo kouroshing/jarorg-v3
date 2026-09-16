@@ -48,6 +48,7 @@ export async function reportDeliveryAction(orderId: string): Promise<DeliveryRes
       selectedSpecialistId: true,
       userId: true,
       categoryTitle: true,
+      _count: { select: { deliverables: true } },
     },
   });
 
@@ -70,6 +71,14 @@ export async function reportDeliveryAction(orderId: string): Promise<DeliveryRes
 
   if (parseOrderStatus(order.status) !== "CONFIRMED") {
     return { success: false, error: "وضعیت این پروژه اجازه ثبت تحویل نمی‌دهد." };
+  }
+
+  if (order._count.deliverables < 1) {
+    return {
+      success: false,
+      error:
+        "قبل از ثبت تحویل، حداقل یک فایل یا لینک خروجی (مثلاً گوگل درایو) اضافه کنید تا کارفرما و جار بتوانند تحویل را ببینند.",
+    };
   }
 
   await prisma.order.update({

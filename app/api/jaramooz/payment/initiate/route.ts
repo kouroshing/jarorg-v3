@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolvePhoneForOtp } from "@/lib/auth/otp";
 import { dbRoleFromPhone } from "@/lib/auth/roles";
 import { courseChargeAmount } from "@/lib/jaramooz/pricing";
-import { resolveZarinpalMerchant } from "@/lib/payments/zarinpal";
+import { resolveZarinpalMerchant, tomanToRial } from "@/lib/payments/zarinpal";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
       const zarinpalBody = {
         merchant_id: merchant.merchantId,
-        amount: finalAmount,
+        amount: tomanToRial(finalAmount),
         callback_url: callbackUrl,
         description: `خرید دوره: ${course.title}`,
         metadata: {

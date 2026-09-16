@@ -373,6 +373,17 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     return <div className="w-full min-h-dvh flex flex-col">{children}</div>;
   }
 
+  /** جار لوکیشن: نقشه edge-to-edge زیر نوار بالا / پایین */
+  if (pathname === "/tools/locations") {
+    return (
+      <main className="relative w-full h-dvh overflow-hidden pt-[calc(env(safe-area-inset-top,0px)+4.25rem)] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top,0px)+4.25rem)] bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] md:bottom-0">
+          {children}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto w-full max-w-[1360px] px-4 sm:px-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] pt-[calc(env(safe-area-inset-top,0px)+5rem)] md:pb-12 md:pt-[calc(env(safe-area-inset-top,0px)+6rem)]">
       {children}

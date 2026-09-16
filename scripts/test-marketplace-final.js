@@ -129,7 +129,7 @@ async function runTests() {
 
     console.log(`✅ Interest ${interest.id} submitted. Order status: HAS_APPLICANTS.`);
 
-    // 7. Client selects Specialist (Step 1 of Two-Way Confirmation)
+    // 7. Client selects Specialist → AWAITING_PAYMENT (no second specialist confirm)
     console.log("\nStep 7: Client selects Specialist...");
     await prisma.$transaction([
       prisma.projectInterest.update({
@@ -139,7 +139,7 @@ async function runTests() {
       prisma.order.update({
         where: { id: order.id },
         data: {
-          status: "AWAITING_SPECIALIST_CONFIRMATION",
+          status: "AWAITING_PAYMENT",
           selectedSpecialistId: specialistUser.id,
         },
       }),
@@ -147,18 +147,18 @@ async function runTests() {
         data: {
           userId: specialistUser.id,
           title: "انتخاب شما توسط کارفرما",
-          message: "کارفرما شما را برای پروژه انتخاب کرد. لطفاً پذیرش نهایی را ثبت کنید.",
+          message: "کارفرما شما را انتخاب کرد. به‌محض پرداخت، پروژه قطعی می‌شود.",
           type: "SUCCESS",
         },
       }),
     ]);
 
     const orderAfterSelect = await prisma.order.findUnique({ where: { id: order.id } });
-    console.assert(orderAfterSelect.status === "AWAITING_SPECIALIST_CONFIRMATION", "Order must be awaiting confirmation");
-    console.log("✅ Order in AWAITING_SPECIALIST_CONFIRMATION state.");
+    console.assert(orderAfterSelect.status === "AWAITING_PAYMENT", "Order must be awaiting payment");
+    console.log("✅ Order in AWAITING_PAYMENT state.");
 
-    // 8. Specialist confirms selection (Step 2 of Two-Way Confirmation)
-    console.log("\nStep 8: Specialist confirms the project...");
+    // 8. Client pays → CONFIRMED
+    console.log("\nStep 8: Client payment confirms the project...");
     await prisma.$transaction([
       prisma.projectInterest.update({
         where: { id: interest.id },
@@ -166,13 +166,13 @@ async function runTests() {
       }),
       prisma.order.update({
         where: { id: order.id },
-        data: { status: "CONFIRMED" },
+        data: { status: "CONFIRMED", paidAt: new Date() },
       }),
       prisma.notification.create({
         data: {
-          userId: clientUser.id,
-          title: "سفارش شما قطعی شد",
-          message: "متخصص انجام سفارش را تأیید کرد.",
+          userId: specialistUser.id,
+          title: "سفارش قطعی شد",
+          message: "کارفرما مبلغ را پرداخت کرد.",
           type: "SUCCESS",
         },
       }),

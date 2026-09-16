@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default async function SpecialistMinePage() {
   const session = await getSession();
   if (!session || !session.userId) {
-    redirect(encodeURI("/login?redirect=/specialist/mine"));
+    redirect("/join");
   }
 
   await repairOrphanSpecialistRole(session.userId);
@@ -55,6 +55,9 @@ export default async function SpecialistMinePage() {
         initialTokens={result.tokens}
         authError={authError}
         redirectTo={redirectTo}
+        kycReady={result.kycReady !== false}
+        kycStatus={result.kycStatus ?? null}
+        specialistHasBase={Boolean(result.specialistHasBase)}
       />
     </SpecialistAppShell>
   );

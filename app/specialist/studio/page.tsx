@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function SpecialistStudioPage() {
   const session = await getSession();
   if (!session?.userId) {
-    redirect("/login?redirect=/specialist/studio");
+    redirect("/join");
   }
 
   await repairOrphanSpecialistRole(session.userId);

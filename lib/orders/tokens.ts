@@ -19,6 +19,9 @@ import { prisma } from "@/lib/prisma";
 const SPENT_APPLY = ["PENDING", "SELECTED", "ACCEPTED", "REJECTED", "WITHDRAWN", "DECLINED"];
 const SPENT_DISMISS = ["NOT_INTERESTED"];
 
+/** Keep NOT_INTERESTED for token burn; feed can show the order again after undismiss. */
+export const UNDISMISS_SHOW_MARKER = "__SHOW_AFTER_DISMISS__";
+
 export type TokenBalance = {
   granted: number;
   spent: number;
@@ -68,14 +71,15 @@ export function startOfNextMonthTehran(now = new Date()): Date {
 
 export async function getTokenBalance(
   specialistId: string,
-  now = new Date()
+  now = new Date(),
+  db: typeof prisma = prisma
 ): Promise<TokenBalance> {
   const [user, settings] = await Promise.all([
-    prisma.user.findUnique({
+    db.user.findUnique({
       where: { id: specialistId },
       select: { planId: true, planExpiresAt: true },
     }),
-    prisma.pwaSettings.findUnique({
+    db.pwaSettings.findUnique({
       where: { id: "system-config" },
       select: {
         freeMonthlyTokens: true,
@@ -96,7 +100,7 @@ export async function getTokenBalance(
     user?.planId && (!user.planExpiresAt || user.planExpiresAt.getTime() > now.getTime());
 
   if (planActive && user?.planId) {
-    const plan = await prisma.plan.findUnique({
+    const plan = await db.plan.findUnique({
       where: { id: user.planId },
       select: { nameFa: true, monthlyTokens: true },
     });
@@ -108,10 +112,10 @@ export async function getTokenBalance(
 
   const since = startOfMonthTehran(now);
   const [applied, dismissed] = await Promise.all([
-    prisma.projectInterest.count({
+    db.projectInterest.count({
       where: { specialistId, status: { in: SPENT_APPLY }, createdAt: { gte: since } },
     }),
-    prisma.projectInterest.count({
+    db.projectInterest.count({
       where: { specialistId, status: { in: SPENT_DISMISS }, updatedAt: { gte: since } },
     }),
   ]);

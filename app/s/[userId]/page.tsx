@@ -101,6 +101,7 @@ export default async function PublicSpecialistPage({ params, searchParams }: Pag
               categorySlug: true,
             },
           },
+          bio: true,
         },
       },
     },
@@ -175,7 +176,15 @@ export default async function PublicSpecialistPage({ params, searchParams }: Pag
           <SpecialistPublicStatsRow
             completedProjects={stats.completedProjects}
             approvedPortfolio={stats.approvedPortfolio}
+            avgRating={stats.avgRating}
+            ratingCount={stats.ratingCount}
           />
+
+          {profile.bio?.trim() ? (
+            <p className="text-sm text-jar-primary leading-relaxed font-medium whitespace-pre-wrap">
+              {profile.bio.trim()}
+            </p>
+          ) : null}
 
           {equipmentTags.length > 0 && (
             <div className="space-y-2 pt-1 border-t border-jar-border">

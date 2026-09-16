@@ -34,6 +34,70 @@ export function isZohalConfigured(): boolean {
   return Boolean(getToken());
 }
 
+/**
+ * Strict match flag: only the boolean `true` counts.
+ * String "true" / 1 / truthy junk must not auto-verify.
+ */
+export function parseMatched(value: unknown): boolean {
+  return value === true;
+}
+
+function pickString(data: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = data[key];
+    if (typeof v === "string" && v.trim()) return sanitizeZohalName(v);
+  }
+  return null;
+}
+
+/** Zohal sometimes returns names like "، امیرسینا " — strip commas/spaces. */
+export function sanitizeZohalName(raw: string): string {
+  return raw
+    .replace(/^[\s،,]+/u, "")
+    .replace(/[\s،,]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isPermissionDeniedMessage(message: string | null | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    message.includes("اجازه") ||
+    message.includes("دسترسی") ||
+    m.includes("permission") ||
+    m.includes("forbidden") ||
+    m.includes("unauthorized")
+  );
+}
+
+/** User-facing copy — never tell specialists to open the Zohal admin panel. */
+function humanizeInquiryError(
+  stage: "shahkar" | "identity" | "iban" | "generic",
+  raw: string | null | undefined
+): string {
+  const msg = (raw || "").trim();
+  if (isPermissionDeniedMessage(msg)) {
+    if (stage === "iban") {
+      return "استعلام تطبیق شبا الان از سمت سرویس بیرونی در دسترس نیست. تیم جار می‌تواند شبا را دستی بررسی کند؛ یا چند ساعت بعد دوباره تلاش کنید.";
+    }
+    return "یکی از سرویس‌های استعلام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید یا با پشتیبانی جار تماس بگیرید.";
+  }
+  if (!msg) {
+    return "استعلام موقتاً ناموفق بود. لطفاً دوباره تلاش کنید.";
+  }
+  // Keep provider detail but frame it for the specialist.
+  const stageLabel =
+    stage === "shahkar"
+      ? "شاهکار (مالکیت موبایل)"
+      : stage === "identity"
+        ? "ثبت احوال"
+        : stage === "iban"
+          ? "تطبیق شبا"
+          : "استعلام";
+  return `${stageLabel}: ${msg}`;
+}
+
 /** Jalali birth date for Zohal: 1370/5/17 or 1370/05/17 */
 export function normalizeJalaliBirthDate(raw: string): string | null {
   const en = toEnglishDigits(raw).trim().replace(/[-.]/g, "/");
@@ -90,18 +154,36 @@ async function zohalPost(
       body?.response_body?.message || `خطای سرویس استعلام (HTTP ${response.status}).`;
     return {
       ok: false,
-      error: message,
+      error: isPermissionDeniedMessage(message)
+        ? "سرویس مربوطه روی پنل زحل برای این توکن فعال نیست. از داشبورد زحل سرویس را فعال/خرید کنید."
+        : message,
       errorCode: body?.response_body?.error_code,
       httpStatus: response.status,
     };
   }
 
   const errorCode = body?.response_body?.error_code;
+  const message = body?.response_body?.message;
   if (errorCode) {
     return {
       ok: false,
-      error: body?.response_body?.message || errorCode,
+      error: isPermissionDeniedMessage(message)
+        ? "سرویس مربوطه روی پنل زحل برای این توکن فعال نیست. از داشبورد زحل سرویس را فعال/خرید کنید."
+        : message || errorCode,
       errorCode,
+      httpStatus: response.status,
+    };
+  }
+
+  // Official Zohal envelope: result === 1 means success.
+  if (typeof body?.result === "number" && body.result !== 1) {
+    const failMsg = message || `استعلام ناموفق (کد ${body.result}).`;
+    return {
+      ok: false,
+      error: isPermissionDeniedMessage(failMsg)
+        ? "سرویس مربوطه روی پنل زحل برای این توکن فعال نیست. از داشبورد زحل سرویس را فعال/خرید کنید."
+        : failMsg,
+      errorCode: body?.response_body?.error_code,
       httpStatus: response.status,
     };
   }
@@ -119,7 +201,38 @@ export async function zohalShahkar(
     national_code: toEnglishDigits(nationalCode),
   });
   if (!res.ok) return res;
-  return { ok: true, data: { matched: Boolean(res.data.matched) } };
+  return { ok: true, data: { matched: parseMatched(res.data.matched) } };
+}
+
+/**
+ * Civil-registry identity inquiry: national code + birth date → names + matched.
+ * POST /services/inquiry/national_identity_inquiry
+ */
+export async function zohalNationalIdentityInquiry(
+  nationalCode: string,
+  birthDate: string
+): Promise<
+  ZohalCallResult<{
+    matched: boolean;
+    firstName: string | null;
+    lastName: string | null;
+    fatherName: string | null;
+  }>
+> {
+  const res = await zohalPost("services/inquiry/national_identity_inquiry", {
+    national_code: toEnglishDigits(nationalCode),
+    birth_date: birthDate,
+  });
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    data: {
+      matched: parseMatched(res.data.matched),
+      firstName: pickString(res.data, "first_name", "firstName"),
+      lastName: pickString(res.data, "last_name", "lastName"),
+      fatherName: pickString(res.data, "father_name", "fatherName"),
+    },
+  };
 }
 
 /** Match IBAN to national code + birth date. */
@@ -134,10 +247,10 @@ export async function zohalIbanNationalMatch(
     birth_date: birthDate,
   });
   if (!res.ok) return res;
-  return { ok: true, data: { matched: Boolean(res.data.matched) } };
+  return { ok: true, data: { matched: parseMatched(res.data.matched) } };
 }
 
-/** Optional bank name lookup for admin display. */
+/** Optional bank name lookup for display. */
 export async function zohalIbanInfo(
   iban: string
 ): Promise<ZohalCallResult<{ name?: string; bank_name?: string }>> {
@@ -162,6 +275,9 @@ export type SpecialistKycVerifyInput = {
 export type SpecialistKycVerifyResult =
   | {
       status: "VERIFIED";
+      firstName: string;
+      lastName: string;
+      fatherName: string | null;
       bankName?: string | null;
     }
   | {
@@ -169,21 +285,24 @@ export type SpecialistKycVerifyResult =
       reason: string;
     }
   | {
-      status: "PENDING";
+      /** Transport / API / provider-off — caller must not lock the user out of retry. */
+      status: "ERROR";
       reason: string;
     };
 
 /**
- * Runs Shahkar + IBAN/national match. Auto-VERIFIED when both match.
- * API/transport failures leave PENDING for admin review.
+ * Shahkar → national identity → IBAN match.
+ * VERIFIED only when all three return matched === true and at least a name.
+ * Provider outages return ERROR (specialist retries). Do not enqueue admin KYC.
  */
 export async function verifySpecialistKycWithZohal(
   input: SpecialistKycVerifyInput
 ): Promise<SpecialistKycVerifyResult> {
   if (!isZohalConfigured()) {
     return {
-      status: "PENDING",
-      reason: "سرویس استعلام روی سرور آماده نیست؛ در صف بررسی دستی ادمین.",
+      status: "ERROR",
+      reason:
+        "سرویس استعلام آنلاین الان روی سرور فعال نیست. کمی بعد دوباره «ارسال و استعلام» بزنید — نیازی به تایید دستی ادمین نیست.",
     };
   }
 
@@ -196,29 +315,58 @@ export async function verifySpecialistKycWithZohal(
   if (!shahkar.ok) {
     console.error("[zohal] shahkar failed", shahkar.error, shahkar.errorCode);
     return {
-      status: "PENDING",
-      reason: `استعلام شاهکار موقتاً ناموفق بود: ${shahkar.error}`,
+      status: "ERROR",
+      reason: humanizeInquiryError("shahkar", shahkar.error),
     };
   }
   if (!shahkar.data.matched) {
     return {
       status: "FAILED",
-      reason: "شماره موبایل حساب با کد ملی مطابقت ندارد.",
+      reason:
+        "شاهکار رد شد: شماره موبایلی که با آن وارد جار شده‌اید با این کد ملی یکی نیست. سیم‌کارت باید به نام صاحب همین کد ملی باشد. اگر کد ملی را اشتباه زده‌اید اصلاح کنید؛ اگر موبایل به نام شخص دیگری است، با همان موبایلِ صاحب کد ملی وارد شوید.",
+    };
+  }
+
+  const identity = await zohalNationalIdentityInquiry(input.nationalId, birthDate);
+  if (!identity.ok) {
+    console.error("[zohal] national identity failed", identity.error, identity.errorCode);
+    return {
+      status: "ERROR",
+      reason: humanizeInquiryError("identity", identity.error),
+    };
+  }
+  if (!identity.data.matched) {
+    return {
+      status: "FAILED",
+      reason:
+        "ثبت احوال رد شد: کد ملی یا تاریخ تولد با اطلاعات رسمی مطابقت ندارد. هر دو را با کارت ملی چک کنید (سال/ماه/روز شمسی دقیق).",
+    };
+  }
+  const firstName = identity.data.firstName;
+  const lastName = identity.data.lastName;
+  if (!firstName || !lastName) {
+    return {
+      status: "FAILED",
+      reason:
+        "نام از سامانه ثبت احوال برنگشت. چند دقیقه بعد دوباره تلاش کنید؛ اگر تکرار شد با پشتیبانی جار تماس بگیرید.",
     };
   }
 
   const ibanMatch = await zohalIbanNationalMatch(input.shaba, input.nationalId, birthDate);
   if (!ibanMatch.ok) {
     console.error("[zohal] iban match failed", ibanMatch.error, ibanMatch.errorCode);
+    // Even if IBAN product is off on the provider token: specialist retries later.
+    // Do not soft-PENDING into the admin KYC queue — Zohal must finish the job.
     return {
-      status: "PENDING",
-      reason: `استعلام تطبیق شبا موقتاً ناموفق بود: ${ibanMatch.error}`,
+      status: "ERROR",
+      reason: humanizeInquiryError("iban", ibanMatch.error),
     };
   }
   if (!ibanMatch.data.matched) {
     return {
       status: "FAILED",
-      reason: "شماره شبا با کد ملی و تاریخ تولد مطابقت ندارد.",
+      reason:
+        "تطبیق شبا رد شد: این شماره شبا متعلق به این کد ملی نیست (یا رقم شبا اشتباه وارد شده). شبا را از اپ بانک کپی کنید؛ پیشوند IR را دوباره تایپ نکنید — فقط ۲۴ رقم. حساب باید به نام صاحب همان کد ملی باشد.",
     };
   }
 
@@ -229,5 +377,11 @@ export async function verifySpecialistKycWithZohal(
     bankName = ibanInfo.data.bank_name || null;
   }
 
-  return { status: "VERIFIED", bankName };
+  return {
+    status: "VERIFIED",
+    firstName,
+    lastName,
+    fatherName: identity.data.fatherName,
+    bankName,
+  };
 }

@@ -810,7 +810,8 @@ export const options: NextAdminOptions = {
         tokenCostDismiss: "هزینه توکن: رد کردن پروژه",
         noApplicantTimeoutHours: "مهلت بی‌درخواست ماندن سفارش (ساعت)",
         selectionReminderHours: "یادآوری به کارفرما پس از (ساعت)",
-        selectionTimeoutDays: "بستن سفارش بی‌پاسخ پس از (روز)",
+        selectionTimeoutDays: "بستن سفارش بی‌پاسخ پس از (روز) — منسوخ؛ تعلیق با مهلت جستجو",
+        matchingTimeoutDays: "مهلت جستجوی متخصص تا تعلیق NO_MATCH (روز)",
         showIosPrompt: "نمایش پرامپت نصب در iOS",
       },
       list: {
@@ -820,7 +821,7 @@ export const options: NextAdminOptions = {
           "travelRatePerKm",
           "travelFreeRadiusKm",
           "freeMonthlyTokens",
-          "selectionTimeoutDays",
+          "matchingTimeoutDays",
         ],
       },
       edit: {
@@ -849,7 +850,11 @@ export const options: NextAdminOptions = {
           },
           selectionTimeoutDays: {
             helperText:
-              "اگر کارفرما در این مدت هیچ متخصصی را انتخاب نکند، سفارش بسته و متخصص‌ها آزاد می‌شوند.",
+              "دیگر برای بستن خودکار استفاده نمی‌شود؛ تعلیق با «مهلت جستجوی متخصص» انجام می‌شود.",
+          },
+          matchingTimeoutDays: {
+            helperText:
+              "از زمان تایید/انتشار: اگر هنوز متخصص انتخاب و پرداخت نشده باشد، سفارش به وضعیت «متخصصی پیدا نشد» می‌رود، از بورد خارج می‌شود و کارفرما تشویق به ویرایش بودجه می‌شود.",
           },
         },
       },

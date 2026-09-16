@@ -107,9 +107,38 @@ async function canAccessPortfolio(
   return { ok: false, cachePublic: false };
 }
 
+async function canAccessDeliverable(
+  publicUrl: string,
+  session: SessionPayload
+): Promise<boolean> {
+  if (isAdmin(session)) return true;
+
+  const row = await prisma.orderDeliverable.findFirst({
+    where: { fileUrl: publicUrl },
+    select: {
+      order: {
+        select: {
+          userId: true,
+          contactPhone: true,
+          selectedSpecialistId: true,
+        },
+      },
+    },
+  });
+
+  if (!row) return false;
+
+  const o = row.order;
+  if (o.selectedSpecialistId === session.userId) return true;
+  if (o.userId === session.userId) return true;
+  if (session.phone && o.contactPhone === session.phone) return true;
+  return false;
+}
+
 /**
  * Serve runtime uploads from UPLOAD_ROOT / public/uploads.
  * avatars/ stay public; moodboards/ need session + ownership/admin;
+ * deliverables/ need order party or admin;
  * portfolio/ is public when APPROVED, else owner/admin only.
  */
 export async function GET(
@@ -142,6 +171,19 @@ export async function GET(
         return new NextResponse(null, { status: 401 });
       }
       const allowed = await canAccessMoodboard(publicUrl, filename, session);
+      if (!allowed) {
+        return new NextResponse(null, { status: 403 });
+      }
+      const data = await fs.readFile(filePath);
+      return fileResponse(data, filePath, "private, max-age=3600");
+    }
+
+    if (folder === "deliverables") {
+      const session = await getSession();
+      if (!session?.userId) {
+        return new NextResponse(null, { status: 401 });
+      }
+      const allowed = await canAccessDeliverable(publicUrl, session);
       if (!allowed) {
         return new NextResponse(null, { status: 403 });
       }

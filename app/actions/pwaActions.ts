@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
 import { requireAdminPermission } from "@/lib/auth/adminAccess";
-import { prisma } from "@/lib/prisma";
+import { ensurePrismaSchemaReady, prisma } from "@/lib/prisma";
 import { getUploadRoot } from "@/lib/storage/uploads";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
@@ -32,6 +32,7 @@ const DEFAULT_PWA_SETTINGS = {
  */
 export async function getPwaSettings(): Promise<PwaSettingsResult> {
   try {
+    await ensurePrismaSchemaReady();
     const settings = await prisma.pwaSettings.upsert({
       where: { id: "system-config" },
       update: {},

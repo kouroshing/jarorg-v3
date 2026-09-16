@@ -68,6 +68,7 @@ export async function applyPendingProfileEdit(params: {
   if ("avatarUrl" in draft && draft.avatarUrl) {
     profileData.avatarUrl = draft.avatarUrl;
   }
+  if ("bio" in draft) profileData.bio = draft.bio ?? null;
   if ("selectedCategories" in draft && Array.isArray(draft.selectedCategories)) {
     profileData.selectedCategories = JSON.stringify(draft.selectedCategories);
   }

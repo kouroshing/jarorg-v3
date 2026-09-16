@@ -43,7 +43,8 @@ export default async function OnboardingDetailsStepPage() {
       <div className="rounded-3xl border border-jar-border bg-jar-surface p-5 sm:p-7 space-y-2 shadow-xs">
         <h1 className="text-lg font-black">محل فعالیت</h1>
         <p className="text-xs text-jar-muted leading-relaxed">
-          شهر، مبدأ حرکت و محدوده کاری روی یک نقشه مشخص می‌شود. ثبت استودیو از مسیر جداگانه است.
+          اول مبدأ حرکت را روی نقشه تأیید کنید، بعد شعاع پوشش را ببینید و تنظیم کنید. استودیو مسیر
+          جداگانه دارد.
         </p>
       </div>
 

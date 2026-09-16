@@ -33,6 +33,8 @@ interface OrderFormClientProps {
   initialContactName?: string;
   initialContactPhone?: string;
   userId?: string | null;
+  /** Only categories with at least one ACTIVE specialist. */
+  availableCategorySlugs?: string[];
 }
 
 // Generate default upcoming date (tomorrow)
@@ -57,9 +59,15 @@ export default function OrderFormClient({
   initialContactName = "",
   initialContactPhone = "",
   userId,
+  availableCategorySlugs = [],
 }: OrderFormClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const orderableSlugs = useMemo(() => {
+    const allowed = new Set(availableCategorySlugs);
+    return ALL_CATEGORIES.map((c) => c.slug).filter((s) => allowed.has(s));
+  }, [availableCategorySlugs]);
 
   // Wizard Navigation State (3 Steps)
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -68,9 +76,21 @@ export default function OrderFormClient({
   // Form State
   const [categorySlug, setCategorySlug] = useState<string>(() => {
     const urlCat = searchParams.get("category");
-    if (urlCat && CATEGORIES_BY_SLUG[urlCat]) return urlCat;
-    return "portrait-avatar";
+    if (urlCat && availableCategorySlugs.includes(urlCat) && CATEGORIES_BY_SLUG[urlCat]) {
+      return urlCat;
+    }
+    return availableCategorySlugs[0] || "";
   });
+
+  useEffect(() => {
+    if (orderableSlugs.length === 0) {
+      if (categorySlug) setCategorySlug("");
+      return;
+    }
+    if (!orderableSlugs.includes(categorySlug)) {
+      setCategorySlug(orderableSlugs[0]);
+    }
+  }, [orderableSlugs, categorySlug]);
 
   // Scheduling State
   const [isFlexibleSchedule, setIsFlexibleSchedule] = useState<boolean>(true);
@@ -84,6 +104,7 @@ export default function OrderFormClient({
   const [districtOrCity, setDistrictOrCity] = useState("تهران");
   // The picked point, kept so the travel fee can be quoted per specialist.
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [photoLocationId, setPhotoLocationId] = useState<string | null>(null);
 
   // Contact + brief (phone comes from account; not collected again)
   const [contactName, setContactName] = useState(() =>
@@ -99,7 +120,10 @@ export default function OrderFormClient({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Derived Values
-  const selectedCategory = CATEGORIES_BY_SLUG[categorySlug] || ALL_CATEGORIES[0];
+  const selectedCategory =
+    (categorySlug && CATEGORIES_BY_SLUG[categorySlug]) ||
+    (orderableSlugs[0] ? CATEGORIES_BY_SLUG[orderableSlugs[0]] : null) ||
+    ALL_CATEGORIES[0];
 
   const locationLabel = useMemo(() => {
     if (locationType === "CLIENT_LOCATION") {
@@ -119,9 +143,17 @@ export default function OrderFormClient({
   const isStepValid = useMemo(() => {
     switch (currentStep) {
       case 1:
-        return Boolean(categorySlug);
+        return Boolean(categorySlug) && orderableSlugs.includes(categorySlug);
       case 2:
-        // Every mode needs a city: map pin, studio, or “photographer suggests”.
+        // Custom location must be map-pinned; other modes need a city label.
+        if (locationType === "CLIENT_LOCATION") {
+          return (
+            districtOrCity.trim().length >= 2 &&
+            coords != null &&
+            Number.isFinite(coords.lat) &&
+            Number.isFinite(coords.lng)
+          );
+        }
         return Boolean(locationType) && districtOrCity.trim().length >= 2;
       case 3:
         return (
@@ -139,8 +171,10 @@ export default function OrderFormClient({
   }, [
     currentStep,
     categorySlug,
+    orderableSlugs,
     locationType,
     districtOrCity,
+    coords,
     isFlexibleSchedule,
     bookingDate,
     durationHours,
@@ -210,6 +244,8 @@ export default function OrderFormClient({
         districtOrCity,
         locationLat: coords?.lat ?? null,
         locationLng: coords?.lng ?? null,
+        photoLocationId:
+          locationType === "SPECIALIST_ADVICE" ? null : photoLocationId,
         referenceLink: referenceLink.trim(),
         moodboardUrls,
         projectDescription: projectDescription.trim(),
@@ -336,6 +372,7 @@ export default function OrderFormClient({
             {currentStep === 1 && (
               <StepCategory
                 selectedSlug={categorySlug}
+                availableSlugs={orderableSlugs}
                 onSelectSlug={(slug) => {
                   setCategorySlug(slug);
                 }}
@@ -345,12 +382,18 @@ export default function OrderFormClient({
             {currentStep === 2 && (
               <StepLocation
                 locationType={locationType}
-                onChangeLocationType={setLocationType}
+                onChangeLocationType={(type) => {
+                  setLocationType(type);
+                  if (type === "SPECIALIST_ADVICE") {
+                    setPhotoLocationId(null);
+                  }
+                }}
                 address={locationAddress}
                 onChangeAddress={setLocationAddress}
                 district={districtOrCity}
                 onChangeCoords={setCoords}
                 onChangeDistrict={setDistrictOrCity}
+                onChangePhotoLocationId={setPhotoLocationId}
               />
             )}
 

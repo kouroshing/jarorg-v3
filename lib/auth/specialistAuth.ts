@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { SPECIALIST_REVIEW_PATH } from "@/lib/specialists/eligibility";
+import { isKycDeadlineSuspension } from "@/lib/kyc/gates";
 
 export const SpecialistStatus = {
   INCOMPLETE: "INCOMPLETE",
@@ -41,16 +42,16 @@ export interface SpecialistEligibilityResult {
 }
 
 /**
- * Verifies if the authenticated user is an ACTIVE, verified specialist eligible for marketplace orders.
+ * Verifies if the authenticated user is an ACTIVE specialist eligible for marketplace orders.
  * Criteria:
  * 1. Valid session & User exists with role SPECIALIST (or ADMIN).
  * 2. SpecialistProfile exists.
  * 3. profile.status === "ACTIVE".
  * 4. profile.agreedToTerms === true.
- * 5. Has at least one Category with >= 10 Portfolio items.
- * 
- * If profile is INCOMPLETE or requirements are not yet satisfied:
- * Returns { isSpecialist: false, error: "PROFILE_INCOMPLETE", redirectTo: "/specialist/onboarding" }.
+ *
+ * Portfolio minimum (10 per category) is an *admin activation* gate, not a
+ * runtime marketplace gate — exception approvals must not redirect-loop ACTIVE
+ * specialists back into onboarding.
  */
 export async function getAuthorizedSpecialist(sessionUserId: string): Promise<SpecialistEligibilityResult> {
   const user = await prisma.user.findUnique({
@@ -72,6 +73,7 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
           equipmentSummary: true,
           baseLat: true,
           baseLng: true,
+          reviewNote: true,
           portfolioItems: {
             select: {
               id: true,
@@ -133,11 +135,16 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
   };
 
   if (profile.status === "SUSPENDED") {
+    const kycDeadlineSuspend = isKycDeadlineSuspension(profile.reviewNote);
     return {
       isSpecialist: false,
-      error: "حساب همکاری شما به حالت تعلیق درآمده است. لطفاً با پشتیبانی جار تماس بگیرید.",
+      error: kycDeadlineSuspend
+        ? "مهلت ۷ روزه احراز هویت تمام شده و حساب معلق است. ابتدا هویت را تکمیل کنید."
+        : "حساب همکاری شما به حالت تعلیق درآمده است. لطفاً با پشتیبانی جار تماس بگیرید.",
       errorCode: "SUSPENDED",
-      redirectTo: SPECIALIST_REVIEW_PATH,
+      redirectTo: kycDeadlineSuspend
+        ? "/specialist/onboarding/identity"
+        : SPECIALIST_REVIEW_PATH,
     };
   }
 
@@ -150,16 +157,9 @@ export async function getAuthorizedSpecialist(sessionUserId: string): Promise<Sp
     };
   }
 
-  // Check strict eligibility requirements:
-  // - status === ACTIVE
-  // - agreedToTerms === true
-  // - at least one category with >= 10 portfolio items
-  const isEligible =
-    profile.status === "ACTIVE" &&
-    profile.agreedToTerms === true &&
-    hasEligibleCategory;
-
-  if (!isEligible) {
+  // ACTIVE + terms is enough for marketplace access. Portfolio count is for
+  // admin activation only (exception approvals stay ACTIVE without looping).
+  if (profile.status !== "ACTIVE" || !profile.agreedToTerms) {
     return {
       isSpecialist: false,
       error: "PROFILE_INCOMPLETE",

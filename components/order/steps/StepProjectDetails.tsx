@@ -454,7 +454,7 @@ export default function StepProjectDetails({
             </h3>
           </div>
           <span className="text-[11px] text-slate-400">
-            {isScheduleDefault ? "هماهنگی توافقی" : `${durationHours} ساعت آفیش`}
+            {isScheduleDefault ? "توافق با متخصص" : `${durationHours} ساعت آفیش`}
           </span>
         </div>
 
@@ -508,7 +508,7 @@ export default function StepProjectDetails({
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs sm:text-sm font-black text-slate-950 group-hover:text-amber-950 transition-colors">
-                  سریع‌ترین زمان با هماهنگی توافقی
+                  بهترین زمان با توافق متخصص
                 </span>
                 <span
                   className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
@@ -525,7 +525,7 @@ export default function StepProjectDetails({
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 leading-relaxed">
-              روز و ساعت دقیق، به صورت توافقی بین شما و عکاس هماهنگ می‌شود.
+              روز و ساعت دقیق را بعد از انتخاب متخصص، با هم هماهنگ می‌کنید — لازم نیست الان تاریخ قطعی بگذارید.
             </p>
           </div>
         </div>

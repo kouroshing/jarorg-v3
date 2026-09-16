@@ -28,6 +28,11 @@ export type TriageOrderRow = {
   contactPhone: string | null;
   applicantCount?: number;
   disputeReason?: string | null;
+  deliverableCount?: number;
+  messageCount?: number;
+  noApplicantsAt?: string | null;
+  clientRemindedAt?: string | null;
+  noMatchAt?: string | null;
   publishFlags?: Array<{
     code: string;
     severity: "hard" | "soft";

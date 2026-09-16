@@ -9,6 +9,7 @@ interface OrderAdminStageProps {
   order: OrderEditInitial & {
     categoryTitle?: string | null;
     locationType: string;
+    createdAt?: string | null;
   };
   isOwnerOrAdmin: boolean;
 }

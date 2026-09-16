@@ -88,7 +88,7 @@ export default function SpecialistCategoriesForm({ initialSelected }: Props) {
         <h1 className="text-lg sm:text-xl font-black">دسته‌بندی‌هایی که بلدید</h1>
         <p className="text-xs text-jar-muted leading-relaxed">
           حداقل {MIN_SELECTED_CATEGORIES} شاخه انتخاب کنید. شاخه‌های شخصی و تجاری جدا هستند؛
-          بعداً باید حداقل ۱۰ نمونه‌کار در یکی از همین شاخه‌ها بارگذاری کنید.
+          بعداً باید حداقل ۱۰ نمونه‌کار در هر یک از همین شاخه‌ها بارگذاری کنید.
         </p>
       </div>
 
