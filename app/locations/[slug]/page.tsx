@@ -361,7 +361,7 @@ export default async function PhotoLocationSeoPage({ params }: Props) {
               href="/order"
               className="inline-flex h-11 w-full sm:w-auto shrink-0 items-center justify-center rounded-full bg-[#141413] px-5 text-xs font-black text-white shadow-lg transition-transform active:scale-95 hover:bg-[#2a2928]"
             >
-              ثبت سفارش عکاسی
+              ثبت سفارش عکاسی و فیلمبرداری
             </Link>
           </div>
         </header>
