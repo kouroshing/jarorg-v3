@@ -109,7 +109,14 @@ export default async function ProfilePage({
       googleDriveFolderId: null,
       budget: o.totalEstimatedPrice.toString(),
       city: o.districtOrCity || "تهران",
-      preferredCallTime: `${o.bookingDate} (${o.timeSlot})`,
+      isFlexibleSchedule: Boolean(o.isFlexibleSchedule),
+      preferredCallTime: o.isFlexibleSchedule
+        ? "بهترین زمان با توافق متخصص"
+        : o.bookingDate || o.timeSlot
+          ? [o.bookingDate, o.timeSlot ? `(${o.timeSlot})` : null]
+              .filter(Boolean)
+              .join(" ")
+          : null,
       thumbnails: [],
       orderUrl: `/order/${o.id}`,
       expert: o.selectedSpecialist

@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Shield,
   Images,
+  MapPin,
 } from "lucide-react";
 import type { AdminPermission } from "@/lib/auth/adminPermissions";
 
@@ -44,6 +45,13 @@ const LINKS: Array<{
     match: (p) =>
       p.toLowerCase().startsWith("/admin/portfolioitem") ||
       p.startsWith("/admin/portfolio"),
+  },
+  {
+    href: "/admin/locations",
+    label: "جار لوکیشن",
+    icon: MapPin,
+    permission: "orders_manage",
+    match: (p) => p.startsWith("/admin/locations"),
   },
   {
     href: "/admin/message",

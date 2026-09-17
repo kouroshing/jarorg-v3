@@ -47,6 +47,17 @@
     -webkit-touch-callout: none;
   }
 
+  /* جار لوکیشن map: hide page SEO under the fullscreen map shell */
+  html[data-jar-loc-map] {
+    overflow: hidden !important;
+  }
+  html[data-jar-loc-map] body {
+    overflow: hidden !important;
+  }
+  html[data-jar-loc-map] .jar-loc-seo {
+    display: none !important;
+  }
+
   /* Preserve input typing, focus, and text selection for form fields */
   input,
   textarea,

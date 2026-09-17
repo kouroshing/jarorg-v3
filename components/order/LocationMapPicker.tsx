@@ -20,6 +20,7 @@ import {
 } from "@/lib/geo/serviceCities";
 import { listNearbyPhotoLocationsForOrderAction } from "@/app/actions/locationActions";
 import type { PhotoLocationPublic } from "@/lib/locations/photoLocation";
+import { getJarMapTileConfig, jarMapTileLayerOptions } from "@/lib/maps/tiles";
 
 export interface Coordinates {
   lat: number;
@@ -234,17 +235,9 @@ export default function LocationMapPicker({
         scrollWheelZoom: true,
       });
 
-      // Pure Persian tiles without API Key watermarks (Neshan or OSM)
-      const neshanKey = process.env.NEXT_PUBLIC_NESHAN_API_KEY;
-      const tileUrl = neshanKey
-        ? `https://api.neshan.org/v4/tiles/standard/{z}/{x}/{y}.png?api_key=${neshanKey}`
-        : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-
-      L.tileLayer(tileUrl, {
-        maxZoom: 18,
-        minZoom: 5,
-        subdomains: neshanKey ? [] : ["a", "b", "c"],
-      }).addTo(map);
+      // Shared Jar tiles (Neshan / Carto / Esri) — OSM often blocked in IR → blank map
+      const tileCfg = getJarMapTileConfig();
+      L.tileLayer(tileCfg.url, jarMapTileLayerOptions(tileCfg)).addTo(map);
 
       catalogLayerRef.current = L.layerGroup().addTo(map);
 
@@ -544,8 +537,10 @@ export default function LocationMapPicker({
   return (
     <div
       className={`${
-        isEmbedded ? "relative" : "absolute inset-0"
-      } w-full h-full overflow-hidden select-none bg-[#FAF9F5]`}
+        isEmbedded
+          ? "relative h-[min(52dvh,360px)] min-h-[280px]"
+          : "absolute inset-0"
+      } w-full overflow-hidden select-none bg-[#FAF9F5]`}
       dir="rtl"
     >
       {/* Dynamic Location Notification Toast */}

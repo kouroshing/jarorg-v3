@@ -30,17 +30,26 @@ import {
 import { phoneToLocalDisplay } from "@/lib/auth/phone";
 import {
   MAX_LOCATION_IMAGES,
+  MAX_LOCATION_VIDEOS,
   SECURITY_LABELS,
+  LOCATION_CATEGORIES,
+  locationCategoryLabel,
   type PhotoLocationSecurity,
+  type PhotoLocationCategory,
 } from "@/lib/locations/photoLocation";
-import { processSinglePortfolioFile } from "@/lib/clientImageCompression";
+import { processSinglePortfolioFile, isVideoFile, isAllowedPortfolioVideo, MAX_VIDEO_RAW_SIZE_BYTES } from "@/lib/clientImageCompression";
 import JarLocationMiniMap from "@/components/tools/JarLocationMiniMap";
+import { SERVICE_CITIES } from "@/lib/geo/serviceCities";
+import { LocationProjectTypePicker } from "@/components/tools/LocationProjectTypePicker";
+import { LocationPhotographerPicker } from "@/components/tools/LocationPhotographerPicker";
+import { projectTypeChipLabel } from "@/lib/locations/projectTypes";
 
 export type AdminPhotoLocationQueueRow = {
   id: string;
   name: string;
   slug: string;
   description: string | null;
+  category: PhotoLocationCategory;
   city: string | null;
   district: string | null;
   address: string | null;
@@ -59,11 +68,16 @@ export type AdminPhotoLocationQueueRow = {
   securityLevel: PhotoLocationSecurity;
   coverImageUrl: string | null;
   imageUrls: string[];
+  videoUrls: string[];
+  photographerUserId: string | null;
+  photographerName: string | null;
+  suitableFor: string[];
 };
 
 type Draft = {
   name: string;
   description: string;
+  category: PhotoLocationCategory;
   city: string;
   district: string;
   address: string;
@@ -78,12 +92,17 @@ type Draft = {
   securityLevel: PhotoLocationSecurity;
   contactPhone: string;
   imageUrls: string[];
+  videoUrls: string[];
+  photographerUserId: string | null;
+  photographerName: string | null;
+  suitableFor: string[];
 };
 
 function toDraft(row: AdminPhotoLocationQueueRow): Draft {
   return {
     name: row.name,
     description: row.description || "",
+    category: row.category || "OTHER",
     city: row.city || "",
     district: row.district || "",
     address: row.address || "",
@@ -98,6 +117,10 @@ function toDraft(row: AdminPhotoLocationQueueRow): Draft {
     securityLevel: row.securityLevel,
     contactPhone: row.contactPhone ? phoneToLocalDisplay(row.contactPhone) : "",
     imageUrls: [...(row.imageUrls || [])],
+    videoUrls: [...(row.videoUrls || [])],
+    photographerUserId: row.photographerUserId,
+    photographerName: row.photographerName,
+    suitableFor: [...(row.suitableFor || [])],
   };
 }
 
@@ -107,6 +130,7 @@ function draftToPatch(draft: Draft) {
   return {
     name: draft.name.trim(),
     description: draft.description.trim() || null,
+    category: draft.category,
     city: draft.city.trim() || null,
     district: draft.district.trim() || null,
     address: draft.address.trim() || null,
@@ -121,8 +145,12 @@ function draftToPatch(draft: Draft) {
     securityLevel: draft.securityLevel,
     contactPhone: draft.contactPhone.trim() || null,
     imageUrls: draft.imageUrls,
+    videoUrls: draft.videoUrls,
     coverImageUrl: draft.imageUrls[0] || null,
+    photographerUserId: draft.photographerUserId,
+    photographerName: draft.photographerName,
     reslug: true,
+    suitableFor: draft.suitableFor,
   };
 }
 
@@ -198,18 +226,35 @@ export default function AdminPhotoLocationQueue({
   const uploadImages = async (id: string, files: FileList | File[]) => {
     const draft = drafts[id];
     if (!draft) return;
-    const remaining = MAX_LOCATION_IMAGES - draft.imageUrls.length;
-    if (remaining <= 0) {
-      setError(`حداکثر ${MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس.`);
-      return;
-    }
-    const list = Array.from(files).slice(0, remaining);
+    const list = Array.from(files);
     setUploadingId(id);
     setError(null);
-    const urls: string[] = [];
+    const addedImages: string[] = [];
+    const addedVideos: string[] = [];
     try {
       for (const file of list) {
-        const optimized = await processSinglePortfolioFile(file, urls.length, list.length);
+        if (isVideoFile(file)) {
+          if (!isAllowedPortfolioVideo(file)) {
+            throw new Error(`فقط ویدیوی MP4 مجاز است («${file.name}»).`);
+          }
+          if (file.size > MAX_VIDEO_RAW_SIZE_BYTES) {
+            throw new Error("حجم ویدیو نباید بیشتر از ۴۰ مگابایت باشد.");
+          }
+          if (draft.videoUrls.length + addedVideos.length >= MAX_LOCATION_VIDEOS) {
+            throw new Error(`حداکثر ${MAX_LOCATION_VIDEOS.toLocaleString("fa-IR")} ویدیو.`);
+          }
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await fetch("/api/location/upload", { method: "POST", body: fd });
+          const json = await res.json();
+          if (!res.ok || !json?.url) throw new Error(json?.error || "آپلود ناموفق بود.");
+          addedVideos.push(json.url as string);
+          continue;
+        }
+        if (draft.imageUrls.length + addedImages.length >= MAX_LOCATION_IMAGES) {
+          throw new Error(`حداکثر ${MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس.`);
+        }
+        const optimized = await processSinglePortfolioFile(file, addedImages.length, list.length);
         const fd = new FormData();
         fd.append("file", optimized);
         const res = await fetch("/api/location/upload", { method: "POST", body: fd });
@@ -217,11 +262,14 @@ export default function AdminPhotoLocationQueue({
         if (!res.ok || !json?.url) {
           throw new Error(json?.error || "آپلود ناموفق بود.");
         }
-        urls.push(json.url as string);
+        addedImages.push(json.url as string);
       }
-      patchDraft(id, { imageUrls: [...draft.imageUrls, ...urls] });
+      patchDraft(id, {
+        imageUrls: [...draft.imageUrls, ...addedImages],
+        videoUrls: [...draft.videoUrls, ...addedVideos],
+      });
     } catch (e: any) {
-      setError(e?.message || "خطا در آپلود عکس.");
+      setError(e?.message || "خطا در آپلود فایل.");
     } finally {
       setUploadingId(null);
     }
@@ -272,7 +320,7 @@ export default function AdminPhotoLocationQueue({
       <input
         ref={fileRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,video/mp4,.mp4"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -324,11 +372,23 @@ export default function AdminPhotoLocationQueue({
                   {draft.name || row.name}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-0.5">
+                  {locationCategoryLabel(draft.category || row.category)} ·{" "}
                   {[draft.city || row.city, draft.district || row.district]
                     .filter(Boolean)
                     .join(" · ") || "—"}{" "}
                   · {formatJalaliDate(new Date(row.createdAt))}
                 </p>
+                {(draft.suitableFor || row.suitableFor).length > 0 && (
+                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                    {(draft.suitableFor || row.suitableFor)
+                      .slice(0, 4)
+                      .map((s) => projectTypeChipLabel(s))
+                      .join(" · ")}
+                    {(draft.suitableFor || row.suitableFor).length > 4
+                      ? ` +${(draft.suitableFor || row.suitableFor).length - 4}`
+                      : ""}
+                  </p>
+                )}
                 <p className="text-[10px] text-slate-400 mt-0.5" dir="ltr">
                   ثبت‌کننده:{" "}
                   {row.submittedByPhone
@@ -350,11 +410,15 @@ export default function AdminPhotoLocationQueue({
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] font-black text-slate-800 flex items-center gap-1.5">
                       <Camera className="h-3.5 w-3.5 text-[#CC785C]" />
-                      گالری عکس
+                      گالری عکس و ویدیو
                     </p>
                     <button
                       type="button"
-                      disabled={uploading || gallery.length >= MAX_LOCATION_IMAGES}
+                      disabled={
+                        uploading ||
+                        (gallery.length >= MAX_LOCATION_IMAGES &&
+                          draft.videoUrls.length >= MAX_LOCATION_VIDEOS)
+                      }
                       onClick={() => {
                         uploadTargetId.current = row.id;
                         fileRef.current?.click();
@@ -366,12 +430,12 @@ export default function AdminPhotoLocationQueue({
                       ) : (
                         <Upload className="h-3.5 w-3.5" />
                       )}
-                      افزودن عکس
+                      افزودن فایل
                     </button>
                   </div>
-                  {gallery.length === 0 ? (
+                  {gallery.length === 0 && draft.videoUrls.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-8 text-center text-[11px] text-slate-500">
-                      هنوز عکسی ثبت نشده — می‌توانید قبل از تایید اضافه کنید.
+                      هنوز فایل ثبت نشده — می‌توانید قبل از تایید عکس یا ویدیو اضافه کنید.
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -422,6 +486,31 @@ export default function AdminPhotoLocationQueue({
                           </div>
                         </div>
                       ))}
+                      {draft.videoUrls.map((url, idx) => (
+                        <div
+                          key={`vid-${url}-${idx}`}
+                          className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+                        >
+                          <video src={url} className="h-full w-full object-cover" muted playsInline />
+                          <span className="absolute top-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                            ویدیو
+                          </span>
+                          <div className="absolute inset-x-0 bottom-0 flex gap-1 p-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/50 to-transparent">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                patchDraft(row.id, {
+                                  videoUrls: draft.videoUrls.filter((_, i) => i !== idx),
+                                })
+                              }
+                              className="rounded bg-rose-600/90 px-1.5 py-0.5 text-white"
+                              aria-label="حذف ویدیو"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </section>
@@ -438,6 +527,24 @@ export default function AdminPhotoLocationQueue({
                       />
                     </label>
                     <label className="block space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600">دسته</span>
+                      <select
+                        value={draft.category}
+                        onChange={(e) =>
+                          patchDraft(row.id, {
+                            category: e.target.value as PhotoLocationCategory,
+                          })
+                        }
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+                      >
+                        {LOCATION_CATEGORIES.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1">
                       <span className="text-[10px] font-bold text-slate-600">توضیحات</span>
                       <textarea
                         value={draft.description}
@@ -449,11 +556,22 @@ export default function AdminPhotoLocationQueue({
                     <div className="grid grid-cols-2 gap-2">
                       <label className="block space-y-1">
                         <span className="text-[10px] font-bold text-slate-600">شهر</span>
-                        <input
+                        <select
                           value={draft.city}
                           onChange={(e) => patchDraft(row.id, { city: e.target.value })}
-                          className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"
-                        />
+                          className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold"
+                        >
+                          <option value="">— انتخاب شهر —</option>
+                          {SERVICE_CITIES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                          {draft.city &&
+                            !(SERVICE_CITIES as readonly string[]).includes(draft.city) && (
+                              <option value={draft.city}>{draft.city}</option>
+                            )}
+                        </select>
                       </label>
                       <label className="block space-y-1">
                         <span className="text-[10px] font-bold text-slate-600">محله</span>
@@ -463,6 +581,28 @@ export default function AdminPhotoLocationQueue({
                           className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"
                         />
                       </label>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                      <LocationProjectTypePicker
+                        value={draft.suitableFor}
+                        onChange={(slugs) => patchDraft(row.id, { suitableFor: slugs })}
+                        compact
+                      />
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                      <LocationPhotographerPicker
+                        compact
+                        value={{
+                          photographerUserId: draft.photographerUserId,
+                          photographerName: draft.photographerName,
+                        }}
+                        onChange={(next) =>
+                          patchDraft(row.id, {
+                            photographerUserId: next.photographerUserId,
+                            photographerName: next.photographerName,
+                          })
+                        }
+                      />
                     </div>
                     <label className="block space-y-1">
                       <span className="text-[10px] font-bold text-slate-600">آدرس</span>

@@ -160,7 +160,7 @@ export async function GET(
       return new NextResponse(null, { status: 404 });
     }
 
-    if (folder === "avatars" || folder === "gallery" || folder === "specialists") {
+    if (folder === "avatars" || folder === "gallery" || folder === "specialists" || folder === "locations") {
       const data = await fs.readFile(filePath);
       return fileResponse(data, filePath, "public, max-age=31536000, immutable");
     }

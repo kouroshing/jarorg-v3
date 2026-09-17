@@ -258,12 +258,20 @@ export default function AdminDashboard({
             </span>
           </div>
           <AdminPhotoLocationQueue items={data.pendingLocations || []} />
-          <Link
-            href="/tools/locations"
-            className="text-[11px] font-bold text-indigo-600 inline-flex"
-          >
-            مشاهده نقشه عمومی جار لوکیشن ←
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/admin/locations"
+              className="text-[11px] font-bold text-[#CC785C] inline-flex"
+            >
+              مدیریت کامل جار لوکیشن ←
+            </Link>
+            <Link
+              href="/tools/locations"
+              className="text-[11px] font-bold text-indigo-600 inline-flex"
+            >
+              مشاهده صفحه عمومی ←
+            </Link>
+          </div>
         </section>
       )}
 

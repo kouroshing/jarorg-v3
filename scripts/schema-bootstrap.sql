@@ -576,6 +576,7 @@ CREATE TABLE "photo_locations" (
     "name" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
     "description" TEXT,
+    "category" TEXT NOT NULL DEFAULT 'OTHER',
     "lat" REAL NOT NULL,
     "lng" REAL NOT NULL,
     "city" TEXT,
@@ -591,12 +592,17 @@ CREATE TABLE "photo_locations" (
     "contact_phone" TEXT,
     "cover_image_url" TEXT,
     "image_urls" TEXT,
+    "video_urls" TEXT,
+    "suitable_for" TEXT,
+    "photographer_user_id" TEXT,
+    "photographer_name" TEXT,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "rejection_reason" TEXT,
     "reviewed_at" DATETIME,
     "reviewed_by_id" TEXT,
     "submitted_by_id" TEXT,
-    CONSTRAINT "photo_locations_submitted_by_id_fkey" FOREIGN KEY ("submitted_by_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    CONSTRAINT "photo_locations_submitted_by_id_fkey" FOREIGN KEY ("submitted_by_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "photo_locations_photographer_user_id_fkey" FOREIGN KEY ("photographer_user_id") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateIndex
@@ -606,8 +612,26 @@ CREATE UNIQUE INDEX "photo_locations_slug_key" ON "photo_locations"("slug");
 CREATE INDEX "photo_locations_status_city_idx" ON "photo_locations"("status", "city");
 
 -- CreateIndex
+CREATE INDEX "photo_locations_status_category_idx" ON "photo_locations"("status", "category");
+
+-- CreateIndex
 CREATE INDEX "photo_locations_lat_lng_idx" ON "photo_locations"("lat", "lng");
 
 -- CreateIndex
 CREATE INDEX "photo_locations_status_created_at_idx" ON "photo_locations"("status", "created_at");
 
+-- CreateIndex
+CREATE INDEX "photo_locations_photographer_user_id_idx" ON "photo_locations"("photographer_user_id");
+
+
+-- CreateTable
+CREATE TABLE "jar_location_page_settings" (
+    "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'default',
+    "hero_title" TEXT NOT NULL DEFAULT 'جار لوکیشن',
+    "hero_subtitle" TEXT NOT NULL DEFAULT 'فضا، عمارت و خیابان — جایی که نور درست می‌افتد.',
+    "hero_image_url" TEXT NOT NULL DEFAULT '/images/jar-locations/hero.jpg',
+    "all_chip_image_url" TEXT NOT NULL DEFAULT '/images/jar-locations/hero.jpg',
+    "free_chip_image_url" TEXT NOT NULL DEFAULT '/images/jar-locations/free.jpg',
+    "category_images" TEXT NOT NULL DEFAULT '{}',
+    "updated_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

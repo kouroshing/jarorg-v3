@@ -9,17 +9,34 @@ import { resolveAdminAccess, hasAdminPermission } from "@/lib/auth/adminAccess";
 import {
   haversineKm,
   maskContactPhone,
+  parseLocationCategory,
   parseLocationImageUrls,
+  parseLocationVideoUrls,
   parseSecurityLevel,
   resolveLocationCover,
   serializeLocationImageUrls,
+  serializeLocationVideoUrls,
   slugifyLocationName,
   MAX_LOCATION_IMAGES,
+  MAX_LOCATION_VIDEOS,
+  LOCATION_CATEGORY_IDS,
   type PhotoLocationPublic,
   type PhotoLocationSecurity,
+  type PhotoLocationCategory,
 } from "@/lib/locations/photoLocation";
 import { getMarketplaceSettings } from "@/lib/orders/settings";
 import { quoteTravel } from "@/lib/orders/travel";
+import {
+  parseSuitableFor,
+  serializeSuitableFor,
+  locationMatchesAudience,
+  locationMatchesCity,
+  locationMatchesProjectSlug,
+  type LocationAudience,
+} from "@/lib/locations/projectTypes";
+import { CATEGORIES_BY_SLUG } from "@/lib/categories";
+import { matchServiceCity } from "@/lib/geo/serviceCities";
+import { formatPublicSpecialistName } from "@/lib/specialists/publicName";
 
 const TEHRAN = { lat: 35.6892, lng: 51.389 };
 
@@ -38,6 +55,7 @@ function mapPublic(
     name: string;
     slug: string;
     description: string | null;
+    category?: string | null;
     lat: number;
     lng: number;
     city: string | null;
@@ -53,6 +71,10 @@ function mapPublic(
     contactPhone: string | null;
     coverImageUrl: string | null;
     imageUrls?: string | null;
+    videoUrls?: string | null;
+    photographerUserId?: string | null;
+    photographerName?: string | null;
+    suitableFor?: string | null;
   },
   revealed: boolean,
   origin?: { lat: number; lng: number } | null
@@ -67,6 +89,7 @@ function mapPublic(
     name: row.name,
     slug: row.slug,
     description: row.description,
+    category: parseLocationCategory(row.category),
     lat: row.lat,
     lng: row.lng,
     city: row.city,
@@ -87,6 +110,11 @@ function mapPublic(
     contactPhoneRevealed: revealed && Boolean(row.contactPhone),
     coverImageUrl: cover,
     imageUrls: gallery,
+    videoUrls: parseLocationVideoUrls(row.videoUrls),
+    photographerUserId: row.photographerUserId ?? null,
+    photographerName: row.photographerName?.trim() || null,
+    photographer: null,
+    suitableFor: parseSuitableFor(row.suitableFor),
     distanceKm,
   };
 }
@@ -104,9 +132,139 @@ async function uniqueSlug(base: string, excludeId?: string): Promise<string> {
   return `${slug}-${Date.now().toString(36)}`;
 }
 
+const categorySchema = z.enum(
+  LOCATION_CATEGORY_IDS as [PhotoLocationCategory, ...PhotoLocationCategory[]]
+);
+
+const ALL_CATEGORY_SLUG_MAX = 80;
+
+function sanitizeSuitableFor(slugs: string[] | undefined): string[] {
+  if (!slugs) return [];
+  return Array.from(
+    new Set(slugs.filter((s) => Boolean(CATEGORIES_BY_SLUG[s])))
+  );
+}
+
+async function persistSuitableFor(id: string, slugs: string[]) {
+  const json = serializeSuitableFor(slugs);
+  await prisma.$executeRawUnsafe(
+    "UPDATE photo_locations SET suitable_for = ? WHERE id = ?",
+    json,
+    id
+  );
+}
+
+async function persistLocationMedia(id: string, videos: string[]) {
+  await prisma.$executeRawUnsafe(
+    "UPDATE photo_locations SET video_urls = ? WHERE id = ?",
+    serializeLocationVideoUrls(videos),
+    id
+  );
+}
+
+async function persistLocationPhotographer(
+  id: string,
+  photographerUserId: string | null,
+  photographerName: string | null
+) {
+  await prisma.$executeRawUnsafe(
+    "UPDATE photo_locations SET photographer_user_id = ?, photographer_name = ? WHERE id = ?",
+    photographerUserId,
+    photographerName,
+    id
+  );
+}
+
+async function resolvePhotographerInput(input: {
+  photographerUserId?: string | null;
+  photographerName?: string | null;
+}): Promise<
+  | { ok: true; photographerUserId: string | null; photographerName: string | null }
+  | { ok: false; error: string }
+> {
+  const customName = input.photographerName?.trim() || null;
+  const userId = input.photographerUserId?.trim() || null;
+  if (!userId) {
+    return { ok: true, photographerUserId: null, photographerName: customName };
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      specialistProfile: { select: { id: true } },
+    },
+  });
+  if (!user) {
+    return { ok: false, error: "متخصص انتخاب‌شده پیدا نشد." };
+  }
+  if (!user.specialistProfile) {
+    return { ok: false, error: "این کاربر متخصص جار نیست." };
+  }
+  return { ok: true, photographerUserId: user.id, photographerName: null };
+}
+
+type MediaCreditRaw = {
+  id: string;
+  video_urls: string | null;
+  photographer_user_id: string | null;
+  photographer_name: string | null;
+};
+
+async function attachMediaCredit<
+  T extends {
+    id: string;
+    videoUrls: string[];
+    photographerUserId: string | null;
+    photographerName: string | null;
+  }
+>(items: T[]): Promise<T[]> {
+  if (items.length === 0) return items;
+  try {
+    const placeholders = items.map(() => "?").join(",");
+    const rows = await prisma.$queryRawUnsafe<MediaCreditRaw[]>(
+      `SELECT id, video_urls, photographer_user_id, photographer_name FROM photo_locations WHERE id IN (${placeholders})`,
+      ...items.map((i) => i.id)
+    );
+    const map = new Map(rows.map((r) => [r.id, r]));
+    return items.map((item) => {
+      const extra = map.get(item.id);
+      if (!extra) return item;
+      return {
+        ...item,
+        videoUrls: parseLocationVideoUrls(extra.video_urls),
+        photographerUserId: extra.photographer_user_id,
+        photographerName: extra.photographer_name?.trim() || null,
+      };
+    });
+  } catch {
+    return items;
+  }
+}
+
+async function attachSuitableFor<T extends { id: string; suitableFor: string[] }>(
+  items: T[]
+): Promise<T[]> {
+  if (items.length === 0) return items;
+  try {
+    const placeholders = items.map(() => "?").join(",");
+    const rows = await prisma.$queryRawUnsafe<{ id: string; suitable_for: string | null }[]>(
+      `SELECT id, suitable_for FROM photo_locations WHERE id IN (${placeholders})`,
+      ...items.map((i) => i.id)
+    );
+    const map = new Map(rows.map((r) => [r.id, parseSuitableFor(r.suitable_for)]));
+    return items.map((item) => ({
+      ...item,
+      suitableFor: map.get(item.id) ?? item.suitableFor,
+    }));
+  } catch {
+    return items;
+  }
+}
+
 const submitSchema = z.object({
   name: z.string().trim().min(2, "نام لوکیشن حداقل ۲ کاراکتر باشد.").max(120),
   description: z.string().trim().max(4000).optional().nullable(),
+  category: categorySchema.optional(),
   lat: z.number().min(24).max(40),
   lng: z.number().min(44).max(64),
   city: z.string().trim().max(80).optional().nullable(),
@@ -124,11 +282,19 @@ const submitSchema = z.object({
   submitterIsVenueOwner: z.boolean().optional(),
   coverImageUrl: z.string().trim().max(500).optional().nullable(),
   imageUrls: z.array(imageUrlSchema).max(MAX_LOCATION_IMAGES).optional(),
+  videoUrls: z.array(imageUrlSchema).max(MAX_LOCATION_VIDEOS).optional(),
+  photographerUserId: z.string().uuid().optional().nullable(),
+  photographerName: z.string().trim().max(80).optional().nullable(),
+  suitableFor: z
+    .array(z.string().trim().min(1).max(80))
+    .max(ALL_CATEGORY_SLUG_MAX)
+    .optional(),
 });
 
 const adminPatchSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   description: z.string().trim().max(4000).optional().nullable(),
+  category: categorySchema.optional(),
   lat: z.number().min(24).max(40).optional(),
   lng: z.number().min(44).max(64).optional(),
   city: z.string().trim().max(80).optional().nullable(),
@@ -144,8 +310,15 @@ const adminPatchSchema = z.object({
   contactPhone: z.string().trim().max(20).optional().nullable(),
   coverImageUrl: z.string().trim().max(500).optional().nullable(),
   imageUrls: z.array(imageUrlSchema).max(MAX_LOCATION_IMAGES).optional(),
+  videoUrls: z.array(imageUrlSchema).max(MAX_LOCATION_VIDEOS).optional(),
+  photographerUserId: z.string().uuid().optional().nullable(),
+  photographerName: z.string().trim().max(80).optional().nullable(),
   /** When true and name changed, regenerate slug from new name. */
   reslug: z.boolean().optional(),
+  suitableFor: z
+    .array(z.string().trim().min(1).max(80))
+    .max(ALL_CATEGORY_SLUG_MAX)
+    .optional(),
 });
 
 function resolveLocationContactPhone(
@@ -207,9 +380,11 @@ function buildAdminDataPatch(
     const data: Record<string, unknown> = {};
     if (patch.name !== undefined) data.name = patch.name;
     if (patch.description !== undefined) data.description = patch.description?.trim() || null;
+    if (patch.category !== undefined) data.category = patch.category;
     if (patch.lat !== undefined) data.lat = patch.lat;
     if (patch.lng !== undefined) data.lng = patch.lng;
-    if (patch.city !== undefined) data.city = patch.city?.trim() || null;
+    if (patch.city !== undefined)
+      data.city = matchServiceCity(patch.city) || patch.city?.trim() || null;
     if (patch.district !== undefined) data.district = patch.district?.trim() || null;
     if (patch.address !== undefined) data.address = patch.address?.trim() || null;
     if (patch.needsPermit !== undefined) data.needsPermit = patch.needsPermit;
@@ -247,6 +422,11 @@ export async function listApprovedPhotoLocationsAction(input?: {
   lat?: number;
   lng?: number;
   limit?: number;
+  category?: PhotoLocationCategory | "ALL";
+  freeOnly?: boolean;
+  city?: string | null;
+  audience?: LocationAudience;
+  projectSlug?: string | null;
 }): Promise<
   | { success: true; items: PhotoLocationPublic[]; loggedIn: boolean }
   | { success: false; error: string }
@@ -259,17 +439,42 @@ export async function listApprovedPhotoLocationsAction(input?: {
       : TEHRAN;
   const limit = Math.min(200, Math.max(1, input?.limit ?? 80));
 
-  const rows = await prisma.photoLocation.findMany({
-    where: { status: "APPROVED" },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-  });
+  const where: {
+    status: string;
+    category?: string;
+    hasEntranceFee?: boolean;
+  } = { status: "APPROVED" };
+  if (input?.category && input.category !== "ALL") {
+    where.category = input.category;
+  }
+  if (input?.freeOnly) {
+    where.hasEntranceFee = false;
+  }
 
-  const items = rows
-    .map((r) => mapPublic(r, loggedIn, origin))
-    .sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
+  try {
+    const rows = await prisma.photoLocation.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
 
-  return { success: true, items, loggedIn };
+    const items = (
+      await attachSuitableFor(rows.map((r) => mapPublic(r, loggedIn, origin)))
+    )
+      .filter((item) => locationMatchesCity(item.city, input?.city))
+      .filter((item) =>
+        locationMatchesAudience(item.suitableFor, input?.audience || "ALL")
+      )
+      .filter((item) =>
+        locationMatchesProjectSlug(item.suitableFor, input?.projectSlug)
+      )
+      .sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
+
+    return { success: true, items, loggedIn };
+  } catch (err) {
+    console.error("[listApprovedPhotoLocationsAction]", err);
+    return { success: false, error: "بارگذاری لوکیشن‌ها ناموفق بود." };
+  }
 }
 
 export async function getPhotoLocationBySlugAction(
@@ -284,7 +489,8 @@ export async function getPhotoLocationBySlugAction(
     where: { slug, status: "APPROVED" },
   });
   if (!row) return { success: false, error: "لوکیشن یافت نشد." };
-  return { success: true, item: mapPublic(row, loggedIn), loggedIn };
+  const [item] = await attachMediaCredit([mapPublic(row, loggedIn)]);
+  return { success: true, item, loggedIn };
 }
 
 export async function submitPhotoLocationAction(
@@ -310,6 +516,9 @@ export async function submitPhotoLocationAction(
   }
   const phone = phoneResult.phone;
 
+  const credit = await resolvePhotographerInput(data);
+  if (!credit.ok) return { success: false, error: credit.error };
+
   const slug = await uniqueSlug(data.name);
   const securityLevel: PhotoLocationSecurity = data.securityLevel || "MEDIUM";
   const gallery = data.imageUrls || [];
@@ -323,9 +532,10 @@ export async function submitPhotoLocationAction(
       name: data.name,
       slug,
       description: data.description?.trim() || null,
+      category: data.category || "OTHER",
       lat: data.lat,
       lng: data.lng,
-      city: data.city?.trim() || null,
+      city: matchServiceCity(data.city) || data.city?.trim() || null,
       district: data.district?.trim() || null,
       address: data.address?.trim() || null,
       needsPermit: data.needsPermit ?? false,
@@ -342,9 +552,13 @@ export async function submitPhotoLocationAction(
       submittedById: session.userId,
     },
   });
+  await persistSuitableFor(row.id, sanitizeSuitableFor(data.suitableFor));
+  await persistLocationMedia(row.id, data.videoUrls || []);
+  await persistLocationPhotographer(row.id, credit.photographerUserId, credit.photographerName);
 
   revalidatePath("/tools/locations");
   revalidatePath("/admin");
+  revalidatePath("/admin/locations");
 
   return {
     success: true,
@@ -487,6 +701,7 @@ export type AdminPhotoLocationRow = {
   name: string;
   slug: string;
   description: string | null;
+  category: PhotoLocationCategory;
   city: string | null;
   district: string | null;
   address: string | null;
@@ -505,6 +720,10 @@ export type AdminPhotoLocationRow = {
   securityLevel: PhotoLocationSecurity;
   coverImageUrl: string | null;
   imageUrls: string[];
+  videoUrls: string[];
+  photographerUserId: string | null;
+  photographerName: string | null;
+  suitableFor: string[];
 };
 
 function mapAdminRow(r: {
@@ -512,6 +731,7 @@ function mapAdminRow(r: {
   name: string;
   slug: string;
   description: string | null;
+  category?: string | null;
   city: string | null;
   district: string | null;
   address: string | null;
@@ -529,6 +749,7 @@ function mapAdminRow(r: {
   securityLevel: string;
   coverImageUrl: string | null;
   imageUrls: string | null;
+  suitableFor?: string | null;
   submittedBy?: { phone: string } | null;
 }): AdminPhotoLocationRow {
   const gallery = parseLocationImageUrls(r.imageUrls);
@@ -537,6 +758,7 @@ function mapAdminRow(r: {
     name: r.name,
     slug: r.slug,
     description: r.description,
+    category: parseLocationCategory(r.category),
     city: r.city,
     district: r.district,
     address: r.address,
@@ -555,6 +777,10 @@ function mapAdminRow(r: {
     securityLevel: parseSecurityLevel(r.securityLevel),
     coverImageUrl: resolveLocationCover(r.coverImageUrl, gallery),
     imageUrls: gallery,
+    videoUrls: [],
+    photographerUserId: null,
+    photographerName: null,
+    suitableFor: parseSuitableFor(r.suitableFor),
   };
 }
 
@@ -577,7 +803,7 @@ export async function listPendingPhotoLocationsAction(): Promise<
 
   return {
     success: true,
-    items: rows.map(mapAdminRow),
+    items: await attachMediaCredit(rows.map(mapAdminRow)),
   };
 }
 
@@ -602,15 +828,26 @@ export async function updatePendingPhotoLocationAction(input: {
 
   const row = await prisma.photoLocation.findUnique({ where: { id: idParsed.data } });
   if (!row) return { success: false, error: "لوکیشن یافت نشد." };
-  if (row.status !== "PENDING") {
-    return { success: false, error: "فقط لوکیشن‌های در صف قابل ویرایش هستند." };
-  }
 
   const data = await buildAdminDataPatch(patchParsed.data, row);
   const updated = await prisma.photoLocation.update({
     where: { id: row.id },
     data,
   });
+  if (patchParsed.data.suitableFor !== undefined) {
+    await persistSuitableFor(row.id, sanitizeSuitableFor(patchParsed.data.suitableFor));
+  }
+  if (patchParsed.data.videoUrls !== undefined) {
+    await persistLocationMedia(row.id, patchParsed.data.videoUrls);
+  }
+  if (
+    patchParsed.data.photographerUserId !== undefined ||
+    patchParsed.data.photographerName !== undefined
+  ) {
+    const credit = await resolvePhotographerInput(patchParsed.data);
+    if (!credit.ok) return { success: false, error: credit.error };
+    await persistLocationPhotographer(row.id, credit.photographerUserId, credit.photographerName);
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -623,6 +860,7 @@ export async function updatePendingPhotoLocationAction(input: {
   }).catch(() => undefined);
 
   revalidatePath("/admin");
+  revalidatePath("/admin/locations");
   revalidatePath("/tools/locations");
 
   return { success: true, message: "تغییرات ذخیره شد.", slug: updated.slug, id: updated.id };
@@ -674,6 +912,20 @@ export async function reviewPhotoLocationAction(input: {
       reviewedById: session?.userId ?? null,
     },
   });
+  if (input.patch?.suitableFor !== undefined) {
+    await persistSuitableFor(row.id, sanitizeSuitableFor(input.patch.suitableFor));
+  }
+  if (input.patch?.videoUrls !== undefined) {
+    await persistLocationMedia(row.id, input.patch.videoUrls);
+  }
+  if (
+    input.patch?.photographerUserId !== undefined ||
+    input.patch?.photographerName !== undefined
+  ) {
+    const credit = await resolvePhotographerInput(input.patch);
+    if (!credit.ok) return { success: false, error: credit.error };
+    await persistLocationPhotographer(row.id, credit.photographerUserId, credit.photographerName);
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -726,12 +978,15 @@ export async function adminCreatePhotoLocationAction(
 
   const gallery = data.imageUrls || [];
   const cover = data.coverImageUrl?.trim() || gallery[0] || null;
+  const credit = await resolvePhotographerInput(data);
+  if (!credit.ok) return { success: false, error: credit.error };
   const slug = await uniqueSlug(data.name);
   const row = await prisma.photoLocation.create({
     data: {
       name: data.name,
       slug,
       description: data.description?.trim() || null,
+      category: data.category || "OTHER",
       lat: data.lat,
       lng: data.lng,
       city: data.city?.trim() || null,
@@ -754,9 +1009,325 @@ export async function adminCreatePhotoLocationAction(
     },
   });
 
+  await persistSuitableFor(row.id, sanitizeSuitableFor(data.suitableFor));
+  await persistLocationMedia(row.id, data.videoUrls || []);
+  await persistLocationPhotographer(row.id, credit.photographerUserId, credit.photographerName);
+
   revalidatePath("/tools/locations");
   revalidatePath(`/locations/${row.slug}`);
   revalidatePath("/admin");
+  revalidatePath("/admin/locations");
 
   return { success: true, message: "لوکیشن اضافه و منتشر شد.", slug: row.slug, id: row.id };
+}
+
+export async function setPhotoLocationStatusAction(input: {
+  id: string;
+  status: "APPROVED" | "REJECTED" | "PENDING";
+  reason?: string;
+}): Promise<LocationActionResult> {
+  const session = await getSession();
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
+    return { success: false, error: "دسترسی ادمین لازم است." };
+  }
+
+  const idParsed = z.string().uuid().safeParse(input.id);
+  if (!idParsed.success) return { success: false, error: "شناسه نامعتبر" };
+
+  const row = await prisma.photoLocation.findUnique({ where: { id: idParsed.data } });
+  if (!row) return { success: false, error: "لوکیشن یافت نشد." };
+
+  if (input.status === "REJECTED" && !(input.reason || "").trim()) {
+    return { success: false, error: "برای رد، دلیل بنویسید." };
+  }
+
+  await prisma.photoLocation.update({
+    where: { id: row.id },
+    data: {
+      status: input.status,
+      rejectionReason: input.status === "REJECTED" ? (input.reason || "").trim() : null,
+      reviewedAt: new Date(),
+      reviewedById: session?.userId ?? null,
+    },
+  });
+
+  revalidatePath("/tools/locations");
+  revalidatePath(`/locations/${row.slug}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/locations");
+
+  return {
+    success: true,
+    message:
+      input.status === "APPROVED"
+        ? "لوکیشن منتشر شد."
+        : input.status === "REJECTED"
+          ? "لوکیشن از انتشار خارج شد."
+          : "وضعیت به انتظار بررسی برگشت.",
+  };
+}
+
+export async function getJarLocationPageSettingsAction(): Promise<
+  | { success: true; settings: import("@/lib/locations/pageSettingsTypes").JarLocationPageSettingsPublic }
+  | { success: false; error: string }
+> {
+  try {
+    const { getJarLocationPageSettings } = await import("@/lib/locations/pageSettings");
+    const settings = await getJarLocationPageSettings();
+    return { success: true, settings };
+  } catch (err) {
+    console.error("[getJarLocationPageSettingsAction]", err);
+    return { success: false, error: "بارگذاری تنظیمات ناموفق بود." };
+  }
+}
+
+export async function updateJarLocationPageSettingsAction(input: {
+  heroTitle?: string;
+  heroSubtitle?: string;
+  heroImageUrl?: string;
+  allChipImageUrl?: string;
+  freeChipImageUrl?: string;
+  categoryImages?: Partial<Record<PhotoLocationCategory, string>>;
+}): Promise<
+  | { success: true; settings: import("@/lib/locations/pageSettingsTypes").JarLocationPageSettingsPublic }
+  | { success: false; error: string }
+> {
+  const session = await getSession();
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
+    return { success: false, error: "دسترسی ندارید." };
+  }
+
+  try {
+    const { upsertJarLocationPageSettings } = await import("@/lib/locations/pageSettings");
+    const settings = await upsertJarLocationPageSettings(input);
+    revalidatePath("/tools/locations");
+    revalidatePath("/admin/locations");
+    return { success: true, settings };
+  } catch (err) {
+    console.error("[updateJarLocationPageSettingsAction]", err);
+    return { success: false, error: "ذخیره تنظیمات ناموفق بود." };
+  }
+}
+
+/** One-click curated free public spots (parks/streets) — idempotent by slug. */
+export async function seedFreeJarLocationsAction(): Promise<
+  | { success: true; message: string; created: number; skipped: number }
+  | { success: false; error: string }
+> {
+  const session = await getSession();
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
+    return { success: false, error: "دسترسی ندارید." };
+  }
+
+  try {
+    const { upsertFreeJarLocations } = await import("@/lib/locations/seedFreeLocations");
+    const result = await upsertFreeJarLocations();
+    revalidatePath("/tools/locations");
+    revalidatePath("/admin/locations");
+    revalidatePath("/admin");
+    revalidatePath("/sitemap.xml");
+    return {
+      success: true,
+      created: result.created,
+      skipped: result.skipped,
+      message:
+        result.created > 0
+          ? `${result.created.toLocaleString("fa-IR")} لوکیشن رایگان اضافه شد${
+              result.skipped
+                ? ` · ${result.skipped.toLocaleString("fa-IR")} قبلاً بود`
+                : ""
+            }.`
+          : "همه لوکیشن‌های رایگان از قبل در کاتالوگ بودند.",
+    };
+  } catch (err) {
+    console.error("[seedFreeJarLocationsAction]", err);
+    return { success: false, error: "وارد کردن لوکیشن‌های رایگان ناموفق بود." };
+  }
+}
+
+/**
+ * Copy mood/hero jpgs from the app bundle onto the Liara uploads disk once.
+ * After this, those files survive redeploys without being re-uploaded in the build.
+ */
+export async function syncJarLocationMoodsToDiskAction(): Promise<
+  | { success: true; message: string }
+  | { success: false; error: string }
+> {
+  const session = await getSession();
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
+    return { success: false, error: "دسترسی ندارید." };
+  }
+
+  try {
+    const { copyJarLocationMoodsToDisk, jarLocationMoodDiskUrl } = await import(
+      "@/lib/locations/moodAssets"
+    );
+    const { LOCATION_CATEGORIES } = await import("@/lib/locations/photoLocation");
+    const { upsertJarLocationPageSettings } = await import("@/lib/locations/pageSettings");
+
+    const result = await copyJarLocationMoodsToDisk();
+    const categoryImages = Object.fromEntries(
+      LOCATION_CATEGORIES.map((c) => {
+        const file = c.moodImage.split("/").pop() || "other.jpg";
+        return [c.id, jarLocationMoodDiskUrl(file)];
+      })
+    ) as Partial<Record<PhotoLocationCategory, string>>;
+
+    await upsertJarLocationPageSettings({
+      heroImageUrl: jarLocationMoodDiskUrl("hero.jpg"),
+      allChipImageUrl: jarLocationMoodDiskUrl("hero.jpg"),
+      freeChipImageUrl: jarLocationMoodDiskUrl("free.jpg"),
+      categoryImages,
+    });
+
+    revalidatePath("/tools/locations");
+    revalidatePath("/admin/locations");
+
+    return {
+      success: true,
+      message: `عکس‌های ظاهر صفحه روی دیسک uploads ذخیره شد · جدید ${result.copied.length.toLocaleString(
+        "fa-IR"
+      )} · از قبل ${result.existed.length.toLocaleString("fa-IR")}.`,
+    };
+  } catch (err) {
+    console.error("[syncJarLocationMoodsToDiskAction]", err);
+    return { success: false, error: "کپی عکس‌ها روی دیسک ناموفق بود." };
+  }
+}
+
+export async function listAdminPhotoLocationsAction(input?: {
+  status?: "PENDING" | "APPROVED" | "REJECTED" | "ALL";
+  city?: string | null;
+  audience?: LocationAudience;
+  projectSlug?: string | null;
+  limit?: number;
+}): Promise<
+  | {
+      success: true;
+      items: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        category: PhotoLocationCategory;
+        city: string | null;
+        status: string;
+        coverImageUrl: string | null;
+        suitableFor: string[];
+        createdAt: string;
+      }>;
+    }
+  | { success: false; error: string }
+> {
+  const session = await getSession();
+  const access = await resolveAdminAccess(session);
+  if (!access || !hasAdminPermission(access, "orders_manage")) {
+    return { success: false, error: "دسترسی ندارید." };
+  }
+
+  const status = input?.status || "ALL";
+  const limit = Math.min(200, Math.max(1, input?.limit ?? 80));
+  const where = status === "ALL" ? {} : { status };
+
+  try {
+    const rows = await prisma.photoLocation.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        category: true,
+        city: true,
+        status: true,
+        coverImageUrl: true,
+        imageUrls: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      items: rows
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          slug: r.slug,
+          category: parseLocationCategory(r.category),
+          city: r.city,
+          status: r.status,
+          coverImageUrl: resolveLocationCover(r.coverImageUrl, parseLocationImageUrls(r.imageUrls)),
+          suitableFor: parseSuitableFor(
+            (r as { suitableFor?: string | null }).suitableFor
+          ),
+          createdAt: r.createdAt.toISOString(),
+        }))
+        .filter((item) => locationMatchesCity(item.city, input?.city))
+        .filter((item) =>
+          locationMatchesAudience(item.suitableFor, input?.audience || "ALL")
+        )
+        .filter((item) =>
+          locationMatchesProjectSlug(item.suitableFor, input?.projectSlug)
+        ),
+    };
+  } catch (err) {
+    console.error("[listAdminPhotoLocationsAction]", err);
+    return { success: false, error: "بارگذاری لوکیشن‌ها ناموفق بود." };
+  }
+}
+
+export type LocationPhotographerOption = {
+  id: string;
+  name: string;
+  city: string | null;
+  avatarUrl: string | null;
+};
+
+export async function searchLocationPhotographersAction(
+  query: string
+): Promise<
+  | { success: true; items: LocationPhotographerOption[] }
+  | { success: false; error: string }
+> {
+  const session = await getSession();
+  if (!session?.userId) {
+    return { success: false, error: "ابتدا وارد شوید." };
+  }
+
+  const q = query.trim().replace(/\s+/g, " ");
+  if (q.length < 2) {
+    return { success: true, items: [] };
+  }
+
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        specialistProfile: { isNot: null },
+        displayName: { contains: q },
+      },
+      select: {
+        id: true,
+        displayName: true,
+        city: true,
+        specialistProfile: { select: { avatarUrl: true, city: true } },
+      },
+      take: 12,
+    });
+    return {
+      success: true,
+      items: users.map((u) => ({
+        id: u.id,
+        name: formatPublicSpecialistName(u.displayName),
+        city: u.specialistProfile?.city || u.city || null,
+        avatarUrl: u.specialistProfile?.avatarUrl || null,
+      })),
+    };
+  } catch (err) {
+    console.error("[searchLocationPhotographersAction]", err);
+    return { success: false, error: "جستجوی متخصص ناموفق بود." };
+  }
 }

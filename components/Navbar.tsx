@@ -106,11 +106,19 @@ export function Navbar({ initialAuth }: NavbarProps) {
     return null;
   }
 
+  const isLocationsHero = pathname === "/tools/locations";
+
   return (
     <>
       {/* 1. Floating Frosted Luxury Header (Claude Light Editorial Style) */}
       <header className="fixed inset-x-0 top-3 z-50 px-4 md:px-6" dir="rtl">
-        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between rounded-full border border-jar-border bg-jar-canvas/90 px-4 sm:px-6 backdrop-blur-md shadow-[0_2px_12px_rgba(31,30,29,0.04)]">
+        <div
+          className={`mx-auto flex h-14 w-full max-w-6xl items-center justify-between rounded-full px-4 sm:px-6 backdrop-blur-xl shadow-[0_2px_12px_rgba(31,30,29,0.04)] ${
+            isLocationsHero
+              ? "border border-white/30 bg-white/40 shadow-[0_8px_32px_rgba(20,20,19,0.12)]"
+              : "border border-jar-border bg-jar-canvas/90 backdrop-blur-md"
+          }`}
+        >
           
           {/* Right: Brand Logo (Persian RTL Anchor) */}
           <div className="flex items-center gap-3">
@@ -373,13 +381,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     return <div className="w-full min-h-dvh flex flex-col">{children}</div>;
   }
 
-  /** جار لوکیشن: نقشه edge-to-edge زیر نوار بالا / پایین */
+  /** جار لوکیشن: هیرو edge-to-edge زیر نوار؛ نقشه خودش fixed است */
   if (pathname === "/tools/locations") {
     return (
-      <main className="relative w-full h-dvh overflow-hidden pt-[calc(env(safe-area-inset-top,0px)+4.25rem)] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top,0px)+4.25rem)] bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] md:bottom-0">
-          {children}
-        </div>
+      <main className="relative w-full min-h-dvh pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-10">
+        {children}
       </main>
     );
   }

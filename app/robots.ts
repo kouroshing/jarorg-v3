@@ -1,5 +1,9 @@
 import type { MetadataRoute } from "next";
 
+const SITE =
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/['"]/g, "")?.replace(/\/$/, "") ||
+  "https://jarorg.ir";
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
@@ -7,8 +11,10 @@ export default function robots(): MetadataRoute.Robots {
         userAgent: "*",
         allow: [
           "/",
-          "/jaramooz",
           "/tools",
+          "/tools/locations",
+          "/locations/",
+          "/jaramooz",
           "/contact",
           "/privacy",
           "/terms",
@@ -23,11 +29,14 @@ export default function robots(): MetadataRoute.Robots {
           "/api",
           "/api/",
           "/specialist/portfolio",
+          "/tools/locations/new",
           "/checkout/",
           "/jaramooz/payment/",
+          "/login",
         ],
       },
     ],
-    sitemap: "https://app.jarorg.ir/sitemap.xml",
+    sitemap: `${SITE}/sitemap.xml`,
+    host: SITE.replace(/^https?:\/\//, ""),
   };
 }

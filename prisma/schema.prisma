@@ -60,6 +60,7 @@ model User {
   reviewsGiven       OrderReview[]       @relation("OrderReviewsGiven")
   reviewsReceived    OrderReview[]       @relation("OrderReviewsReceived")
   photoLocations     PhotoLocation[]     @relation("PhotoLocationSubmitter")
+  photographedLocations PhotoLocation[]  @relation("PhotoLocationPhotographer")
 
   @@map("users")
 }
@@ -738,6 +739,8 @@ model PhotoLocation {
   name        String
   slug        String  @unique
   description String?
+  /// OPEN_SPACE | MANSION_GARDEN | STREET | STUDIO | HISTORIC | DECOR | OTHER
+  category    String  @default("OTHER")
 
   lat      Float
   lng      Float
@@ -758,6 +761,16 @@ model PhotoLocation {
   coverImageUrl String? @map("cover_image_url")
   /// JSON array of image URLs for the location gallery.
   imageUrls     String? @map("image_urls")
+  /// JSON array of MP4 video URLs for the location slideshow.
+  videoUrls     String? @map("video_urls")
+  /// JSON array of order-form category slugs this location suits (personal/commercial).
+  suitableFor   String? @map("suitable_for")
+
+  /// Specialist on Jar whose photos/videos these are (optional).
+  photographerUserId String? @map("photographer_user_id")
+  photographerUser   User?   @relation("PhotoLocationPhotographer", fields: [photographerUserId], references: [id], onDelete: SetNull)
+  /// Free-text credit when the photographer is not a Jar specialist.
+  photographerName   String? @map("photographer_name")
 
   /// PENDING | APPROVED | REJECTED
   status          String  @default("PENDING")
@@ -772,7 +785,24 @@ model PhotoLocation {
   interestPicks  ProjectInterest[]  @relation("InterestProposedPhotoLocation")
 
   @@index([status, city])
+  @@index([status, category])
   @@index([lat, lng])
   @@index([status, createdAt])
+  @@index([photographerUserId])
   @@map("photo_locations")
+}
+
+/// جار لوکیشن — editable catalog page appearance (hero, chips, copy).
+model JarLocationPageSettings {
+  id               String   @id @default("default")
+  heroTitle        String   @default("جار لوکیشن") @map("hero_title")
+  heroSubtitle     String   @default("فضا، عمارت و خیابان — جایی که نور درست می‌افتد.") @map("hero_subtitle")
+  heroImageUrl     String   @default("/images/jar-locations/hero.jpg") @map("hero_image_url")
+  allChipImageUrl  String   @default("/images/jar-locations/hero.jpg") @map("all_chip_image_url")
+  freeChipImageUrl String   @default("/images/jar-locations/free.jpg") @map("free_chip_image_url")
+  /// JSON map of PhotoLocationCategory → image URL
+  categoryImages   String   @default("{}") @map("category_images")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("jar_location_page_settings")
 }

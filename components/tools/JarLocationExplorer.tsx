@@ -29,10 +29,26 @@ import type { PhotoLocationPublic } from "@/lib/locations/photoLocation";
 import {
   formatDistanceKm,
   MAX_LOCATION_IMAGES,
+  MAX_LOCATION_VIDEOS,
   SECURITY_LABELS,
+  LOCATION_CATEGORIES,
+  type PhotoLocationCategory,
 } from "@/lib/locations/photoLocation";
-import { processSinglePortfolioFile } from "@/lib/clientImageCompression";
+import { processSinglePortfolioFile, isImageFile, isVideoFile, isAllowedPortfolioVideo, MAX_IMAGE_RAW_SIZE_BYTES, MAX_VIDEO_RAW_SIZE_BYTES } from "@/lib/clientImageCompression";
 import { getJarMapTileConfig, jarMapTileLayerOptions } from "@/lib/maps/tiles";
+import { getCategoryTitle } from "@/lib/categories";
+import { SERVICE_CITIES, DEFAULT_SERVICE_CITY, matchServiceCity } from "@/lib/geo/serviceCities";
+import { lookupCityCenter } from "@/lib/geo/cityCenters";
+import { LocationProjectTypePicker } from "@/components/tools/LocationProjectTypePicker";
+import { LocationPhotographerPicker, type SelfSpecialistOption } from "@/components/tools/LocationPhotographerPicker";
+
+export type LocationPortfolioPick = {
+  id: string;
+  fileUrl: string;
+  title: string | null;
+  categorySlug: string;
+  mediaType?: "IMAGE" | "VIDEO";
+};
 
 const LocationMapPicker = dynamic(
   () => import("@/components/order/LocationMapPicker"),
@@ -416,17 +432,33 @@ function JarLocationLeafletMap({
   );
 }
 
-export function JarLocationSubmitForm() {
+export function JarLocationSubmitForm({
+  portfolioImages = [],
+  initialCategory,
+  initialCity,
+  initialProjectSlug,
+  selfSpecialist = null,
+}: {
+  /** Approved image/video portfolio items — shown when submitter is a specialist. */
+  portfolioImages?: LocationPortfolioPick[];
+  initialCategory?: PhotoLocationCategory;
+  initialCity?: string;
+  initialProjectSlug?: string;
+  selfSpecialist?: SelfSpecialistOption | null;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [city, setCity] = useState("");
+  const [city, setCity] = useState(initialCity || DEFAULT_SERVICE_CITY);
   const [district, setDistrict] = useState("");
   const [address, setAddress] = useState("");
-  const [coords, setCoords] = useState(TEHRAN);
+  const [coords, setCoords] = useState(
+    () => lookupCityCenter(initialCity || DEFAULT_SERVICE_CITY) || TEHRAN
+  );
+  const [mapKey, setMapKey] = useState(0);
   const [needsPermit, setNeedsPermit] = useState(false);
   const [proCameraAllowed, setProCameraAllowed] = useState(true);
   const [phoneCameraAllowed, setPhoneCameraAllowed] = useState(true);
@@ -434,41 +466,134 @@ export function JarLocationSubmitForm() {
   const [hasChangingRoom, setHasChangingRoom] = useState(false);
   const [hasParking, setHasParking] = useState(false);
   const [securityLevel, setSecurityLevel] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
+  const [category, setCategory] = useState<PhotoLocationCategory>(
+    initialCategory || "OPEN_SPACE"
+  );
   const [contactPhone, setContactPhone] = useState("");
   const [isVenueOwner, setIsVenueOwner] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [videoUrls, setVideoUrls] = useState<string[]>([]);
+  const [photographerUserId, setPhotographerUserId] = useState<string | null>(
+    selfSpecialist?.id ?? null
+  );
+  const [photographerName, setPhotographerName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState<string | null>(null);
+  const [uploadProgressPercent, setUploadProgressPercent] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showPortfolioPicker, setShowPortfolioPicker] = useState(false);
+  const [suitableFor, setSuitableFor] = useState<string[]>(
+    initialProjectSlug ? [initialProjectSlug] : []
+  );
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   const contactDigitsLen = contactPhone.replace(/\D/g, "").length;
   const phoneReady = !hasEntranceFee || contactDigitsLen >= 10;
+  const hasPortfolio = portfolioImages.length > 0;
 
   const uploadFiles = async (files: FileList | File[]) => {
-    const remaining = MAX_LOCATION_IMAGES - imageUrls.length;
-    if (remaining <= 0) {
-      setError(`حداکثر ${MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس می‌توانید بفرستید.`);
-      return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    let nextImages = imageUrls.length;
+    let nextVideos = videoUrls.length;
+
+    for (const file of list) {
+      if (isVideoFile(file)) {
+        if (!isAllowedPortfolioVideo(file)) {
+          setError(`فقط ویدیوی MP4 مجاز است («${file.name}»).`);
+          return;
+        }
+        if (file.size > MAX_VIDEO_RAW_SIZE_BYTES) {
+          setError(`حجم ویدیو نباید بیشتر از ۴۰ مگابایت باشد («${file.name}»).`);
+          return;
+        }
+        if (nextVideos >= MAX_LOCATION_VIDEOS) {
+          setError(`حداکثر ${MAX_LOCATION_VIDEOS.toLocaleString("fa-IR")} ویدیو می‌توانید بفرستید.`);
+          return;
+        }
+        nextVideos += 1;
+      } else if (isImageFile(file)) {
+        if (file.size > MAX_IMAGE_RAW_SIZE_BYTES) {
+          setError(`حجم تصویر خام نباید بیشتر از ۲۵ مگابایت باشد («${file.name}»).`);
+          return;
+        }
+        if (nextImages >= MAX_LOCATION_IMAGES) {
+          setError(`حداکثر ${MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس می‌توانید بفرستید.`);
+          return;
+        }
+        nextImages += 1;
+      } else {
+        setError(`فرمت «${file.name}» پشتیبانی نمی‌شود.`);
+        return;
+      }
     }
-    const list = Array.from(files).slice(0, remaining);
+
     setUploading(true);
     setError(null);
+    setUploadProgressText("در حال آماده‌سازی…");
+    setUploadProgressPercent(5);
     try {
-      const urls: string[] = [];
+      const addedImages: string[] = [];
+      const addedVideos: string[] = [];
       for (let i = 0; i < list.length; i++) {
-        const optimized = await processSinglePortfolioFile(list[i], i, list.length);
+        const file = list[i];
+        const isVid = isVideoFile(file);
+        setUploadProgressText(
+          isVid
+            ? `آپلود ویدیو ${i + 1} از ${list.length}…`
+            : `بهینه‌سازی WebP فایل ${i + 1} از ${list.length}…`
+        );
+        setUploadProgressPercent(Math.round(8 + (i / list.length) * 55));
+        const payload = isVid ? file : await processSinglePortfolioFile(file, i, list.length);
+        setUploadProgressText(`آپلود فایل ${i + 1} از ${list.length}…`);
+        setUploadProgressPercent(Math.round(65 + (i / list.length) * 30));
         const fd = new FormData();
-        fd.append("file", optimized);
+        fd.append("file", payload);
         const res = await fetch("/api/location/upload", { method: "POST", body: fd });
         const json = await res.json();
         if (!res.ok || !json?.url) throw new Error(json?.error || "آپلود ناموفق");
-        urls.push(json.url as string);
+        if (json.kind === "video" || isVid) addedVideos.push(json.url as string);
+        else addedImages.push(json.url as string);
       }
-      setImageUrls((prev) => [...prev, ...urls]);
+      if (addedImages.length) setImageUrls((prev) => [...prev, ...addedImages]);
+      if (addedVideos.length) setVideoUrls((prev) => [...prev, ...addedVideos]);
+      setUploadProgressPercent(100);
+      setUploadProgressText("آپلود کامل شد");
     } catch (e: any) {
-      setError(e?.message || "خطا در آپلود عکس");
+      setError(e?.message || "خطا در آپلود فایل");
     } finally {
       setUploading(false);
+      setTimeout(() => {
+        setUploadProgressText(null);
+        setUploadProgressPercent(0);
+      }, 800);
     }
+  };
+
+  const togglePortfolioImage = (item: LocationPortfolioPick) => {
+    const isVideo = item.mediaType === "VIDEO";
+    if (isVideo) {
+      setVideoUrls((prev) => {
+        if (prev.includes(item.fileUrl)) return prev.filter((u) => u !== item.fileUrl);
+        if (prev.length >= MAX_LOCATION_VIDEOS) {
+          setError(`حداکثر ${MAX_LOCATION_VIDEOS.toLocaleString("fa-IR")} ویدیو.`);
+          return prev;
+        }
+        setError(null);
+        return [...prev, item.fileUrl];
+      });
+      return;
+    }
+    setImageUrls((prev) => {
+      if (prev.includes(item.fileUrl)) return prev.filter((u) => u !== item.fileUrl);
+      if (prev.length >= MAX_LOCATION_IMAGES) {
+        setError(`حداکثر ${MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس.`);
+        return prev;
+      }
+      setError(null);
+      return [...prev, item.fileUrl];
+    });
   };
 
   const onSubmit = (e: React.FormEvent) => {
@@ -488,10 +613,16 @@ export function JarLocationSubmitForm() {
       }
     }
 
+    if (suitableFor.length === 0) {
+      setError("مشخص کنید این لوکیشن به درد چه نوع پروژه‌هایی می‌خورد.");
+      return;
+    }
+
     startTransition(async () => {
       const res = await submitPhotoLocationAction({
         name,
         description,
+        category,
         lat: coords.lat,
         lng: coords.lng,
         city: city || null,
@@ -507,7 +638,11 @@ export function JarLocationSubmitForm() {
         contactPhone: hasEntranceFee ? contactPhone : null,
         submitterIsVenueOwner: hasEntranceFee ? isVenueOwner : false,
         imageUrls,
+        videoUrls,
         coverImageUrl: imageUrls[0] || null,
+        photographerUserId,
+        photographerName,
+        suitableFor,
       });
       if (!res.success) {
         setError(res.error);
@@ -523,7 +658,7 @@ export function JarLocationSubmitForm() {
       <div>
         <h1 className="text-lg font-black text-jar-primary">ثبت لوکیشن در جار لوکیشن</h1>
         <p className="text-xs text-jar-muted mt-1 leading-relaxed">
-          بعد از بررسی تیم جار روی نقشه عمومی نمایش داده می‌شود.
+          بعد از بررسی تیم جار روی نقشه عمومی نمایش داده می‌شود. پین نقشه را روی محل دقیق بگذارید.
         </p>
       </div>
 
@@ -538,6 +673,41 @@ export function JarLocationSubmitForm() {
         />
       </label>
 
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-bold text-jar-primary">
+          دسته لوکیشن <span className="text-rose-600">*</span>
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {LOCATION_CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategory(c.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold border transition-colors ${
+                category === c.id
+                  ? "bg-jar-primary text-white border-jar-primary"
+                  : "bg-white text-jar-primary border-jar-border hover:bg-jar-soft"
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ background: category === c.id ? "#fff" : c.pinColor }}
+              />
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-jar-border bg-white p-3.5">
+        <LocationProjectTypePicker
+          value={suitableFor}
+          onChange={setSuitableFor}
+          required
+          compact
+        />
+      </div>
+
       <label className="block space-y-1">
         <span className="text-[11px] font-bold text-jar-primary">توضیحات</span>
         <textarea
@@ -549,26 +719,54 @@ export function JarLocationSubmitForm() {
         />
       </label>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
+      <div className="space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] font-bold text-jar-primary flex items-center gap-1.5">
             <ImageIcon className="h-3.5 w-3.5" />
-            عکس‌های لوکیشن <span className="text-rose-600">*</span>
+            عکس و ویدیوی لوکیشن <span className="text-rose-600">*</span>
           </p>
-          <button
-            type="button"
-            disabled={uploading || isPending || imageUrls.length >= MAX_LOCATION_IMAGES}
-            onClick={() => fileRef.current?.click()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-jar-border bg-white px-3 text-[10px] font-bold text-jar-primary disabled:opacity-50"
-          >
-            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            افزودن عکس
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {hasPortfolio && (
+              <button
+                type="button"
+                disabled={uploading || isPending}
+                onClick={() => setShowPortfolioPicker((v) => !v)}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[10px] font-bold transition-colors ${
+                  showPortfolioPicker
+                    ? "border-jar-primary bg-jar-primary text-white"
+                    : "border-jar-border bg-white text-jar-primary"
+                }`}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                نمونه‌کارهای من
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={uploading || isPending || (imageUrls.length >= MAX_LOCATION_IMAGES && videoUrls.length >= MAX_LOCATION_VIDEOS)}
+              onClick={() => fileRef.current?.click()}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-jar-primary px-3 text-[10px] font-bold text-white disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Upload className="h-3.5 w-3.5" />
+              )}
+              آپلود فایل
+            </button>
+          </div>
         </div>
+        <p className="text-[10px] text-jar-muted font-medium leading-relaxed">
+          مثل نمونه‌کار: تصویر به WebP زیر ۷۰۰ کیلوبایت فشرده می‌شود · ویدیو فقط MP4 تا ۴۰ مگابایت · تا{" "}
+          {MAX_LOCATION_IMAGES.toLocaleString("fa-IR")} عکس و{" "}
+          {MAX_LOCATION_VIDEOS.toLocaleString("fa-IR")} ویدیو
+          {hasPortfolio ? " · می‌توانید از نمونه‌کارهای تاییدشده هم انتخاب کنید" : ""}
+        </p>
+
         <input
           ref={fileRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,video/mp4,.mp4"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -577,13 +775,100 @@ export function JarLocationSubmitForm() {
             if (files?.length) void uploadFiles(files);
           }}
         />
+
+        {showPortfolioPicker && hasPortfolio && (
+          <div className="rounded-2xl border border-jar-border bg-jar-canvas p-3 space-y-2">
+            <p className="text-[11px] font-bold text-jar-primary">
+              انتخاب از نمونه‌کارهای تاییدشده ({portfolioImages.length.toLocaleString("fa-IR")})
+            </p>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
+              {portfolioImages.map((item) => {
+                const selected =
+                  item.mediaType === "VIDEO"
+                    ? videoUrls.includes(item.fileUrl)
+                    : imageUrls.includes(item.fileUrl);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => togglePortfolioImage(item)}
+                    className={`relative aspect-square overflow-hidden rounded-xl border-2 transition-all ${
+                      selected
+                        ? "border-jar-primary ring-2 ring-jar-primary/30"
+                        : "border-jar-border hover:border-jar-primary/40"
+                    }`}
+                    title={item.title || getCategoryTitle(item.categorySlug)}
+                  >
+                    {item.mediaType === "VIDEO" ? (
+                      <video src={item.fileUrl} className="h-full w-full object-cover" muted playsInline />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.fileUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    )}
+                    {selected && (
+                      <span className="absolute inset-0 flex items-center justify-center bg-jar-primary/35">
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-black text-jar-primary">
+                          انتخاب
+                        </span>
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="rounded-2xl border border-jar-border bg-jar-canvas p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-bold text-jar-primary">
+              <span className="inline-flex items-center gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {uploadProgressText || "در حال آپلود…"}
+              </span>
+              <span className="font-mono">{uploadProgressPercent.toLocaleString("fa-IR")}٪</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-jar-border">
+              <div
+                className="h-full rounded-full bg-jar-primary transition-all"
+                style={{ width: `${uploadProgressPercent}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {imageUrls.length === 0 ? (
           <button
             type="button"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (e.dataTransfer.files?.length) void uploadFiles(e.dataTransfer.files);
+            }}
             onClick={() => fileRef.current?.click()}
-            className="w-full rounded-2xl border border-dashed border-jar-border bg-jar-soft/40 px-4 py-8 text-center text-[11px] text-jar-muted"
+            disabled={uploading}
+            className={`w-full rounded-2xl border-2 border-dashed px-4 py-10 text-center transition-colors ${
+              isDragging
+                ? "border-jar-logo bg-jar-soft/80"
+                : "border-jar-border bg-jar-soft/40 hover:border-jar-primary/40"
+            }`}
           >
-            حداقل یک عکس واضح از فضا بفرستید (تا ۸ عکس)
+            <Upload className="mx-auto h-7 w-7 text-jar-muted mb-2" />
+            <p className="text-xs font-bold text-jar-primary">
+              برای بارگذاری کلیک کنید یا فایل‌ها را اینجا رها کنید
+            </p>
+            <p className="text-[10px] text-jar-muted mt-1 font-medium">
+              JPG / PNG / WEBP و ویدیوی MP4 · فشرده‌سازی خودکار عکس
+            </p>
           </button>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -609,21 +894,82 @@ export function JarLocationSubmitForm() {
                 </button>
               </div>
             ))}
+            {videoUrls.map((url, idx) => (
+              <div
+                key={`vid-${url}-${idx}`}
+                className="relative aspect-square overflow-hidden rounded-xl border border-jar-border bg-jar-soft"
+              >
+                <video src={url} className="h-full w-full object-cover" muted playsInline />
+                <span className="absolute top-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                  ویدیو
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVideoUrls((prev) => prev.filter((_, i) => i !== idx))}
+                  className="absolute top-1 left-1 rounded-full bg-rose-600/90 p-0.5 text-white"
+                  aria-label="حذف ویدیو"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            {(imageUrls.length < MAX_LOCATION_IMAGES || videoUrls.length < MAX_LOCATION_VIDEOS) && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="aspect-square rounded-xl border-2 border-dashed border-jar-border bg-jar-canvas text-jar-muted hover:border-jar-primary hover:text-jar-primary flex flex-col items-center justify-center gap-1"
+              >
+                <Plus className="h-5 w-5" />
+                <span className="text-[9px] font-bold">افزودن</span>
+              </button>
+            )}
           </div>
         )}
       </div>
 
+      <div className="rounded-2xl border border-jar-border bg-white p-3.5">
+        <LocationPhotographerPicker
+          value={{ photographerUserId, photographerName }}
+          onChange={(next) => {
+            setPhotographerUserId(next.photographerUserId);
+            setPhotographerName(next.photographerName);
+          }}
+          selfSpecialist={selfSpecialist}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-bold text-jar-primary">
+          شهر <span className="text-rose-600">*</span>
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {SERVICE_CITIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => {
+                setCity(c);
+                const center = lookupCityCenter(c);
+                if (center) {
+                  setCoords(center);
+                  setMapKey((k) => k + 1);
+                }
+              }}
+              className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                city === c
+                  ? "border-jar-primary bg-jar-primary text-white"
+                  : "border-jar-border bg-white text-jar-muted"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <label className="block space-y-1">
-          <span className="text-[11px] font-bold text-jar-primary">شهر</span>
-          <input
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            className="w-full rounded-xl border border-jar-border bg-white px-3 py-2 text-sm"
-            placeholder="تهران"
-          />
-        </label>
-        <label className="block space-y-1">
+        <label className="block space-y-1 col-span-2 sm:col-span-1">
           <span className="text-[11px] font-bold text-jar-primary">محله</span>
           <input
             value={district}
@@ -631,27 +977,34 @@ export function JarLocationSubmitForm() {
             className="w-full rounded-xl border border-jar-border bg-white px-3 py-2 text-sm"
           />
         </label>
+        <label className="block space-y-1 col-span-2 sm:col-span-1">
+          <span className="text-[11px] font-bold text-jar-primary">آدرس</span>
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            className="w-full rounded-xl border border-jar-border bg-white px-3 py-2 text-sm"
+          />
+        </label>
       </div>
-
-      <label className="block space-y-1">
-        <span className="text-[11px] font-bold text-jar-primary">آدرس</span>
-        <input
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          className="w-full rounded-xl border border-jar-border bg-white px-3 py-2 text-sm"
-        />
-      </label>
 
       <div className="space-y-2">
         <p className="text-[11px] font-bold text-jar-primary flex items-center gap-1.5">
           <MapPin className="h-3.5 w-3.5" />
           موقعیت روی نقشه
         </p>
-        <div className="rounded-2xl overflow-hidden border border-jar-border min-h-[280px]">
+        <p className="text-[10px] text-jar-muted font-medium">
+          نقشه را جابه‌جا کنید تا پین وسط دقیقاً روی لوکیشن باشد؛ محله و آدرس خودکار پر می‌شود.
+        </p>
+        <div className="rounded-2xl overflow-hidden border border-jar-border">
           <LocationMapPicker
+            key={mapKey}
             variant="embedded"
             district={district}
-            onChangeDistrict={setDistrict}
+            onChangeDistrict={(val) => {
+              setDistrict(val);
+              const matched = matchServiceCity(val);
+              if (matched) setCity(matched);
+            }}
             address={address}
             onChangeAddress={setAddress}
             onChangeCoords={(c) => setCoords(c)}
@@ -776,6 +1129,7 @@ export function JarLocationSubmitForm() {
           uploading ||
           name.trim().length < 2 ||
           imageUrls.length === 0 ||
+          suitableFor.length === 0 ||
           (hasEntranceFee && !phoneReady)
         }
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-jar-primary text-white text-xs font-bold disabled:opacity-50"

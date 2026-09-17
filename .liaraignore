@@ -25,3 +25,5 @@ scratch/
 # only root-level storage — never ignore lib/storage
 /storage/
 .agents/
+.tmp-liara-home/
+docs/

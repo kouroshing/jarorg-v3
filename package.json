@@ -14,6 +14,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:wal": "node scripts/set-wal.js",
+    "db:seed:free-locations": "node scripts/seed-free-jar-locations.cjs",
     "cron:auto-release": "node scripts/auto-release-escrow.mjs",
     "cron:auto-release:apply": "node scripts/auto-release-escrow.mjs --apply",
     "cron:order-timeouts": "node scripts/order-timeouts.mjs",

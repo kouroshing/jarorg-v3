@@ -371,6 +371,18 @@ export default async function AdminPage({
         name: r.name,
         slug: r.slug,
         description: r.description,
+        category: (["OPEN_SPACE", "MANSION_GARDEN", "STREET", "STUDIO", "HISTORIC", "DECOR", "OTHER"].includes(
+          (r as { category?: string }).category || ""
+        )
+          ? (r as { category?: string }).category
+          : "OTHER") as
+          | "OPEN_SPACE"
+          | "MANSION_GARDEN"
+          | "STREET"
+          | "STUDIO"
+          | "HISTORIC"
+          | "DECOR"
+          | "OTHER",
         city: r.city,
         district: r.district,
         address: r.address,
@@ -402,6 +414,21 @@ export default async function AdminPage({
             const arr = r.imageUrls ? JSON.parse(r.imageUrls) : [];
             return Array.isArray(arr)
               ? arr.filter((u: unknown): u is string => typeof u === "string" && u.trim().length > 0)
+              : [];
+          } catch {
+            return [];
+          }
+        })(),
+        videoUrls: [],
+        photographerUserId: null,
+        photographerName: null,
+        suitableFor: (() => {
+          try {
+            const arr = (r as { suitableFor?: string | null }).suitableFor
+              ? JSON.parse((r as { suitableFor?: string | null }).suitableFor as string)
+              : [];
+            return Array.isArray(arr)
+              ? arr.filter((u: unknown): u is string => typeof u === "string")
               : [];
           } catch {
             return [];

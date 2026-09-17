@@ -269,7 +269,12 @@ function ProjectList({ projects = [], tab }: { projects: any[]; tab: SubTabId })
                     <div className="flex items-center gap-2 text-xs font-medium text-jar-muted">
                       <Clock className="h-4 w-4 text-jar-muted/70 shrink-0" />
                       <span className="min-w-0 break-words">
-                        زمان ترجیحی تماس: {project.preferredCallTime}
+                        {project.orderUrl
+                          ? project.isFlexibleSchedule
+                            ? "زمان‌بندی: "
+                            : "زمان عکاسی: "
+                          : "زمان ترجیحی تماس: "}
+                        {project.preferredCallTime}
                       </span>
                     </div>
                   )}
